@@ -862,7 +862,6 @@ func (ct *ConnectivityTest) NeedsStaticRoutes() bool {
 
 	// Static routes are only needed on kind. Cloud platforms have pod IP -> node IP
 	// connectivity.
-	// if f, ok := ct.Feature(features.Flavor); ok && f.Enabled && f.Mode != "kind" && f.Mode != "aks" {
 	if f, ok := ct.Feature(features.Flavor); ok && f.Enabled && f.Mode != "kind" {
 		return false
 	}
