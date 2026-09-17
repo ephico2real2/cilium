@@ -162,12 +162,12 @@ generate-bpf2go:
 	$(QUIET)BPF2GO_CC="$(CLANG)" BPF2GO_CFLAGS="$(MAX_OVERLAY_OPTIONS) $(CLANG_FLAGS)" \
 		BPFGEN_CILIUM_ROOT="$(BPFGEN_CILIUM_ROOT)" \
 		BPFGEN_OBJ_CACHE_ROOT="$(BPFGEN_OBJ_CACHE_ROOT)" \
-		$(GO) generate ../pkg/datapath/bpf
+		GOARCH=$(NATIVE_ARCH) $(GO) generate ../pkg/datapath/bpf
 	@$(ECHO_GEN)../pkg/datapath/bpf/testprogs
 	$(QUIET)BPF2GO_CC="$(CLANG)" BPF2GO_CFLAGS="$(MAX_OVERLAY_OPTIONS) $(CLANG_FLAGS)" \
 		BPFGEN_CILIUM_ROOT="$(BPFGEN_CILIUM_ROOT)" \
 		BPFGEN_OBJ_CACHE_ROOT="$(BPFGEN_OBJ_CACHE_ROOT)" \
-		$(GO) generate ../pkg/datapath/bpf/testprogs
+		GOARCH=$(NATIVE_ARCH) $(GO) generate ../pkg/datapath/bpf/testprogs
 
 .PHONY: generate
 generate: $(BPF) generate-bpf2go

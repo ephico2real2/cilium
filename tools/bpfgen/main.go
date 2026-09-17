@@ -41,6 +41,7 @@ func run(bpf2goArgs []string) error {
 
 	args := append([]string{"tool", "github.com/cilium/ebpf/cmd/bpf2go", "-output-dir", tmpDir}, bpf2goArgs...)
 	cmd := exec.Command("go", args...)
+	cmd.Env = append(cmd.Env, os.Environ()...)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
