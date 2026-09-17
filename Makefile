@@ -74,7 +74,7 @@ bpf-objs:
 		exit 1; \
 	fi
 	if [ ! -d "$(OBJ_CACHE_ROOT)" ]; then \
-		$(QUIET)$(MAKE) $(SUBMAKEOPTS) BPFGEN_CILIUM_ROOT="." BPFGEN_OBJ_CACHE_ROOT="$(OBJ_CACHE_ROOT)" -C bpf generate-bpf2go; \
+		$(QUIET)$(MAKE) $(SUBMAKEOPTS) BPFGEN_CILIUM_ROOT="$(ROOT_DIR)" BPFGEN_OBJ_CACHE_ROOT="$(OBJ_CACHE_ROOT)" -C bpf generate-bpf2go; \
 	fi
 	cp -a $(OBJ_CACHE_ROOT)/. .
 
