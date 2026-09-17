@@ -68,7 +68,10 @@ build: ## Builds all the components for Cilium by executing make in the respecti
 	$(QUIET)$(MAKE) $(SUBMAKEOPTS) $(SUBDIRS_DATAPATH_GEN)
 	$(QUIET)$(MAKE) $(SUBMAKEOPTS) $(SUBDIRS_GO)
 
-build-container: ## Builds components required for cilium-agent container.
+bpf-objs:
+	cp -a $(OBJ_CACHE_ROOT)/. .
+
+build-container: bpf-objs ## Builds components required for cilium-agent container.
 	for i in $(SUBDIRS_CILIUM_CONTAINER); do $(MAKE) $(SUBMAKEOPTS) -C $$i all; done
 
 build-container-operator: ## Builds components required for cilium-operator container.
@@ -203,7 +206,7 @@ install-container-binary: install-bpf ## Install binaries for all components req
 	$(QUIET)$(INSTALL) -m 0755 -d $(DESTDIR)$(BINDIR)
 	for i in $(SUBDIRS_CILIUM_CONTAINER); do $(MAKE) $(SUBMAKEOPTS) -C $$i install-binary; done
 
-install-bash-completion: ## Install bash completion for all components required for cilium-agent container.
+install-bash-completion: bpf-objs ## Install bash completion for all components required for cilium-agent container.
 	$(QUIET)$(INSTALL) -m 0755 -d $(DESTDIR)$(BINDIR)
 	for i in $(SUBDIRS_CILIUM_CONTAINER); do $(MAKE) $(SUBMAKEOPTS) -C $$i install-bash-completion; done
 

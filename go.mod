@@ -338,6 +338,7 @@ replace sigs.k8s.io/controller-tools => github.com/cilium/controller-tools v0.22
 replace sigs.k8s.io/controller-runtime => sigs.k8s.io/controller-runtime v0.24.1-0.20260901001410-dc7618f3b4f6
 
 tool (
+	github.com/cilium/cilium/tools/bpfgen
 	github.com/cilium/cilium/tools/dpgen
 	github.com/cilium/deepequal-gen
 	github.com/cilium/ebpf/cmd/bpf2go
