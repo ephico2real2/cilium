@@ -36,13 +36,6 @@ ARG MODIFIERS
 # as that will mess with caching for incremental builds!
 #
 WORKDIR /go/src/github.com/cilium/cilium
-# Build BPF .o files
-RUN --mount=type=bind,readwrite,target=/go/src/github.com/cilium/cilium \
-    --mount=type=cache,target=/root/.cache \
-    --mount=type=cache,target=/go/pkg \
-    make BPFGEN_CILIUM_ROOT=/go/src/github.com/cilium/cilium BPFGEN_OBJ_CACHE_ROOT=/root/.cache/bpf-objs \
-    -C bpf generate-bpf2go
-
 # We must override NOSTRIP=1 to ensure binaries include debug symbols for extraction. They will be stripped subsequently
 # in accordance with the supplied/default NOSTRIP setting. See "Extract debug symbols" below.
 RUN --mount=type=bind,readwrite,target=/go/src/github.com/cilium/cilium \
@@ -57,7 +50,7 @@ RUN --mount=type=bind,readwrite,target=/go/src/github.com/cilium/cilium \
     # install-bash-completion will execute the bash_completion script. It is
     # fine to run this with same architecture as BUILDARCH since the output of
     # bash_completion is the same for both architectures.
-    make GOARCH=${BUILDARCH} DESTDIR=/tmp/install/${TARGETOS}/${TARGETARCH} PKG_BUILD=1 $(echo $MODIFIERS | tr -d '"') \
+    make GOARCH=${BUILDARCH} DESTDIR=/tmp/install/${TARGETOS}/${TARGETARCH} PKG_BUILD=1 $(echo $MODIFIERS | tr -d '"') OBJ_CACHE_ROOT=/root/.cache/bpf-objs \
     install-bash-completion licenses-all && \
     mv LICENSE.all /tmp/install/${TARGETOS}/${TARGETARCH}/LICENSE.all
 

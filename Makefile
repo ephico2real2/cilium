@@ -69,33 +69,40 @@ build: ## Builds all the components for Cilium by executing make in the respecti
 	$(QUIET)$(MAKE) $(SUBMAKEOPTS) $(SUBDIRS_GO)
 
 bpf-objs:
+	if [ -z "$(OBJ_CACHE_ROOT)" ]; then \
+		echo "OBJ_CACHE_ROOT is empty or not set!"; \
+		exit 1; \
+	fi
+	if [ ! -d "$(OBJ_CACHE_ROOT)" ]; then \
+		$(QUIET)$(MAKE) $(SUBMAKEOPTS) BPFGEN_CILIUM_ROOT="." BPFGEN_OBJ_CACHE_ROOT="$(OBJ_CACHE_ROOT)" -C bpf generate-bpf2go; \
+	fi
 	cp -a $(OBJ_CACHE_ROOT)/. .
 
 build-container: bpf-objs ## Builds components required for cilium-agent container.
 	for i in $(SUBDIRS_CILIUM_CONTAINER); do $(MAKE) $(SUBMAKEOPTS) -C $$i all; done
 
-build-container-operator: ## Builds components required for cilium-operator container.
+build-container-operator: bpf-objs ## Builds components required for cilium-operator container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_OPERATOR_CONTAINER) all
 
-build-container-operator-generic: ## Builds components required for a cilium-operator generic variant container.
+build-container-operator-generic: bpf-objs ## Builds components required for a cilium-operator generic variant container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_OPERATOR_CONTAINER) cilium-operator-generic
 
-build-container-operator-aws: ## Builds components required for a cilium-operator aws variant container.
+build-container-operator-aws: bpf-objs ## Builds components required for a cilium-operator aws variant container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_OPERATOR_CONTAINER) cilium-operator-aws
 
-build-container-operator-azure: ## Builds components required for a cilium-operator azure variant container.
+build-container-operator-azure: bpf-objs ## Builds components required for a cilium-operator azure variant container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_OPERATOR_CONTAINER) cilium-operator-azure
 
-build-container-operator-alibabacloud: ## Builds components required for a cilium-operator alibabacloud variant container.
+build-container-operator-alibabacloud: bpf-objs ## Builds components required for a cilium-operator alibabacloud variant container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_OPERATOR_CONTAINER) cilium-operator-alibabacloud
 
-build-container-hubble-relay:
+build-container-hubble-relay: bpf-objs
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_RELAY_CONTAINER) all
 
-build-container-clustermesh-apiserver: ## Builds components required for the clustermesh-apiserver container.
+build-container-clustermesh-apiserver: bpf-objs ## Builds components required for the clustermesh-apiserver container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_CLUSTERMESH_APISERVER_CONTAINER) all
 
-build-container-standalone-dns-proxy: ## Builds components required for standalone dns proxy container.
+build-container-standalone-dns-proxy: bpf-objs ## Builds components required for standalone dns proxy container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_STANDALONE_DNS_PROXY_CONTAINER) all
 
 $(SUBDIRS): force ## Execute default make target(make all) for the provided subdirectory.
