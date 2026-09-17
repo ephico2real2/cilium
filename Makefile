@@ -530,6 +530,7 @@ fuzz: check-fuzz # Run fuzzer tests briefly for FUZZ_TIME seconds
 	./test/fuzzing/go-fuzz.sh | $(GOTEST_FORMATTER)
 
 precheck: ## Peform build precheck for the source code.
+	$(QUIET)$(MAKE) $(SUBMAKEOPTS) -C bpf generate-bpf2go
 ifeq ($(SKIP_K8S_CODE_GEN_CHECK),false)
 	@$(ECHO_CHECK) contrib/scripts/check-k8s-code-gen.sh
 	$(QUIET) contrib/scripts/check-k8s-code-gen.sh
@@ -702,6 +703,7 @@ BPF_TEST_FLAGS ?=
 SUDO ?= sudo -E
 
 run_bpf_tests: ## Build and run the BPF unit tests using the cilium-builder container image.
+	$(QUIET)$(MAKE) $(SUBMAKEOPTS) -C bpf generate-bpf2go
 	contrib/scripts/builder.sh \
 		env MAKEFLAGS="$(filter-out --jobserver-auth=%,$(MAKEFLAGS))" \
 		make $(SUBMAKEOPTS) -C bpf/tests/ all
