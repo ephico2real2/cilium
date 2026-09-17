@@ -96,10 +96,10 @@ build-container-operator-azure: bpf-objs ## Builds components required for a cil
 build-container-operator-alibabacloud: bpf-objs ## Builds components required for a cilium-operator alibabacloud variant container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_OPERATOR_CONTAINER) cilium-operator-alibabacloud
 
-build-container-hubble-relay: bpf-objs
+build-container-hubble-relay:
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_RELAY_CONTAINER) all
 
-build-container-clustermesh-apiserver: bpf-objs ## Builds components required for the clustermesh-apiserver container.
+build-container-clustermesh-apiserver: ## Builds components required for the clustermesh-apiserver container.
 	$(MAKE) $(SUBMAKEOPTS) -C $(SUBDIR_CLUSTERMESH_APISERVER_CONTAINER) all
 
 build-container-standalone-dns-proxy: bpf-objs ## Builds components required for standalone dns proxy container.
