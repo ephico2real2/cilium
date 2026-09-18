@@ -5,6 +5,7 @@ package seven
 
 import (
 	"net/http"
+	"net/netip"
 	"net/url"
 	"testing"
 
@@ -13,7 +14,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
+	"github.com/cilium/cilium/pkg/hubble/parser/getters"
 	"github.com/cilium/cilium/pkg/hubble/testutils"
+	"github.com/cilium/cilium/pkg/ipcache"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
+	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/proxy/accesslog"
 	"github.com/cilium/cilium/pkg/u8proto"
@@ -125,4 +131,104 @@ func Test_decodeEndpoint(t *testing.T) {
 	}
 	ep := decodeEndpoint(epi, "kube-system", "hubble-ui")
 	assert.Equal(t, expected, ep)
+}
+
+func TestDecodeL7Workloads(t *testing.T) {
+	requestPath, err := url.Parse("http://myhost/some/path")
+	require.NoError(t, err)
+	lr := &accesslog.LogRecord{
+		Type:                accesslog.TypeRequest,
+		Timestamp:           fakeTimestamp,
+		NodeAddressInfo:     fakeNodeInfo,
+		ObservationPoint:    accesslog.Ingress,
+		SourceEndpoint:      fakeSourceEndpoint,
+		DestinationEndpoint: fakeDestinationEndpoint,
+		IPVersion:           accesslog.VersionIPv4,
+		Verdict:             accesslog.VerdictForwarded,
+		TransportProtocol:   accesslog.TransportProtocol(u8proto.TCP),
+		HTTP: &accesslog.LogRecordHTTP{
+			Code:     0,
+			Method:   "GET",
+			URL:      requestPath,
+			Protocol: "HTTP/1.1",
+		},
+	}
+
+	t.Run("remote from ipcache", func(t *testing.T) {
+		ipGetter := &testutils.FakeIPGetter{
+			OnGetK8sMetadata: func(ip netip.Addr) *ipcache.K8sMetadata {
+				if ip == netip.MustParseAddr(fakeDestinationEndpoint.IPv4) {
+					return &ipcache.K8sMetadata{
+						Namespace: "shop-ns",
+						PodName:   "shop-abc",
+						Workloads: []ciliumv2.EndpointWorkload{
+							{Kind: "Deployment", Name: "shop"},
+						},
+					}
+				}
+				return nil
+			},
+		}
+		endpointGetter := &testutils.FakeEndpointGetter{
+			OnGetEndpointInfo: func(netip.Addr) (getters.EndpointInfo, bool) {
+				return nil, false
+			},
+		}
+
+		parser, err := New(hivetest.Logger(t), &testutils.NoopDNSGetter, ipGetter, &testutils.NoopServiceGetter, endpointGetter)
+		require.NoError(t, err)
+
+		f := &flowpb.Flow{}
+		err = parser.Decode(lr, f)
+		require.NoError(t, err)
+		assert.Equal(t, []*flowpb.Workload{{Kind: "Deployment", Name: "shop"}}, f.Destination.Workloads)
+	})
+
+	t.Run("local pod overrides", func(t *testing.T) {
+		controller := true
+		ipGetter := &testutils.FakeIPGetter{
+			OnGetK8sMetadata: func(ip netip.Addr) *ipcache.K8sMetadata {
+				if ip == netip.MustParseAddr(fakeDestinationEndpoint.IPv4) {
+					return &ipcache.K8sMetadata{
+						Namespace: "shop-ns",
+						PodName:   "shop-abc12-xyz",
+						Workloads: []ciliumv2.EndpointWorkload{
+							{Kind: "Deployment", Name: "stale"},
+						},
+					}
+				}
+				return nil
+			},
+		}
+		endpointGetter := &testutils.FakeEndpointGetter{
+			OnGetEndpointInfo: func(ip netip.Addr) (getters.EndpointInfo, bool) {
+				if ip == netip.MustParseAddr(fakeDestinationEndpoint.IPv4) {
+					return &testutils.FakeEndpointInfo{
+						ID: fakeDestinationEndpoint.ID,
+						Pod: &slim_corev1.Pod{
+							ObjectMeta: slim_metav1.ObjectMeta{
+								Name:         "shop-abc12-xyz",
+								GenerateName: "shop-abc12-",
+								Labels:       map[string]string{"pod-template-hash": "abc12"},
+								OwnerReferences: []slim_metav1.OwnerReference{{
+									Controller: &controller,
+									Kind:       "ReplicaSet",
+									Name:       "shop-abc12",
+								}},
+							},
+						},
+					}, true
+				}
+				return nil, false
+			},
+		}
+
+		parser, err := New(hivetest.Logger(t), &testutils.NoopDNSGetter, ipGetter, &testutils.NoopServiceGetter, endpointGetter)
+		require.NoError(t, err)
+
+		f := &flowpb.Flow{}
+		err = parser.Decode(lr, f)
+		require.NoError(t, err)
+		assert.Equal(t, []*flowpb.Workload{{Kind: "Deployment", Name: "shop"}}, f.Destination.Workloads)
+	})
 }

@@ -14,9 +14,11 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
+	"github.com/cilium/cilium/pkg/hubble/parser/common"
 	"github.com/cilium/cilium/pkg/hubble/parser/errors"
 	"github.com/cilium/cilium/pkg/hubble/parser/getters"
 	"github.com/cilium/cilium/pkg/hubble/parser/options"
+	"github.com/cilium/cilium/pkg/ipcache"
 	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
 	"github.com/cilium/cilium/pkg/k8s/utils"
 	ciliumLabels "github.com/cilium/cilium/pkg/labels"
@@ -110,22 +112,26 @@ func (p *Parser) Decode(r *accesslog.LogRecord, decoded *flowpb.Flow) error {
 	destinationIP, _ := netip.ParseAddr(ip.Destination)
 	var sourceNames, destinationNames []string
 	var sourceNamespace, sourcePod, destinationNamespace, destinationPod string
+	var srcMeta, dstMeta *ipcache.K8sMetadata
 	if p.dnsGetter != nil {
 		sourceNames = p.dnsGetter.GetNamesOf(uint32(r.DestinationEndpoint.ID), sourceIP)
 		destinationNames = p.dnsGetter.GetNamesOf(uint32(r.SourceEndpoint.ID), destinationIP)
 	}
 	if p.ipGetter != nil {
-		if meta := p.ipGetter.GetK8sMetadata(sourceIP); meta != nil {
-			sourceNamespace, sourcePod = meta.Namespace, meta.PodName
+		if srcMeta = p.ipGetter.GetK8sMetadata(sourceIP); srcMeta != nil {
+			sourceNamespace, sourcePod = srcMeta.Namespace, srcMeta.PodName
 		}
-		if meta := p.ipGetter.GetK8sMetadata(destinationIP); meta != nil {
-			destinationNamespace, destinationPod = meta.Namespace, meta.PodName
+		if dstMeta = p.ipGetter.GetK8sMetadata(destinationIP); dstMeta != nil {
+			destinationNamespace, destinationPod = dstMeta.Namespace, dstMeta.PodName
 		}
 	}
 	srcEndpoint := decodeEndpoint(r.SourceEndpoint, sourceNamespace, sourcePod)
 	dstEndpoint := decodeEndpoint(r.DestinationEndpoint, destinationNamespace, destinationPod)
+	srcEndpoint.Workloads = common.WorkloadsFromMetadata(srcMeta)
+	dstEndpoint.Workloads = common.WorkloadsFromMetadata(dstMeta)
 
 	if p.endpointGetter != nil {
+		// ipcache metadata names remote endpoints; a local pod's owner refs override when present.
 		p.updateEndpointWorkloads(sourceIP, srcEndpoint)
 		p.updateEndpointWorkloads(destinationIP, dstEndpoint)
 	}
