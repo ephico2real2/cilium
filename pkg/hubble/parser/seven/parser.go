@@ -14,9 +14,11 @@ import (
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	flowpb "github.com/cilium/cilium/api/v1/flow"
+	"github.com/cilium/cilium/pkg/hubble/parser/common"
 	"github.com/cilium/cilium/pkg/hubble/parser/errors"
 	"github.com/cilium/cilium/pkg/hubble/parser/getters"
 	"github.com/cilium/cilium/pkg/hubble/parser/options"
+	"github.com/cilium/cilium/pkg/ipcache"
 	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
 	"github.com/cilium/cilium/pkg/k8s/utils"
 	ciliumLabels "github.com/cilium/cilium/pkg/labels"
@@ -110,22 +112,26 @@ func (p *Parser) Decode(r *accesslog.LogRecord, decoded *flowpb.Flow) error {
 	destinationIP, _ := netip.ParseAddr(ip.Destination)
 	var sourceNames, destinationNames []string
 	var sourceNamespace, sourcePod, sourcePodUID, destinationNamespace, destinationPod, destinationPodUID string
+	var srcMeta, dstMeta *ipcache.K8sMetadata
 	if p.dnsGetter != nil {
 		sourceNames = p.dnsGetter.GetNamesOf(uint32(r.DestinationEndpoint.ID), sourceIP)
 		destinationNames = p.dnsGetter.GetNamesOf(uint32(r.SourceEndpoint.ID), destinationIP)
 	}
 	if p.ipGetter != nil {
-		if meta := p.ipGetter.GetK8sMetadata(sourceIP); meta != nil {
-			sourceNamespace, sourcePod, sourcePodUID = meta.Namespace, meta.PodName, meta.PodUID
+		if srcMeta = p.ipGetter.GetK8sMetadata(sourceIP); srcMeta != nil {
+			sourceNamespace, sourcePod, sourcePodUID = srcMeta.Namespace, srcMeta.PodName, srcMeta.PodUID
 		}
-		if meta := p.ipGetter.GetK8sMetadata(destinationIP); meta != nil {
-			destinationNamespace, destinationPod, destinationPodUID = meta.Namespace, meta.PodName, meta.PodUID
+		if dstMeta = p.ipGetter.GetK8sMetadata(destinationIP); dstMeta != nil {
+			destinationNamespace, destinationPod, destinationPodUID = dstMeta.Namespace, dstMeta.PodName, dstMeta.PodUID
 		}
 	}
 	srcEndpoint := decodeEndpoint(r.SourceEndpoint, sourceNamespace, sourcePod, sourcePodUID)
 	dstEndpoint := decodeEndpoint(r.DestinationEndpoint, destinationNamespace, destinationPod, destinationPodUID)
+	srcEndpoint.Workloads = common.WorkloadsFromMetadata(srcMeta)
+	dstEndpoint.Workloads = common.WorkloadsFromMetadata(dstMeta)
 
 	if p.endpointGetter != nil {
+		// ipcache metadata names remote endpoints; a local pod's owner refs override when present.
 		p.updateEndpointFromLocal(sourceIP, srcEndpoint)
 		p.updateEndpointFromLocal(destinationIP, dstEndpoint)
 	}
@@ -235,6 +241,10 @@ func (p *Parser) updateEndpointFromLocal(ip netip.Addr, endpoint *flowpb.Endpoin
 		endpoint.Namespace = ep.GetK8sNamespace()
 		endpoint.PodName = ep.GetK8sPodName()
 		endpoint.PodUid = ep.GetK8sPodUID()
+		// The local endpoint is also the authority on its workload: whatever the ipcache
+		// metadata said is replaced, and a pod without an owner (a bare Pod) reports no
+		// workload, as it did before the metadata was consulted.
+		endpoint.Workloads = nil
 		if pod := ep.GetPod(); pod != nil {
 			workload, workloadTypeMeta, ok := utils.GetWorkloadMetaFromPod(pod)
 			if ok {
