@@ -17,6 +17,7 @@ import (
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	identityPkg "github.com/cilium/cilium/pkg/identity"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/source"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
@@ -944,4 +945,44 @@ func TestIPCacheShadowedCIDRRevivalUsesCurrentAttributes(t *testing.T) {
 	require.Equal(t, cidrKey, event.encryptKey)
 	require.Equal(t, cidrMeta, event.k8sMeta)
 	require.Equal(t, cidrFlags, event.endpointFlags)
+}
+
+func TestK8sMetadataEqualWorkloads(t *testing.T) {
+	withWorkload := &K8sMetadata{
+		Namespace: "ns",
+		PodName:   "pod",
+		Workloads: []ciliumv2.EndpointWorkload{{Kind: "Deployment", Name: "shop"}},
+	}
+	same := &K8sMetadata{
+		Namespace: "ns",
+		PodName:   "pod",
+		Workloads: []ciliumv2.EndpointWorkload{{Kind: "Deployment", Name: "shop"}},
+	}
+	withoutWorkload := &K8sMetadata{
+		Namespace: "ns",
+		PodName:   "pod",
+	}
+	require.True(t, withWorkload.Equal(same))
+	require.False(t, withWorkload.Equal(withoutWorkload))
+	require.False(t, withoutWorkload.Equal(withWorkload))
+}
+
+// A CEP update that changes ONLY the workload (a pod adopted by a ReplicaSet after creation)
+// must reach the ipcache: upsertLocked's "already mapped" short-circuit keys on K8sMetadata.Equal.
+func TestUpsertWorkloadOnlyChangeReachesMetadata(t *testing.T) {
+	s := setupIPCacheTestSuite(t)
+	ipc := s.IPIdentityCache
+	ip := "10.0.0.7"
+	addr := netip.MustParseAddr(ip)
+	id := Identity{ID: identityPkg.NumericIdentity(1234), Source: source.CustomResource}
+	before := &K8sMetadata{Namespace: "ns", PodName: "pod", PodUID: "uid"}
+	_, err := ipc.Upsert(ip, net.ParseIP("192.168.0.1"), 0, before, id)
+	require.NoError(t, err)
+	require.Nil(t, ipc.GetK8sMetadata(addr).Workloads)
+
+	after := &K8sMetadata{Namespace: "ns", PodName: "pod", PodUID: "uid",
+		Workloads: []ciliumv2.EndpointWorkload{{Kind: "Deployment", Name: "shop"}}}
+	_, err = ipc.Upsert(ip, net.ParseIP("192.168.0.1"), 0, after, id)
+	require.NoError(t, err)
+	require.Equal(t, after.Workloads, ipc.GetK8sMetadata(addr).Workloads)
 }

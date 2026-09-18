@@ -11,6 +11,8 @@ import (
 	"github.com/cilium/cilium/api/v1/models"
 	identitymodel "github.com/cilium/cilium/pkg/identity/model"
 	cilium_v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
+	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
+	"github.com/cilium/cilium/pkg/k8s/utils"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/node"
@@ -76,7 +78,8 @@ func (e *Endpoint) GetCiliumEndpointStatus() *cilium_v2.EndpointStatus {
 	logger := e.getLogger()
 
 	svcAccount := ""
-	if pod := e.GetPod(); pod != nil {
+	pod := e.GetPod()
+	if pod != nil {
 		svcAccount = pod.Spec.ServiceAccountName
 	}
 
@@ -94,7 +97,25 @@ func (e *Endpoint) GetCiliumEndpointStatus() *cilium_v2.EndpointStatus {
 		Encryption:          cilium_v2.EncryptionSpec{Key: int(node.GetEndpointEncryptKeyIndex(ln, e.wgConfig.Enabled(), e.ipsecConfig.Enabled()))},
 		NamedPorts:          e.getNamedPortsModel(),
 		ServiceAccount:      svcAccount,
+		Workloads:           e.getWorkloadsModel(pod),
 	}
 
 	return status
+}
+
+// getWorkloadsModel returns the Kubernetes workload owning the endpoint's pod.
+// The result is derived from the pod's owner references and is stable for the
+// lifetime of the pod, so it does not cause extra CiliumEndpoint status churn.
+func (e *Endpoint) getWorkloadsModel(pod *slim_corev1.Pod) []cilium_v2.EndpointWorkload {
+	if pod == nil {
+		return nil
+	}
+	workload, workloadTypeMeta, ok := utils.GetWorkloadMetaFromPod(pod)
+	if !ok {
+		return nil
+	}
+	return []cilium_v2.EndpointWorkload{{
+		Kind: workloadTypeMeta.Kind,
+		Name: workload.Name,
+	}}
 }

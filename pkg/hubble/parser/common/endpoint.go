@@ -10,12 +10,30 @@ import (
 	pb "github.com/cilium/cilium/api/v1/flow"
 	"github.com/cilium/cilium/pkg/hubble/parser/getters"
 	"github.com/cilium/cilium/pkg/identity"
+	"github.com/cilium/cilium/pkg/ipcache"
 	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
 	"github.com/cilium/cilium/pkg/k8s/utils"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/time"
 )
+
+// WorkloadsFromMetadata converts ipcache K8sMetadata.Workloads into Hubble flow workloads.
+// Returns nil when meta is nil or Workloads is empty.
+func WorkloadsFromMetadata(meta *ipcache.K8sMetadata) []*pb.Workload {
+	if meta == nil {
+		return nil
+	}
+	n := len(meta.Workloads)
+	if n == 0 {
+		return nil
+	}
+	workloads := make([]*pb.Workload, 0, n)
+	for _, w := range meta.Workloads {
+		workloads = append(workloads, &pb.Workload{Kind: w.Kind, Name: w.Name})
+	}
+	return workloads
+}
 
 type DatapathContext struct {
 	SrcIP                 netip.Addr
@@ -162,12 +180,14 @@ func (r *EndpointResolver) ResolveEndpoint(ip netip.Addr, datapathSecurityIdenti
 	// for remote endpoints, assemble the information via ip and identity
 	numericIdentity := datapathSecurityIdentity
 	var namespace, podName, podUID string
+	var workloads []*pb.Workload
 	if r.ipGetter != nil {
 		if ipIdentity, ok := r.ipGetter.LookupSecIDByIP(ip); ok {
 			numericIdentity = resolveIdentityConflict(ipIdentity.ID, false)
 		}
 		if meta := r.ipGetter.GetK8sMetadata(ip); meta != nil {
 			namespace, podName, podUID = meta.Namespace, meta.PodName, meta.PodUID
+			workloads = WorkloadsFromMetadata(meta)
 		}
 	}
 	var labels []string
@@ -192,5 +212,6 @@ func (r *EndpointResolver) ResolveEndpoint(ip netip.Addr, datapathSecurityIdenti
 		Labels:      labels,
 		PodName:     podName,
 		PodUid:      podUID,
+		Workloads:   workloads,
 	}
 }

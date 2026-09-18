@@ -60,6 +60,7 @@ func TransformToCiliumEndpoint(cep *cilium_v2.CiliumEndpoint) (*types.CiliumEndp
 		Networking:     cep.Status.Networking,
 		NamedPorts:     cep.Status.NamedPorts,
 		ServiceAccount: cep.Status.ServiceAccount,
+		Workloads:      cep.Status.Workloads,
 	}, nil
 }
 
@@ -125,5 +126,6 @@ func ConvertCoreCiliumEndpointToTypesCiliumEndpoint(ccep *cilium_v2alpha1.CoreCi
 		Networking:     ccep.Networking,
 		NamedPorts:     ccep.NamedPorts,
 		ServiceAccount: ccep.ServiceAccount,
+		// CES CoreCiliumEndpoint does not carry workloads yet (out of scope).
 	}
 }

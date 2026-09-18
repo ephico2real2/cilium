@@ -827,6 +827,9 @@ func Test_TransformToCiliumEndpoint(t *testing.T) {
 						},
 					},
 					ServiceAccount: "test-service-account",
+					Workloads: []v2.EndpointWorkload{
+						{Kind: "Deployment", Name: "shop"},
+					},
 				},
 			},
 			want: &types.CiliumEndpoint{
@@ -880,6 +883,9 @@ func Test_TransformToCiliumEndpoint(t *testing.T) {
 					},
 				},
 				ServiceAccount: "test-service-account",
+				Workloads: []v2.EndpointWorkload{
+					{Kind: "Deployment", Name: "shop"},
+				},
 			},
 		},
 	}

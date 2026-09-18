@@ -1204,6 +1204,15 @@ Option Value          Description
 ``app``               Kubernetes pod's app name, derived from pod labels (``app.kubernetes.io/name``, ``k8s-app``, or ``app``).
 ===================== ===================================================================================
 
+The workload of an endpoint on another node of the same cluster is read from its
+CiliumEndpoint (``status.workloads``), so the CiliumEndpoint CRD must be at schema
+version 1.34.5 or later (the operator rewrites the CRD on start when the cluster's
+``io.cilium.k8s.crd.schema.version`` label is older; an endpoint whose CiliumEndpoint
+status was written before that rewrite reports no workload until its status next
+changes or the agent restarts). It stays empty when the owning agent is older, when
+CiliumEndpointSlices are enabled (the slice does not carry it), and for endpoints in
+another cluster of a Cluster Mesh.
+
 When specifying the source and/or destination context, multiple contexts can be
 specified by separating them via the ``|`` symbol.
 When multiple are specified, then the first non-empty value is added to the

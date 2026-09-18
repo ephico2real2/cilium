@@ -39,6 +39,16 @@ Informational Notes
   Service name prefix. EndpointSlices generated from Pods by the
   kube-controller-manager are unaffected.
 
+* Hubble now reports the Kubernetes workload of pods on other nodes, so the
+  ``source_workload`` and ``destination_workload`` labels of Hubble metrics are
+  filled for cross-node and Gateway traffic. The workload is carried on
+  ``CiliumEndpoint.status.workloads`` and the CiliumEndpoint CRD schema version
+  is bumped to 1.34.5; the operator rewrites the CRD on start. An endpoint whose
+  CiliumEndpoint status was written before that rewrite reports no workload
+  until its status next changes or its agent restarts. The labels stay empty
+  with CiliumEndpointSlices enabled and for endpoints in another cluster of a
+  Cluster Mesh.
+
 Changes to Features
 ~~~~~~~~~~~~~~~~~~~
 
