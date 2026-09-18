@@ -18,6 +18,7 @@ import (
 	"github.com/cilium/cilium/pkg/identity/cache"
 	iputil "github.com/cilium/cilium/pkg/ip"
 	ipcacheTypes "github.com/cilium/cilium/pkg/ipcache/types"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/k8s/synced"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/lock"
@@ -98,6 +99,9 @@ type K8sMetadata struct {
 	PodName string
 	// NamedPorts is the set of named ports for the pod
 	NamedPorts types.NamedPortMap
+	// Workloads is the Kubernetes workload (Deployment, StatefulSet, …) of the pod behind the IP.
+	// Populated from CiliumEndpoint.status.workloads so Hubble can name remote endpoints (cilium/cilium#25676).
+	Workloads []ciliumv2.EndpointWorkload
 }
 
 // Configuration is init-time configuration for the IPCache.
@@ -982,6 +986,14 @@ func (m *K8sMetadata) Equal(o *K8sMetadata) bool {
 	}
 	for k, v := range m.NamedPorts {
 		if v2, ok := o.NamedPorts[k]; !ok || v != v2 {
+			return false
+		}
+	}
+	if len(m.Workloads) != len(o.Workloads) {
+		return false
+	}
+	for i, w := range m.Workloads {
+		if w != o.Workloads[i] {
 			return false
 		}
 	}

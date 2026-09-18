@@ -50,6 +50,7 @@ func TestGetCiliumEndpointStatus(t *testing.T) {
 	require.Equal(t, models.NamedPorts{}, status.NamedPorts)
 	// ServiceAccount should be empty when no pod is set
 	require.Empty(t, status.ServiceAccount)
+	require.Nil(t, status.Workloads)
 }
 
 func TestGetCiliumEndpointStatusWithServiceAccount(t *testing.T) {
@@ -102,4 +103,53 @@ func TestGetCiliumEndpointStatusWithServiceAccount(t *testing.T) {
 	require.Equal(t, models.NamedPorts{}, status.NamedPorts)
 	// ServiceAccount should match the pod's ServiceAccountName
 	require.Equal(t, "test-service-account", status.ServiceAccount)
+	require.Nil(t, status.Workloads)
+}
+
+func TestGetCiliumEndpointStatusWithWorkloads(t *testing.T) {
+	p := createTestEndpointParams(t)
+	m := &models.EndpointChangeRequest{
+		Addressing: &models.AddressPair{
+			IPv4: "192.168.1.100",
+			IPv6: "f00d::a10:0:0:abcd",
+		},
+		ContainerID:  "ContainerID",
+		K8sPodName:   "shop-abc-123",
+		K8sNamespace: "Namespace",
+		ID:           200,
+		Labels: models.Labels{
+			"k8s:io.cilium.k8s.policy.cluster=default",
+			"k8s:io.cilium.k8s.policy.serviceaccount=test-service-account",
+			"k8s:io.kubernetes.pod.namespace=default",
+			"k8s:name=probe",
+		},
+		State: models.EndpointStateWaitingDashForDashIdentity.Pointer(),
+	}
+	e, err := NewEndpointFromChangeModel(p, nil, &FakeEndpointProxy{}, m, nil)
+	require.NoError(t, err)
+
+	controller := true
+	pod := &slim_corev1.Pod{
+		ObjectMeta: slim_metav1.ObjectMeta{
+			Name:         "shop-abc-123",
+			GenerateName: "shop-abc-",
+			Labels: map[string]string{
+				"pod-template-hash": "abc",
+			},
+			OwnerReferences: []slim_metav1.OwnerReference{
+				{
+					Kind:       "ReplicaSet",
+					Name:       "shop-abc",
+					Controller: &controller,
+				},
+			},
+		},
+		Spec: slim_corev1.PodSpec{
+			ServiceAccountName: "test-service-account",
+		},
+	}
+	e.SetPod(pod)
+
+	status := e.GetCiliumEndpointStatus()
+	require.Equal(t, []v2.EndpointWorkload{{Kind: "Deployment", Name: "shop"}}, status.Workloads)
 }

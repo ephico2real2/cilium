@@ -17,6 +17,7 @@ import (
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	identityPkg "github.com/cilium/cilium/pkg/identity"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/source"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
@@ -865,4 +866,24 @@ func TestIPCacheShadowedCIDRRevivalUsesCurrentAttributes(t *testing.T) {
 	require.Equal(t, cidrKey, event.encryptKey)
 	require.Equal(t, cidrMeta, event.k8sMeta)
 	require.Equal(t, cidrFlags, event.endpointFlags)
+}
+
+func TestK8sMetadataEqualWorkloads(t *testing.T) {
+	withWorkload := &K8sMetadata{
+		Namespace: "ns",
+		PodName:   "pod",
+		Workloads: []ciliumv2.EndpointWorkload{{Kind: "Deployment", Name: "shop"}},
+	}
+	same := &K8sMetadata{
+		Namespace: "ns",
+		PodName:   "pod",
+		Workloads: []ciliumv2.EndpointWorkload{{Kind: "Deployment", Name: "shop"}},
+	}
+	withoutWorkload := &K8sMetadata{
+		Namespace: "ns",
+		PodName:   "pod",
+	}
+	require.True(t, withWorkload.Equal(same))
+	require.False(t, withWorkload.Equal(withoutWorkload))
+	require.False(t, withoutWorkload.Equal(withWorkload))
 }

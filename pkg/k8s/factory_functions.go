@@ -155,6 +155,7 @@ func TransformToCiliumEndpoint(obj any) (any, error) {
 			Networking:     concreteObj.Status.Networking,
 			NamedPorts:     concreteObj.Status.NamedPorts,
 			ServiceAccount: concreteObj.Status.ServiceAccount,
+			Workloads:      concreteObj.Status.Workloads,
 		}, nil
 	case *types.CiliumEndpoint:
 		return obj, nil
@@ -193,6 +194,7 @@ func TransformToCiliumEndpoint(obj any) (any, error) {
 				Networking:     ciliumEndpoint.Status.Networking,
 				NamedPorts:     ciliumEndpoint.Status.NamedPorts,
 				ServiceAccount: ciliumEndpoint.Status.ServiceAccount,
+				Workloads:      ciliumEndpoint.Status.Workloads,
 			},
 		}, nil
 	default:
@@ -262,5 +264,6 @@ func ConvertCoreCiliumEndpointToTypesCiliumEndpoint(ccep *cilium_v2alpha1.CoreCi
 		Networking:     ccep.Networking,
 		NamedPorts:     ccep.NamedPorts,
 		ServiceAccount: ccep.ServiceAccount,
+		// CES CoreCiliumEndpoint does not carry workloads yet (out of scope).
 	}
 }

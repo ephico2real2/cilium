@@ -1130,6 +1130,9 @@ Option Value          Description
 ``app``               Kubernetes pod's app name, derived from pod labels (``app.kubernetes.io/name``, ``k8s-app``, or ``app``).
 ===================== ===================================================================================
 
+The workload of an endpoint on another node is read from its CiliumEndpoint
+(``status.workloads``). Older agents in a mixed-version cluster leave it empty.
+
 When specifying the source and/or destination context, multiple contexts can be
 specified by separating them via the ``|`` symbol.
 When multiple are specified, then the first non-empty value is added to the

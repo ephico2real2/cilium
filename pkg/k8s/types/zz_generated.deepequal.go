@@ -49,6 +49,22 @@ func (in *CiliumEndpoint) deepEqual(other *CiliumEndpoint) bool {
 	if in.ServiceAccount != other.ServiceAccount {
 		return false
 	}
+	if ((in.Workloads != nil) && (other.Workloads != nil)) || ((in.Workloads == nil) != (other.Workloads == nil)) {
+		in, other := &in.Workloads, &other.Workloads
+		if other == nil {
+			return false
+		}
+
+		if len(*in) != len(*other) {
+			return false
+		} else {
+			for i, inElement := range *in {
+				if !inElement.DeepEqual(&(*other)[i]) {
+					return false
+				}
+			}
+		}
+	}
 
 	return true
 }

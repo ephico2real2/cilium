@@ -216,6 +216,7 @@ func (k *K8sCiliumEndpointsWatcher) endpointUpdated(oldEndpoint, endpoint *types
 		Namespace:  endpoint.Namespace,
 		PodName:    endpoint.Name,
 		NamedPorts: make(ciliumTypes.NamedPortMap, len(endpoint.NamedPorts)),
+		Workloads:  endpoint.Workloads,
 	}
 	for _, port := range endpoint.NamedPorts {
 		if err := k8sMeta.NamedPorts.AddPort(port.Name, int(port.Port), port.Protocol); err != nil {

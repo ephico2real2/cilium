@@ -106,6 +106,21 @@ type EndpointStatus struct {
 	//
 	// +kubebuilder:validation:Optional
 	ServiceAccount string `json:"service-account,omitempty"`
+
+	// Workloads lists the Kubernetes workload (Deployment, StatefulSet, DaemonSet, Job, CronJob, …) the endpoint's pod
+	// belongs to, resolved by the owning agent from the pod's owner references. Remote agents read it from here so
+	// Hubble can name the workload of an endpoint on another node (cilium/cilium#25676).
+	//
+	// +kubebuilder:validation:Optional
+	Workloads []EndpointWorkload `json:"workloads,omitempty"`
+}
+
+// EndpointWorkload identifies a Kubernetes workload by kind and name.
+type EndpointWorkload struct {
+	// +kubebuilder:validation:Optional
+	Kind string `json:"kind,omitempty"`
+	// +kubebuilder:validation:Optional
+	Name string `json:"name,omitempty"`
 }
 
 // +k8s:deepcopy-gen=false
