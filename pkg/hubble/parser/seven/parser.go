@@ -231,6 +231,9 @@ func (p *Parser) computeResponseTime(r *accesslog.LogRecord, timestamp time.Time
 
 func (p *Parser) updateEndpointWorkloads(ip netip.Addr, endpoint *flowpb.Endpoint) {
 	if ep, ok := p.endpointGetter.GetEndpointInfo(ip); ok {
+		// A local endpoint is the authority on its own pod: whatever the ipcache metadata said is replaced, and a pod
+		// without an owner (a bare Pod) reports no workload, as it did before the metadata was consulted.
+		endpoint.Workloads = nil
 		if pod := ep.GetPod(); pod != nil {
 			workload, workloadTypeMeta, ok := utils.GetWorkloadMetaFromPod(pod)
 			if ok {

@@ -231,4 +231,40 @@ func TestDecodeL7Workloads(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, []*flowpb.Workload{{Kind: "Deployment", Name: "shop"}}, f.Destination.Workloads)
 	})
+
+	// a local pod with no owner reports no workload, even when the ipcache metadata carries a stale one: the local
+	// endpoint is the authority (before the metadata was consulted this was nil, and it must stay nil)
+	t.Run("local ownerless pod clears stale metadata", func(t *testing.T) {
+		ipGetter := &testutils.FakeIPGetter{
+			OnGetK8sMetadata: func(ip netip.Addr) *ipcache.K8sMetadata {
+				if ip == netip.MustParseAddr(fakeDestinationEndpoint.IPv4) {
+					return &ipcache.K8sMetadata{
+						Namespace: "shop-ns",
+						PodName:   "bare-pod",
+						Workloads: []ciliumv2.EndpointWorkload{{Kind: "Deployment", Name: "stale"}},
+					}
+				}
+				return nil
+			},
+		}
+		endpointGetter := &testutils.FakeEndpointGetter{
+			OnGetEndpointInfo: func(ip netip.Addr) (getters.EndpointInfo, bool) {
+				if ip == netip.MustParseAddr(fakeDestinationEndpoint.IPv4) {
+					return &testutils.FakeEndpointInfo{
+						ID:  fakeDestinationEndpoint.ID,
+						Pod: &slim_corev1.Pod{ObjectMeta: slim_metav1.ObjectMeta{Name: "bare-pod"}},
+					}, true
+				}
+				return nil, false
+			},
+		}
+
+		parser, err := New(hivetest.Logger(t), &testutils.NoopDNSGetter, ipGetter, &testutils.NoopServiceGetter, endpointGetter)
+		require.NoError(t, err)
+
+		f := &flowpb.Flow{}
+		err = parser.Decode(lr, f)
+		require.NoError(t, err)
+		assert.Nil(t, f.Destination.Workloads)
+	})
 }
