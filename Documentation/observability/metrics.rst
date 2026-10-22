@@ -1134,10 +1134,12 @@ The workload of an endpoint on another node is read from its CiliumEndpoint
 (``status.workloads``), so the CiliumEndpoint CRD must be at schema version 1.33.13 or
 later (the operator updates it on start). For an endpoint in another cluster of a
 Cluster Mesh, that cluster's clustermesh-apiserver copies it into the endpoint's kvstore
-entry, so that clustermesh-apiserver must be of this version too. It stays empty when the
-owning agent is older, when CiliumEndpointSlices are enabled (the slice does not carry
-it), and when the agents write their own kvstore entries (identity allocation mode
-``kvstore``).
+entry. This requires a clustermesh-apiserver that exports workloads and an observing
+agent that reads them; older agents ignore the extra field. KVStoreMesh mirrors the
+entry unchanged and does not need this change. The workload stays empty when the
+owning agent is older or when CiliumEndpointSlices are enabled (the slice does not
+carry it). Cross-cluster workload metadata also stays empty when agents write their
+own kvstore entries (identity allocation mode ``kvstore``).
 
 When specifying the source and/or destination context, multiple contexts can be
 specified by separating them via the ``|`` symbol.

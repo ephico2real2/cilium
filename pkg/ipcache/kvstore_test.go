@@ -273,3 +273,30 @@ func TestIPIdentityWatcherWorkloads(t *testing.T) {
 		require.Equal(t, step.workloads, meta.Workloads, step.name)
 	}
 }
+
+func TestIPIdentityWatcherWorkloadsOnly(t *testing.T) {
+	s := setupIPCacheTestSuite(t)
+	watcher := &IPIdentityWatcher{
+		log: hivetest.Logger(t), ipcache: s.IPIdentityCache, source: source.ClusterMesh,
+	}
+	ip := netip.MustParseAddr("10.244.3.18")
+	pair := identity.IPIdentityPair{
+		IP: net.ParseIP(ip.String()), ID: 199480,
+		K8sWorkloads: []identity.Workload{{Kind: "Deployment", Name: "shop"}},
+	}
+	watcher.OnUpdate(&pair)
+	meta := s.IPIdentityCache.GetK8sMetadata(ip)
+	require.NotNil(t, meta)
+	require.Equal(t, []ciliumv2.EndpointWorkload{{Kind: "Deployment", Name: "shop"}}, meta.Workloads)
+
+	// The stored metadata must not alias the input, and a workload-only
+	// change must replace it even when identity and addressing stay the same.
+	pair.K8sWorkloads[0].Name = "new-owner"
+	require.Equal(t, "shop", s.IPIdentityCache.GetK8sMetadata(ip).Workloads[0].Name)
+	watcher.OnUpdate(&pair)
+	require.Equal(t, "new-owner", s.IPIdentityCache.GetK8sMetadata(ip).Workloads[0].Name)
+
+	pair.K8sWorkloads = nil
+	watcher.OnUpdate(&pair)
+	require.Nil(t, s.IPIdentityCache.GetK8sMetadata(ip))
+}

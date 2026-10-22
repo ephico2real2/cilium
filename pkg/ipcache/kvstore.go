@@ -411,7 +411,7 @@ func (iw *IPIdentityWatcher) OnUpdate(k storepkg.Key) {
 	}
 
 	var k8sMeta *K8sMetadata
-	if ipIDPair.K8sNamespace != "" || ipIDPair.K8sPodName != "" || len(ipIDPair.NamedPorts) > 0 {
+	if ipIDPair.K8sNamespace != "" || ipIDPair.K8sPodName != "" || len(ipIDPair.NamedPorts) > 0 || len(ipIDPair.K8sWorkloads) > 0 {
 		k8sMeta = &K8sMetadata{
 			Namespace:  ipIDPair.K8sNamespace,
 			PodName:    ipIDPair.K8sPodName,
