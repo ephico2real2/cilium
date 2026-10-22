@@ -254,6 +254,12 @@ func namedPortsToIPIdentity(namedPorts models.NamedPorts) []identity.NamedPort {
 	})
 }
 
+func workloadsToIPIdentity(workloads []cilium_api_v2.EndpointWorkload) []identity.Workload {
+	return cslices.Map(workloads, func(workload cilium_api_v2.EndpointWorkload) identity.Workload {
+		return identity.Workload{Kind: workload.Kind, Name: workload.Name}
+	})
+}
+
 func ciliumEndpointMapper(endpoint *types.CiliumEndpoint) iter.Seq[store.Key] {
 	return func(yield func(store.Key) bool) {
 		if n := endpoint.Networking; n != nil {
@@ -269,6 +275,7 @@ func ciliumEndpointMapper(endpoint *types.CiliumEndpoint) iter.Seq[store.Key] {
 						K8sPodName:        endpoint.Name,
 						K8sServiceAccount: endpoint.ServiceAccount,
 						NamedPorts:        namedPortsToIPIdentity(endpoint.NamedPorts),
+						K8sWorkloads:      workloadsToIPIdentity(endpoint.Workloads),
 					}
 
 					if endpoint.Identity != nil {
@@ -321,6 +328,7 @@ func ciliumEndpointSliceMapper(endpointslice *cilium_api_v2a1.CiliumEndpointSlic
 							Key:               uint8(endpoint.Encryption.Key),
 							K8sServiceAccount: endpoint.ServiceAccount,
 							NamedPorts:        namedPortsToIPIdentity(endpoint.NamedPorts),
+							// No K8sWorkloads: a CiliumEndpointSlice does not carry the workload.
 						}
 
 						if !yield(&entry) {

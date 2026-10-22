@@ -57,6 +57,9 @@ type IPIdentityPair struct {
 	K8sPodName        string          `json:"K8sPodName,omitempty"`
 	K8sServiceAccount string          `json:"K8sServiceAccount,omitempty"`
 	NamedPorts        []NamedPort     `json:"NamedPorts,omitempty"`
+	// K8sWorkloads names the workload of the pod behind the IP, so that Hubble
+	// can name an endpoint of another cluster. Older readers ignore it.
+	K8sWorkloads []Workload `json:"K8sWorkloads,omitempty"`
 }
 
 type IdentityMap map[NumericIdentity]labels.LabelArray
@@ -91,6 +94,16 @@ type NamedPort struct {
 	Name     string `json:"Name"`
 	Port     uint16 `json:"Port"`
 	Protocol string `json:"Protocol"`
+}
+
+// Workload is a Kubernetes workload (Deployment, StatefulSet, ...) owning a pod.
+//
+// WARNING - STABLE API
+// This structure is written as JSON to the key-value store. Do NOT modify this
+// structure in ways which are not JSON forward compatible.
+type Workload struct {
+	Kind string `json:"Kind"`
+	Name string `json:"Name"`
 }
 
 // Sanitize takes a partially initialized Identity (for example, deserialized

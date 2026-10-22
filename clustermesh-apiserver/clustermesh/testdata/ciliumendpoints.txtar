@@ -102,6 +102,13 @@ k8s/delete endpoint-3.yaml
 kvstore/list -o json cilium/state/ip ips-1.actual
 * cmp ips-1.actual ips-1.expected
 
+# Add a CiliumEndpoint whose owning agent reports the pod's workload (status.workloads).
+k8s/add endpoint-5.yaml
+
+# Wait for synchronization. The entry carries the workload, for the agents of the other clusters.
+kvstore/list -o json cilium/state/ip ips-1+5.actual
+* cmp ips-1+5.actual ips-1+5.expected
+
 # Annotate namespace-1 as non-global
 k8s/update namespace-1-annotated.yaml
 
@@ -219,6 +226,28 @@ status:
     node: 172.18.0.3
   service-account: default
   state: ready
+
+-- endpoint-5.yaml --
+apiVersion: cilium.io/v2
+kind: CiliumEndpoint
+metadata:
+  name: cep-005
+  namespace: foo
+status:
+  id: 1485
+  identity:
+    id: 199480
+    labels:
+    - k8s:app=shop
+  networking:
+    addressing:
+    - ipv4: 10.244.3.17
+    node: 172.18.0.4
+  service-account: default
+  state: ready
+  workloads:
+  - kind: Deployment
+    name: shop
 
 -- ips-1+2.expected --
 # cilium/state/ip/v1/default/10.244.1.79
@@ -623,4 +652,35 @@ status:
   "K8sNamespace": "foo",
   "K8sPodName": "cep-001",
   "K8sServiceAccount": "default"
+}
+-- ips-1+5.expected --
+# cilium/state/ip/v1/default/10.244.1.80
+{
+  "IP": "10.244.1.80",
+  "Mask": null,
+  "HostIP": "172.18.0.3",
+  "ID": 199472,
+  "Key": 0,
+  "Metadata": "",
+  "K8sNamespace": "foo",
+  "K8sPodName": "cep-001",
+  "K8sServiceAccount": "default"
+}
+# cilium/state/ip/v1/default/10.244.3.17
+{
+  "IP": "10.244.3.17",
+  "Mask": null,
+  "HostIP": "172.18.0.4",
+  "ID": 199480,
+  "Key": 0,
+  "Metadata": "",
+  "K8sNamespace": "foo",
+  "K8sPodName": "cep-005",
+  "K8sServiceAccount": "default",
+  "K8sWorkloads": [
+    {
+      "Kind": "Deployment",
+      "Name": "shop"
+    }
+  ]
 }

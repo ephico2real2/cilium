@@ -6,6 +6,7 @@ package ipcache
 import (
 	"context"
 	"net"
+	"net/netip"
 	"sync"
 	"testing"
 	"time"
@@ -15,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/cilium/pkg/identity"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/kvstore"
 	storepkg "github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/source"
@@ -235,4 +237,39 @@ func TestIPIdentityWatcherNamedPorts(t *testing.T) {
 		"http": {Proto: u8proto.TCP, Port: 8080},
 		"dns":  {Proto: u8proto.UDP, Port: 53},
 	}, event.k8sMeta.NamedPorts)
+}
+
+// The workload in a remote cluster's entry reaches the metadata Hubble reads
+// (GetK8sMetadata); an entry from a writer without the field leaves it empty.
+func TestIPIdentityWatcherWorkloads(t *testing.T) {
+	s := setupIPCacheTestSuite(t)
+	watcher := &IPIdentityWatcher{
+		log:     hivetest.Logger(t),
+		ipcache: s.IPIdentityCache,
+		source:  source.ClusterMesh,
+	}
+	ip := netip.MustParseAddr("10.244.3.17")
+	withoutField := `{"IP":"10.244.3.17","Mask":null,"HostIP":"172.18.0.4","ID":199480,"Key":0,"Metadata":"",` +
+		`"K8sNamespace":"foo","K8sPodName":"cep-005","K8sServiceAccount":"default"}`
+	withField := `{"IP":"10.244.3.17","Mask":null,"HostIP":"172.18.0.4","ID":199480,"Key":0,"Metadata":"",` +
+		`"K8sNamespace":"foo","K8sPodName":"cep-005","K8sServiceAccount":"default",` +
+		`"K8sWorkloads":[{"Kind":"Deployment","Name":"shop"}]}`
+
+	for _, step := range []struct {
+		name, value string
+		workloads   []ciliumv2.EndpointWorkload
+	}{
+		{name: "older writer", value: withoutField},
+		{name: "writer upgraded", value: withField, workloads: []ciliumv2.EndpointWorkload{{Kind: "Deployment", Name: "shop"}}},
+		{name: "writer rolled back", value: withoutField},
+	} {
+		var pair identity.IPIdentityPair
+		require.NoError(t, pair.Unmarshal(ip.String(), []byte(step.value)), step.name)
+		watcher.OnUpdate(&pair)
+
+		meta := s.IPIdentityCache.GetK8sMetadata(ip)
+		require.NotNil(t, meta, step.name)
+		require.Equal(t, "cep-005", meta.PodName, step.name)
+		require.Equal(t, step.workloads, meta.Workloads, step.name)
+	}
 }

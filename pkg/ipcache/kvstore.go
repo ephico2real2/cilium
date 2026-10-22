@@ -17,6 +17,7 @@ import (
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/identity"
+	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/kvstore"
 	storepkg "github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/lock"
@@ -425,6 +426,9 @@ func (iw *IPIdentityWatcher) OnUpdate(k storepkg.Key) {
 					logfields.IPAddr, ipIDPair,
 				)
 			}
+		}
+		for _, w := range ipIDPair.K8sWorkloads {
+			k8sMeta.Workloads = append(k8sMeta.Workloads, ciliumv2.EndpointWorkload{Kind: w.Kind, Name: w.Name})
 		}
 	}
 
