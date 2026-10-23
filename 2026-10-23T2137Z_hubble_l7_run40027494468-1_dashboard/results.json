@@ -1,0 +1,16 @@
+{
+  "base": "3b6e980b3d4eaa5be4532602ccb2bd54d8540dc4",
+  "validation": "synthetic PromQL fixtures, not live load",
+  "prometheus": "3.10.0",
+  "dashboard_id_preserved": "3g264CZVz",
+  "only_changes": [
+    "source_namespace.allValue",
+    "source_workload.allValue"
+  ],
+  "addon_symlink_resolves_to_chart": true,
+  "baseline_gateway_all": "FAIL as expected: 50 instead of 550 req/s",
+  "fixed_gateway_all": "PASS: 550 req/s",
+  "explicit_source_filters": "PASS: 50 req/s",
+  "namespace_cluster_workload_reporter_isolation": "PASS",
+  "promql_assertions": 8
+}

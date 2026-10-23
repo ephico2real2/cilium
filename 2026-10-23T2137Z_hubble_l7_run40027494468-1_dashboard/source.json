@@ -1,0 +1,8 @@
+{
+  "source": "e00be3729bf71334a500b5202a8e1136177697b3",
+  "upstream_base": "3b6e980b3d4eaa5be4532602ccb2bd54d8540dc4",
+  "kind": "synthetic dashboard regression",
+  "grafana": "12.2.0",
+  "prometheus": "3.10.0",
+  "application_load": false
+}

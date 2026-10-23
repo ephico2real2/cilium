@@ -1,0 +1,139 @@
+{
+  "pages": [
+    {
+      "name": "00-synthetic-fixture",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": null
+    },
+    {
+      "name": "before-all-destination",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"loadtest\", source_workload=~\"load\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_namespace": "team-a",
+              "destination_workload": "shop",
+              "status": "200"
+            },
+            "value": 49.992
+          }
+        ],
+        "total": 49.992
+      }
+    },
+    {
+      "name": "after-all-destination",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\".*\", source_workload=~\".*\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_namespace": "team-a",
+              "destination_workload": "shop",
+              "status": "200"
+            },
+            "value": 550.129
+          }
+        ],
+        "total": 550.129
+      }
+    },
+    {
+      "name": "before-all-source",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"loadtest\", source_workload=~\"load\"}[$__rate_interval])) by (cluster, source_namespace, source_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "source_namespace": "loadtest",
+              "source_workload": "load",
+              "status": "200"
+            },
+            "value": 50
+          }
+        ],
+        "total": 50
+      }
+    },
+    {
+      "name": "after-all-source",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\".*\", source_workload=~\".*\"}[$__rate_interval])) by (cluster, source_namespace, source_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "source_namespace": "loadtest",
+              "source_workload": "load",
+              "status": "200"
+            },
+            "value": 50.015
+          },
+          {
+            "labels": {
+              "cluster": "poc1",
+              "status": "200"
+            },
+            "value": 500.151
+          }
+        ],
+        "total": 550.166
+      }
+    },
+    {
+      "name": "after-selected-source",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"loadtest\", source_workload=~\"load\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_namespace": "team-a",
+              "destination_workload": "shop",
+              "status": "200"
+            },
+            "value": 49.991
+          }
+        ],
+        "total": 49.991
+      }
+    }
+  ]
+}
