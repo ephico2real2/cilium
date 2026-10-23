@@ -1354,7 +1354,8 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 0,
-        "type": "query"
+        "type": "query",
+        "allValue": ".*"
       },
       {
         "current": {},
@@ -1377,7 +1378,8 @@
         "regex": "",
         "skipUrlSync": false,
         "sort": 0,
-        "type": "query"
+        "type": "query",
+        "allValue": ".*"
       }
     ]
   },
