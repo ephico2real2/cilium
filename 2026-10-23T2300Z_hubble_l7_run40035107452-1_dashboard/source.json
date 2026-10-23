@@ -1,0 +1,9 @@
+{
+  "source": "221d435ecce12fdf19efb4ca71026ff1c889317b",
+  "upstream_base": "e5967e950b8f10ae514c58787e80d8e0192c15fd",
+  "kind": "real two-node Cilium Gateway load",
+  "grafana": "12.2.0",
+  "prometheus": "kube-prometheus-stack 90.1.1",
+  "application_load": true,
+  "traffic": "Fortio 1.75.3: external Gateway 200, pod Gateway 200, direct pod 20 req/s; six minutes each"
+}
