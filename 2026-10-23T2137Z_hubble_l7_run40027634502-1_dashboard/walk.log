@@ -1,0 +1,6 @@
+00-synthetic-fixture: settled 0s; SYNTHETIC dashboard regression fixture | No application traffic is generated. | Counter stream	Rate / second | Gateway: empty source namespace/workload	500 | Pod: loadtest/load	50 | Expected All total	550 | Expected selected pod total	50 | Other clusters, destinations and reporters are isolation controls. — expectations met
+before-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=50.01, series=1 — expectations met
+after-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=550.018, series=1 — expectations met
+before-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=49.999, series=1 — expectations met
+after-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=549.99, series=2 — expectations met
+after-selected-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=49.99, series=1 — expectations met

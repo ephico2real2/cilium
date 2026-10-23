@@ -1,0 +1,23 @@
+[
+  {
+    "name": "baseline-all",
+    "query": "sum(round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"(loadtest)\", source_workload=~\"(load)\"}[10s])) by (cluster, destination_namespace, destination_workload, status), 0.001))",
+    "expected": 50,
+    "actual": 50.003,
+    "synthetic": true
+  },
+  {
+    "name": "fixed-all",
+    "query": "sum(round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\".*\", source_workload=~\".*\"}[10s])) by (cluster, destination_namespace, destination_workload, status), 0.001))",
+    "expected": 550,
+    "actual": 550.037,
+    "synthetic": true
+  },
+  {
+    "name": "explicit-source",
+    "query": "sum(round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"loadtest\", source_workload=~\"load\"}[10s])) by (cluster, destination_namespace, destination_workload, status), 0.001))",
+    "expected": 50,
+    "actual": 50.003,
+    "synthetic": true
+  }
+]
