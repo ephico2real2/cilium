@@ -8,6 +8,7 @@
 PROTOC ?= protoc
 
 ZTUNNEL_PROTO_SOURCES := \
+	./security/authorization_ztunnel.proto \
 	./ca_ztunnel.proto \
 	./workload_ztunnel.proto \
 	./zds_ztunnel.proto
@@ -31,3 +32,4 @@ all:
 		--go-grpc_out=require_unimplemented_servers=false,paths=source_relative:. \
 		--go-json_out=orig_name=true,paths=source_relative:. \
   		$(ZTUNNEL_PROTO_SOURCES)
+	$(QUIET)python3 security/normalize-docs.py

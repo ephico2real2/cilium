@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/cilium/ztunnel",
+  "commit": "5bb9cf256b10a209ae9bc0624ddfbf27dbc439de",
+  "path": "proto/authorization.proto",
+  "gitBlob": "6c4c03c95bfc0c28e1b54230f279aa7317d5d057",
+  "sha256": "d6561b0269009afd05287dcb202d29c5922aee37cb4bf1704e59be0b73e5f500"
+}
