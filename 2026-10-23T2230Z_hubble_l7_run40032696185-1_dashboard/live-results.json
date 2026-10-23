@@ -1,0 +1,16 @@
+{
+  "application_load": true,
+  "gateway_requested_qps": 200,
+  "direct_requested_qps": 20,
+  "gateway_measured_http_200_qps": 199.6,
+  "gateway_reporter": "client",
+  "gateway_client": "external Docker container on kind bridge",
+  "direct_measured_http_200_qps": 20.0,
+  "fixed_all_qps": 399.22,
+  "baseline_enumerated_source_qps": 199.62,
+  "baseline_query": "sum(rate(hubble_http_requests_total{cluster=\"poc1\",destination_namespace=\"team-a\",destination_workload=\"shop\",reporter=\"client\",source_namespace=~\"(loadtest)\",source_workload=~\"(load)\"}[1m]))",
+  "fixed_query": "sum(rate(hubble_http_requests_total{cluster=\"poc1\",destination_namespace=\"team-a\",destination_workload=\"shop\",reporter=\"client\",source_namespace=~\".*\",source_workload=~\".*\"}[1m]))",
+  "remote_backend_node": "poc1-control-plane",
+  "gateway_reporter_node": "poc1-worker",
+  "source_commit": "e00be3729bf71334a500b5202a8e1136177697b3"
+}

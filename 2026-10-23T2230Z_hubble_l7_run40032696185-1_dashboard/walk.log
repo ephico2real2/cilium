@@ -1,0 +1,7 @@
+01-before-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=199.933, series=1 — expectations met
+02-after-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=399.033, series=1 — expectations met
+03-before-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=199.567, series=1 — expectations met
+04-after-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=399.6, series=2 — expectations met
+05-after-selected-direct-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=20, series=1 — expectations met
+06-after-full-live-dashboard: scrolled 3 screens for the lazy panels
+06-after-full-live-dashboard: settled 6s; panels=11; "No data"=0; first: Incoming Request Volume | Incoming Request Success Rate (non-5xx responses) | Request Duration | Incoming Requests by Source and Response Code | Incoming Request Success Rate (non-5xx responses) By Source; browser Prometheus total=1, series=1 — expectations met
