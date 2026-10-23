@@ -45,6 +45,9 @@ jobs:
   #    poll-interval: 15
 
   build-and-push-prs:
+    # The upstream Quay OIDC broker trusts only cilium/cilium. Our fork uses
+    # cmtc-development-images.yaml and its GHCR package instead.
+    if: github.repository == 'cilium/cilium'
     timeout-minutes: 45
     name: Build and Push Images
     runs-on: ${{ vars.UBUNTU_2604_4CPU_16GB || 'ubuntu-26.04' }}
@@ -512,7 +515,7 @@ jobs:
           df -h
 
   image-digests:
-    if: ${{ always() }}
+    if: ${{ always() && github.repository == 'cilium/cilium' }}
     name: Display Digests
     runs-on: ubuntu-26.04
     needs: build-and-push-prs
