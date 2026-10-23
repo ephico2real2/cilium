@@ -22,3 +22,5 @@ gh workflow run cmtc-development-images.yaml -R ephico2real2/cilium -f source_sh
 ```
 
 Download `cilium-image-bundle/images.lock.json` from the successful run. In CMTC, use `CILIUM_IMAGE_LOCK=/absolute/path/images.lock.json make lab-up`, or deliberately update its checked-in lock to advance the default development version. The lab fetches the exact chart, renders explicit image overrides and verifies all deployed component digests and agent binary versions. Retain the publisher and deployed CI links when updating a pin.
+
+The Hubble dashboard regression workflow also accepts `image_lock_url`. Set it to an immutable raw CMTC lock URL and pass its matching `source_sha`; the job skips native image compilation, verifies the source, deploys the GHCR digest references with the matching chart, then runs the existing external Gateway, pod Gateway and direct-pod load streams before the Grafana browser assertions. The native build path remains available when the input is omitted.

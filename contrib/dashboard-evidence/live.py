@@ -69,13 +69,22 @@ def check():
     assert pods['items'] and all(pod['spec']['nodeName'] == 'poc1-control-plane' for pod in pods['items'])
     agents = json.loads((LIVE / 'agent-pods.json').read_text())
     assert len(agents['items']) == 2
-    assert all(p['spec']['containers'][0]['image'] == 'docker.io/ephico2real2/cilium:dashboard-test' for p in agents['items'])
+    expected_agent = 'docker.io/ephico2real2/cilium:dashboard-test'
+    expected_operator = 'docker.io/ephico2real2/operator-generic:dashboard-test'
+    if (OUT / 'published-images.lock.json').exists():
+        lock = json.loads((OUT / 'published-images.lock.json').read_text())
+        assert lock['source_sha'] == SOURCE
+        expected_agent = lock['images']['agent']['image']
+        expected_operator = lock['images']['operator-generic']['image']
+    assert all(p['spec']['containers'][0]['image'] == expected_agent for p in agents['items'])
+    operators = json.loads((LIVE / 'operator-pods.json').read_text())
+    assert operators['items'] and all(p['spec']['containers'][0]['image'] == expected_operator for p in operators['items'])
     # Verify live versions include this exact fork source, rather than a release image.
     assert SOURCE[:8] in (LIVE / 'cilium-version.txt').read_text()
     results = {'application_load': True, 'requested_qps': {'external_gateway': 200, 'pod_gateway': 200, 'direct_pod': 20}, 'gateway_measured_http_200_qps': gateway, 'gateway_reporter': reporter, 'gateway_client': 'external Docker container on kind bridge', 'direct_measured_http_200_qps': direct, 'fixed_all_qps': total, 'baseline_enumerated_source_qps': baseline, 'baseline_query': baseline_query, 'fixed_query': total_query, 'remote_backend_node': 'poc1-control-plane', 'gateway_reporter_node': 'poc1-worker', 'source_commit': SOURCE}
     (OUT / 'live-results.json').write_text(json.dumps(results, indent=2) + '\n')
     source = json.loads((OUT / 'source.json').read_text())
-    source.update(kind='real two-node Cilium Gateway load', application_load=True, prometheus='kube-prometheus-stack 90.1.1', traffic='Fortio 1.75.3: external Gateway 200, pod Gateway 200, direct pod 20 req/s; six minutes each')
+    source.update(images={'agent':expected_agent,'operator':expected_operator},kind='real two-node Cilium Gateway load', application_load=True, prometheus='kube-prometheus-stack 90.1.1', traffic='Fortio 1.75.3: external Gateway 200, pod Gateway 200, direct pod 20 req/s; six minutes each')
     (OUT / 'source.json').write_text(json.dumps(source, indent=2) + '\n')
     pages = []
     cases = [('01-before-all-destination', 'baseline-hubble-l7-all', 10, reporter, True, False), ('02-after-all-destination', '3g264CZVz', 10, reporter, False, False), ('03-before-all-source', 'baseline-hubble-l7-all', 3, reporter, True, False), ('04-after-all-source', '3g264CZVz', 3, reporter, False, False), ('05-after-selected-direct-source', '3g264CZVz', 10, 'server', False, True)]
