@@ -1,0 +1,18 @@
+# Copyright Authors of Cilium
+# SPDX-License-Identifier: Apache-2.0
+
+# PoC values with only CI access/resource/interval overrides. No telemetry fixtures.
+prometheus:
+  prometheusSpec:
+    scrapeInterval: 10s
+    evaluationInterval: 15s
+    resources: {requests: {cpu: 100m, memory: 512Mi}, limits: {memory: 2Gi}}
+grafana:
+  route:
+    main: {enabled: false}
+    redirect: {enabled: false}
+  additionalDataSources: []
+  grafana.ini:
+    server: {root_url: 'http://127.0.0.1:3000'}
+    auth.anonymous: {enabled: true, org_role: Viewer}
+    analytics: {reporting_enabled: false, check_for_updates: false}
