@@ -1,0 +1,30 @@
+# Copyright Authors of Cilium
+# SPDX-License-Identifier: Apache-2.0
+
+# Exact fork main chart plus images built from the proposed dashboard commit.
+kubeProxyReplacement: true
+k8sServiceHost: placeholder
+k8sServicePort: 6443
+cluster: {name: poc1, id: 1}
+ipam: {mode: kubernetes}
+image:
+  repository: docker.io/ephico2real2/cilium
+  tag: dashboard-test
+  useDigest: false
+  pullPolicy: Never
+operator:
+  replicas: 1
+  image:
+    repository: docker.io/ephico2real2/operator
+    suffix: ''
+    genericDigest: ''
+    tag: dashboard-test
+    useDigest: false
+    pullPolicy: Never
+gatewayAPI:
+  enabled: true
+  hostNetwork:
+    enabled: true
+    nodes:
+      matchLabels: {kubernetes.io/hostname: poc1-worker}
+hubble: {enabled: true}

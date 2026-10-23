@@ -1,0 +1,185 @@
+name: Hubble L7 dashboard regression evidence
+on:
+  push:
+    branches: [ci/hubble-l7-dashboard-evidence, ci/hubble-dashboard-live-proof]
+    paths:
+      - .github/workflows/hubble-l7-dashboard-evidence.yaml
+      - .github/actions/browser-walk/**
+      - contrib/dashboard-evidence/**
+      - install/kubernetes/cilium/files/hubble/dashboards/hubble-l7-http-metrics-by-workload.json
+  pull_request:
+    paths:
+      - .github/workflows/hubble-l7-dashboard-evidence.yaml
+      - .github/actions/browser-walk/**
+      - contrib/dashboard-evidence/**
+      - install/kubernetes/cilium/files/hubble/dashboards/hubble-l7-http-metrics-by-workload.json
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full fork commit SHA to build and test
+        type: string
+        required: false
+      upstream_sha:
+        description: Full upstream commit SHA containing the baseline dashboard
+        type: string
+        required: false
+permissions:
+  contents: read
+env:
+  DASHBOARD_SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
+  DASHBOARD_BASE_SHA: ${{ inputs.upstream_sha || 'e5967e950b8f10ae514c58787e80d8e0192c15fd' }}
+concurrency:
+  group: hubble-dashboard-evidence
+  cancel-in-progress: true
+jobs:
+  dashboard:
+    if: github.repository == 'ephico2real2/cilium' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    name: Fork build, real Gateway load and Grafana browser evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      statuses: write
+    steps:
+      - name: Validate exact source and baseline revisions
+        run: |
+          [[ "$DASHBOARD_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DASHBOARD_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - name: Attach pending live-load evidence status to the dashboard commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --silent --method POST "repos/$GITHUB_REPOSITORY/statuses/$DASHBOARD_SOURCE_SHA" \
+            -f state=pending -f context='Hubble dashboard live Gateway evidence' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            -f description='Build exact fork, deploy kind, run HTTP load, inspect Grafana'
+      - name: Checkout fork-only evidence tools
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .github/actions/browser-walk
+            contrib/dashboard-evidence
+      - name: Checkout the exact proposed fork source and chart
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.DASHBOARD_SOURCE_SHA }}
+          path: source
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Checkout the existing PoC app, bootstrap and monitoring pattern
+        uses: actions/checkout@v5
+        with:
+          repository: ephico2real2/cilium-implementation-poc
+          ref: 22fb6e14c0cca8c78af1f072d1e89ebaea6a916b
+          path: poc
+          persist-credentials: false
+          sparse-checkout: |
+            demos/09-routes/app
+            demos/shared
+            demos/16-monitoring
+            scripts
+      - name: Prepare and checksum-verify Prometheus tools
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts .tmp/prometheus
+          curl -fsSL --retry 4 https://github.com/prometheus/prometheus/releases/download/v3.10.0/prometheus-3.10.0.linux-amd64.tar.gz -o .tmp/prometheus.tgz
+          printf '%s  %s\n' 41c50d97bb6a181623fc89d3fe61d0cc68ee69cc93da9091b8bba005f9690122 .tmp/prometheus.tgz | sha256sum --check
+          tar -xzf .tmp/prometheus.tgz -C .tmp/prometheus --strip-components=1
+          git -C source fetch --no-tags --depth=1 origin "$DASHBOARD_BASE_SHA"
+          git -C source update-ref refs/remotes/upstream/main "$DASHBOARD_BASE_SHA"
+      - name: Supplementary fail-before and pass-after PromQL fixtures
+        env:
+          DASHBOARD_EVIDENCE_OUT: artifacts
+          DASHBOARD_PROMTOOL: .tmp/prometheus/promtool
+        run: |
+          python3 contrib/dashboard-evidence/validate.py source
+          python3 contrib/dashboard-evidence/fixture.py prepare
+      - name: Prepare native Cilium image build context
+        run: |
+          make -C source GIT_VERSION images/cilium/Dockerfile.dockerignore images/operator/Dockerfile.dockerignore
+          df -h .
+      - name: Prepare cached native Docker builds
+        uses: docker/setup-buildx-action@v3
+      - name: Build and load the fork Cilium agent locally
+        uses: docker/build-push-action@v6
+        with:
+          context: source
+          file: source/images/cilium/Dockerfile
+          target: release
+          load: true
+          tags: docker.io/ephico2real2/cilium:dashboard-test
+          build-args: CILIUM_SHA=${{ env.DASHBOARD_SOURCE_SHA }}
+          cache-from: type=gha,scope=hubble-dashboard-agent
+          cache-to: type=gha,scope=hubble-dashboard-agent,mode=max
+      - name: Build and load the matching fork operator locally
+        uses: docker/build-push-action@v6
+        with:
+          context: source
+          file: source/images/operator/Dockerfile
+          target: release
+          load: true
+          tags: docker.io/ephico2real2/operator-generic:dashboard-test
+          build-args: |
+            CILIUM_SHA=${{ env.DASHBOARD_SOURCE_SHA }}
+            OPERATOR_VARIANT=operator-generic
+          cache-from: type=gha,scope=hubble-dashboard-operator
+          cache-to: type=gha,scope=hubble-dashboard-operator,mode=max
+      - name: Build the PoC application and prepared Ubuntu Playwright image
+        run: |
+          docker build -t routedemo:local -f poc/demos/09-routes/app/Containerfile poc/demos
+          docker build -t cilium-dashboard-capture:dev contrib/dashboard-evidence
+          mkdir -p artifacts/live
+          docker image inspect docker.io/ephico2real2/cilium:dashboard-test docker.io/ephico2real2/operator-generic:dashboard-test routedemo:local > artifacts/live/built-images.json
+      - name: Deploy the fork, monitoring and PoC apps, then start real HTTP load
+        id: deploy
+        run: bash contrib/dashboard-evidence/live.sh install
+      - name: Wait for real Gateway and direct-pod metrics and verify remote placement
+        id: livecheck
+        run: python3 contrib/dashboard-evidence/live.py
+      - name: Capture and publish load-driven before-after browser evidence
+        if: always() && steps.livecheck.outcome == 'success'
+        uses: ./.github/actions/browser-walk
+      - name: Collect deployed logs and completed Fortio load results
+        if: always() && steps.deploy.outcome != 'skipped'
+        run: bash contrib/dashboard-evidence/live.sh collect
+      - name: Require measured successful application requests
+        if: always() && !cancelled()
+        run: python3 contrib/dashboard-evidence/live.py loads
+      - name: Record live-load validation summary
+        if: always()
+        run: |
+          {
+            echo '## Real two-node Gateway load'
+            echo "Exact fork source: $DASHBOARD_SOURCE_SHA; upstream dashboard baseline: $DASHBOARD_BASE_SHA."
+            echo 'PoC pattern: 22fb6e14c0cca8c78af1f072d1e89ebaea6a916b.'
+            echo 'Fortio requests run through the deployed Cilium Gateway and directly between pods. No synthetic exporter is started.'
+            echo 'Dashboard rendering and workload labels are tested; this run makes no workload-mTLS or node-encryption claim.'
+            for file in artifacts/live-results.json artifacts/live/load-validation.json; do
+              if [ -f "$file" ]; then cat "$file"; fi
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Retain load results, placement, source images, queries, logs and PNGs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hubble-l7-dashboard-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 30
+      - name: Delete the CI kind cluster
+        if: always()
+        run: |
+          kind delete cluster --name poc1 || true
+          docker rm -f gateway-load || true
+      - name: Attach final live-load verdict to the dashboard commit
+        if: always() && !cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LIVE_JOB_STATUS: ${{ job.status }}
+        run: |
+          state=failure
+          if [ "$LIVE_JOB_STATUS" = success ]; then state=success; fi
+          gh api --silent --method POST "repos/$GITHUB_REPOSITORY/statuses/$DASHBOARD_SOURCE_SHA" \
+            -f state="$state" -f context='Hubble dashboard live Gateway evidence' \
+            -f target_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            -f description='Fork deployment, real HTTP load, Grafana queries and published PNGs'

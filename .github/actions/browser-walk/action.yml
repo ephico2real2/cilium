@@ -1,0 +1,48 @@
+name: Browser walk with published evidence
+description: Reused PoC/CMTC pattern, prepared Ubuntu Playwright, YAML/JSON specs and failure evidence
+inputs:
+  spec:
+    description: YAML/JSON page spec
+    default: artifacts/walk.json
+  out:
+    description: Captures directory
+    default: artifacts/screenshots
+  publish-branch:
+    description: Published evidence branch
+    default: ci-captures
+runs:
+  using: composite
+  steps:
+    - name: Walk and retain failures
+      shell: bash
+      env:
+        WALK_SPEC: ${{ inputs.spec }}
+        CAPTURE_OUT: ${{ inputs.out }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$CAPTURE_OUT"
+        for name in results.json live-results.json source.json before.log after.log; do
+          if [ -f "artifacts/$name" ]; then cp "artifacts/$name" "$CAPTURE_OUT/"; fi
+        done
+        set +e
+        docker run --rm --network host --ipc host \
+          -v "$PWD/$WALK_SPEC:/spec.json:ro" -v "$PWD/$CAPTURE_OUT:/evidence" \
+          -e S=/evidence cilium-dashboard-capture:dev /spec.json 2>&1 | tee "$CAPTURE_OUT/walk.log"
+        rc=${PIPESTATUS[0]}
+        set -e
+        echo "$rc" > "$CAPTURE_OUT/walk.rc"
+    - name: Publish before enforcing expectations
+      if: inputs.publish-branch != '' && !cancelled()
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        CAPTURE_OUT: ${{ inputs.out }}
+        CAPTURE_BRANCH: ${{ inputs.publish-branch }}
+      run: bash contrib/dashboard-evidence/publish.sh
+    - name: Enforce browser and real query expectations
+      shell: bash
+      env:
+        CAPTURE_OUT: ${{ inputs.out }}
+      run: |
+        rc=$(cat "$CAPTURE_OUT/walk.rc" 2>/dev/null || echo 1)
+        exit "$rc"

@@ -1,0 +1,9 @@
+{
+  "name": "cmtc-ci-captures",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "js-yaml": "4.1.0",
+    "playwright": "1.63.0"
+  }
+}
