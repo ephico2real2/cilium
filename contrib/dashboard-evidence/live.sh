@@ -29,13 +29,19 @@ nodes:
   - role: worker
 YAML
   kind create cluster --name poc1 --image kindest/node:v1.36.4@sha256:099e049362a1526b2db71494e1947aae99bd16290d7c895f2b7ea312e3cbfaed --config .tmp/kind.yaml --wait 60s
-  kind load docker-image --name poc1 docker.io/ephico2real2/cilium:dashboard-test docker.io/ephico2real2/operator-generic:dashboard-test routedemo:local
+  published_values=()
+  if [ -f .tmp/published-values.json ]; then
+    kind load docker-image --name poc1 routedemo:local
+    published_values=(-f .tmp/published-values.json)
+  else
+    kind load docker-image --name poc1 docker.io/ephico2real2/cilium:dashboard-test docker.io/ephico2real2/operator-generic:dashboard-test routedemo:local
+  fi
   gateway_version=$(awk '$1 == "sigs.k8s.io/gateway-api" {print $2}' source/go.mod)
   curl -fsSL --retry 4 "https://github.com/kubernetes-sigs/gateway-api/releases/download/$gateway_version/experimental-install.yaml" -o artifacts/live/gateway-crds.yaml
   kubectl apply --server-side -f artifacts/live/gateway-crds.yaml
   control_ip=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' poc1-control-plane)
   helm install cilium source/install/kubernetes/cilium -n kube-system \
-    -f contrib/dashboard-evidence/cilium-live.yaml \
+    -f contrib/dashboard-evidence/cilium-live.yaml "${published_values[@]}" \
     --set k8sServiceHost="$control_ip" --set k8sServicePort=6443 --wait --timeout 12m
   kubectl rollout status -n kube-system ds/cilium --timeout=5m
   kubectl rollout status -n kube-system ds/cilium-envoy --timeout=5m
@@ -52,7 +58,8 @@ YAML
   kubectl rollout status -n kube-system ds/cilium --timeout=5m
   kubectl create configmap dashboard-regression -n monitoring \
     --from-file=before.json=artifacts/grafana/dashboards/before.json \
-    --from-file=after.json=artifacts/grafana/dashboards/after.json
+    --from-file=after.json=artifacts/grafana/dashboards/after.json \
+    --from-file=by-app.json=artifacts/grafana/dashboards/by-app.json
   kubectl label configmap dashboard-regression -n monitoring grafana_dashboard=1
   kubectl apply -f contrib/dashboard-evidence/apps-live.yaml
   kubectl rollout status -n team-a deployment/shop --timeout=5m

@@ -17,7 +17,7 @@ spec:
   replicas: 1
   selector: {matchLabels: {app: shop}}
   template:
-    metadata: {labels: {app: shop}}
+    metadata: {labels: {app: shop, app.kubernetes.io/name: storefront}}
     spec:
       nodeSelector: {kubernetes.io/hostname: poc1-control-plane}
       tolerations: [{key: node-role.kubernetes.io/control-plane, operator: Exists, effect: NoSchedule}]
@@ -44,7 +44,7 @@ spec:
   replicas: 1
   selector: {matchLabels: {app: load}}
   template:
-    metadata: {labels: {app: load}}
+    metadata: {labels: {app: load, app.kubernetes.io/name: checkout-client}}
     spec:
       nodeSelector: {kubernetes.io/hostname: poc1-worker}
       containers:

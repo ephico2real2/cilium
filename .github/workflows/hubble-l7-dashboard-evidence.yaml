@@ -23,17 +23,25 @@ on:
         description: Full upstream commit SHA containing the baseline dashboard
         type: string
         required: false
+      image_lock_url:
+        description: Optional immutable raw GitHub URL of the published image lock to test
+        type: string
+        required: false
 permissions:
   contents: read
 env:
   DASHBOARD_SOURCE_SHA: ${{ inputs.source_sha || github.event.pull_request.head.sha || github.sha }}
   DASHBOARD_BASE_SHA: ${{ inputs.upstream_sha || 'e5967e950b8f10ae514c58787e80d8e0192c15fd' }}
+  DASHBOARD_IMAGE_LOCK_URL: ${{ inputs.image_lock_url }}
 concurrency:
   group: hubble-dashboard-evidence
   cancel-in-progress: true
 jobs:
   dashboard:
-    if: github.repository == 'ephico2real2/cilium' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: >-
+      github.repository == 'ephico2real2/cilium' &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     name: Fork build, real Gateway load and Grafana browser evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -78,6 +86,7 @@ jobs:
             demos/09-routes/app
             demos/shared
             demos/16-monitoring
+            demos/37-two-gateways
             scripts
       - name: Prepare and checksum-verify Prometheus tools
         run: |
@@ -95,13 +104,19 @@ jobs:
         run: |
           python3 contrib/dashboard-evidence/validate.py source
           python3 contrib/dashboard-evidence/fixture.py prepare
+          python3 poc/demos/37-two-gateways/l7-by-app-dashboard.py \
+            source/install/kubernetes/cilium/files/hubble/dashboards/hubble-l7-http-metrics-by-workload.json \
+            > artifacts/grafana/dashboards/by-app.json
       - name: Prepare native Cilium image build context
+        if: env.DASHBOARD_IMAGE_LOCK_URL == ''
         run: |
           make -C source GIT_VERSION images/cilium/Dockerfile.dockerignore images/operator/Dockerfile.dockerignore
           df -h .
       - name: Prepare cached native Docker builds
+        if: env.DASHBOARD_IMAGE_LOCK_URL == ''
         uses: docker/setup-buildx-action@v3
       - name: Build and load the fork Cilium agent locally
+        if: env.DASHBOARD_IMAGE_LOCK_URL == ''
         uses: docker/build-push-action@v6
         with:
           context: source
@@ -113,6 +128,7 @@ jobs:
           cache-from: type=gha,scope=hubble-dashboard-agent
           cache-to: type=gha,scope=hubble-dashboard-agent,mode=max
       - name: Build and load the matching fork operator locally
+        if: env.DASHBOARD_IMAGE_LOCK_URL == ''
         uses: docker/build-push-action@v6
         with:
           context: source
@@ -125,12 +141,21 @@ jobs:
             OPERATOR_VARIANT=operator-generic
           cache-from: type=gha,scope=hubble-dashboard-operator
           cache-to: type=gha,scope=hubble-dashboard-operator,mode=max
+      - name: Select published GHCR images with the same source revision
+        if: env.DASHBOARD_IMAGE_LOCK_URL != ''
+        run: |
+          [[ "$DASHBOARD_IMAGE_LOCK_URL" =~ ^https://raw[.]githubusercontent[.]com/ephico2real2/(cilium|clustermesh-trust-controller)/[0-9a-f]{40}/ ]] || exit 1
+          mkdir -p artifacts/live
+          curl -fsSL --retry 4 "$DASHBOARD_IMAGE_LOCK_URL" -o artifacts/published-images.lock.json
+          python3 contrib/dashboard-evidence/published.py
       - name: Build the PoC application and prepared Ubuntu Playwright image
         run: |
           docker build -t routedemo:local -f poc/demos/09-routes/app/Containerfile poc/demos
           docker build -t cilium-dashboard-capture:dev contrib/dashboard-evidence
           mkdir -p artifacts/live
-          docker image inspect docker.io/ephico2real2/cilium:dashboard-test docker.io/ephico2real2/operator-generic:dashboard-test routedemo:local > artifacts/live/built-images.json
+          if [ -z "$DASHBOARD_IMAGE_LOCK_URL" ]; then
+            docker image inspect docker.io/ephico2real2/cilium:dashboard-test docker.io/ephico2real2/operator-generic:dashboard-test routedemo:local > artifacts/live/built-images.json
+          fi
       - name: Deploy the fork, monitoring and PoC apps, then start real HTTP load
         id: deploy
         run: bash contrib/dashboard-evidence/live.sh install

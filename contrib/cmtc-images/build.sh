@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copyright Authors of Cilium
 # SPDX-License-Identifier: Apache-2.0
-# Build on the selected local Docker engine, then push immutable source/role/arch tags.
+# Build on the selected local Docker engine, then push source/role/arch tags.
 set -euo pipefail
 source_dir=$(cd "${1:?source checkout required}" && pwd)
 out=${2:?output directory required}
