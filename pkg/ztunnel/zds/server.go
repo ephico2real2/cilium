@@ -22,6 +22,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/iptables"
 	"github.com/cilium/cilium/pkg/ztunnel/pb"
@@ -30,6 +31,8 @@ import (
 const (
 	// defaultZDSUnixAddress is the default Unix socket address for the ZDS server.
 	defaultZDSUnixAddress = "/var/run/cilium/ztunnel.sock"
+	defaultZDSAckTimeout  = 30 * time.Second
+	logStage              = "stage"
 )
 
 type ztunnelConn struct {
@@ -88,6 +91,14 @@ func (zc *ztunnelConn) sendMsg(req *pb.WorkloadRequest, ns *netns.NetNS) error {
 }
 
 func (zc *ztunnelConn) sendAndWaitForAck(req *pb.WorkloadRequest, netnsPath string) error {
+	return zc.sendAndWaitForAckWithTimeout(req, netnsPath, defaultZDSAckTimeout)
+}
+
+func (zc *ztunnelConn) sendAndWaitForAckWithTimeout(req *pb.WorkloadRequest, netnsPath string, timeout time.Duration) error {
+	if err := zc.conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return fmt.Errorf("setting ZDS acknowledgment deadline: %w", err)
+	}
+	defer zc.conn.SetDeadline(time.Time{})
 	var ns *netns.NetNS
 	if netnsPath != "" {
 		var err error
@@ -107,8 +118,12 @@ func (zc *ztunnelConn) sendAndWaitForAck(req *pb.WorkloadRequest, netnsPath stri
 		return err
 	}
 
-	if resp.GetAck() != nil && resp.GetAck().GetError() != "" {
-		return fmt.Errorf("ztunnel responded with an ack error: %s", resp.GetAck().GetError())
+	ack := resp.GetAck()
+	if ack == nil {
+		return fmt.Errorf("ztunnel response did not contain an acknowledgment")
+	}
+	if ack.GetError() != "" {
+		return fmt.Errorf("ztunnel responded with an ack error: %s", ack.GetError())
 	}
 
 	return nil
@@ -178,9 +193,11 @@ type Server struct {
 }
 
 type zdsUpdate struct {
+	ctx       context.Context // Caller lifetime; expired queued work must not be sent.
 	request   *pb.WorkloadRequest
 	netnsPath string     // Path to network namespace; empty string if no netns needed
 	errCh     chan error // Channel to signal if the update was sent successfully
+	onAck     func()     // Commit cache state before publishing acknowledgment.
 }
 
 // newZDSServer creates a new ZDS (Ztunnel Discovery Service) server that communicates
@@ -261,6 +278,7 @@ func (s *Server) Serve(ctx context.Context) {
 	}()
 
 	var cancelPrevConn context.CancelFunc
+	var previousDone <-chan struct{}
 	var wg sync.WaitGroup
 
 	for {
@@ -281,13 +299,20 @@ func (s *Server) Serve(ctx context.Context) {
 		if cancelPrevConn != nil {
 			s.logger.Info("canceling previous ztunnel connection for new connection")
 			cancelPrevConn()
+			// Cancellation closes blocked reads. Join before starting another
+			// consumer of the shared update queue or replaying its snapshot.
+			<-previousDone
 		}
 
 		zc := &ztunnelConn{conn: conn}
 		connCtx, cancel := context.WithCancel(ctx)
 		cancelPrevConn = cancel
+		done := make(chan struct{})
+		previousDone = done
 
 		wg.Go(func() {
+			defer close(done)
+			defer cancel()
 			if err := s.handleConn(connCtx, zc); err != nil {
 				s.logger.Error("failed to handle connection", logfields.Error, err)
 			}
@@ -297,20 +322,35 @@ func (s *Server) Serve(ctx context.Context) {
 
 func (s *Server) handleConn(ctx context.Context, zc *ztunnelConn) error {
 	defer zc.Close()
+	stopClose := context.AfterFunc(ctx, func() { zc.Close() })
+	defer stopClose()
 	s.metrics.ConnectionActive.Inc()
 	defer s.metrics.ConnectionActive.Dec()
 
 	s.logger.Info("new ztunnel connection")
 
+	if err := zc.conn.SetReadDeadline(time.Now().Add(defaultZDSAckTimeout)); err != nil {
+		return fmt.Errorf("setting ZDS hello deadline: %w", err)
+	}
 	hello, err := zc.readHello()
 	if err != nil {
 		return fmt.Errorf("failed to read hello from ztunnel: %w", err)
+	}
+	if err := zc.conn.SetReadDeadline(time.Time{}); err != nil {
+		return err
+	}
+	if hello.GetVersion() != pb.Version_V1 {
+		return fmt.Errorf("unsupported ztunnel ZDS version: %s", hello.GetVersion())
 	}
 	s.logger.Info("received hello from ztunnel", logfields.Version, hello.GetVersion())
 
 	// Wait for initial snapshot to be seeded
 	s.logger.Info("waiting for initial snapshot to be seeded")
-	<-s.initialSnapshotSeeded
+	select {
+	case <-s.initialSnapshotSeeded:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	s.logger.Info("initial snapshot seeded, sending to ztunnel")
 
 	// Send the initial snapshot to this connection
@@ -322,12 +362,7 @@ func (s *Server) handleConn(ctx context.Context, zc *ztunnelConn) error {
 	for {
 		select {
 		case update := <-s.updates:
-			err := zc.sendAndWaitForAck(update.request, update.netnsPath)
-			if update.errCh != nil {
-				update.errCh <- err
-				close(update.errCh)
-			}
-			if err != nil {
+			if err := s.processUpdate(ctx, zc, update); err != nil {
 				return fmt.Errorf("failed to send update: %w", err)
 			}
 
@@ -338,7 +373,61 @@ func (s *Server) handleConn(ctx context.Context, zc *ztunnelConn) error {
 	}
 }
 
+func (s *Server) processUpdate(ctx context.Context, zc *ztunnelConn, update zdsUpdate) error {
+	complete := func(err error) {
+		if update.errCh != nil {
+			update.errCh <- err
+			close(update.errCh)
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		complete(err)
+		return err
+	}
+	if update.ctx == nil {
+		update.ctx = ctx
+	}
+	if err := update.ctx.Err(); err != nil {
+		// Never open the namespace FD or transmit an expired queued request.
+		complete(err)
+		return nil
+	}
+	closed := make(chan struct{})
+	stopClose := context.AfterFunc(update.ctx, func() {
+		zc.Close()
+		close(closed)
+	})
+	err := zc.sendAndWaitForAck(update.request, update.netnsPath)
+	// Stop (or join) cancellation before publishing success: the caller
+	// normally cancels its context as soon as it receives the result.
+	if !stopClose() {
+		<-closed
+		err = update.ctx.Err()
+	}
+	if canceled := update.ctx.Err(); canceled != nil {
+		// V1 has no request nonce. Retire this connection so an ambiguous
+		// late ACK cannot be attributed to the next request.
+		zc.Close()
+		err = canceled
+	}
+	if err == nil && update.onAck != nil {
+		update.onAck()
+	}
+	complete(err)
+	return err
+}
+
 func (s *Server) EnrollEndpoint(ep *endpoint.Endpoint) error {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultZDSAckTimeout)
+	defer cancel()
+	return s.EnrollEndpointContext(ctx, ep)
+}
+
+// EnrollEndpointContext only records enrollment after an explicit successful
+// proxy acknowledgment. Cancellation also bounds waiting for a disconnected
+// proxy or a full update queue; installed capture rules remain fail-closed.
+func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoint) error {
+	started := time.Now()
 	s.logger.Info("enrolling endpoint to ztunnel", logfields.EndpointID, ep.GetID16())
 	s.metrics.EnrollmentTotal.Inc()
 
@@ -389,19 +478,45 @@ func (s *Server) EnrollEndpoint(ep *endpoint.Endpoint) error {
 		request:   req,
 		netnsPath: ep.GetContainerNetnsPath(),
 		errCh:     make(chan error, 1),
+		onAck: func() {
+			s.endpointCacheMutex.Lock()
+			s.endpointCache[ep.GetID16()] = ep
+			s.endpointCacheMutex.Unlock()
+		},
 	}
 
-	s.updates <- update
-	if err := <-update.errCh; err != nil {
+	if err := s.sendUpdateAndWaitForAck(ctx, update); err != nil {
 		s.metrics.EnrollmentFailures.WithLabelValues("send_failed").Inc()
 		return fmt.Errorf("sending update failed: %w", err)
 	}
 
-	// Only add to cache after successful enrollment
-	s.endpointCacheMutex.Lock()
-	s.endpointCache[ep.GetID16()] = ep
-	s.endpointCacheMutex.Unlock()
+	s.logger.Info("Endpoint enrollment acknowledged",
+		logfields.EndpointID, ep.GetID16(),
+		logfields.Duration, time.Since(started),
+		logStage, "zds-enrollment",
+	)
 	return nil
+}
+
+func (s *Server) sendUpdateAndWaitForAck(ctx context.Context, update zdsUpdate) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	update.ctx = ctx
+	select {
+	case s.updates <- update:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err, ok := <-update.errCh:
+		if !ok {
+			return fmt.Errorf("ZDS update completed without an acknowledgment result")
+		}
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *Server) DisenrollEndpoint(ep *endpoint.Endpoint) error {
@@ -443,17 +558,18 @@ func (s *Server) DisenrollEndpoint(ep *endpoint.Endpoint) error {
 		request:   req,
 		netnsPath: "",
 		errCh:     make(chan error, 1),
+		onAck: func() {
+			s.endpointCacheMutex.Lock()
+			delete(s.endpointCache, ep.GetID16())
+			s.endpointCacheMutex.Unlock()
+		},
 	}
 
-	s.updates <- update
-	if err := <-update.errCh; err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultZDSAckTimeout)
+	defer cancel()
+	if err := s.sendUpdateAndWaitForAck(ctx, update); err != nil {
 		return fmt.Errorf("sending update failed: %w", err)
 	}
-
-	// Only remove from cache after successful disenrollment
-	s.endpointCacheMutex.Lock()
-	delete(s.endpointCache, ep.GetID16())
-	s.endpointCacheMutex.Unlock()
 
 	return nil
 }
@@ -479,9 +595,14 @@ func (s *Server) SeedInitialSnapshot(eps ...*endpoint.Endpoint) {
 // This is called by handleConn for each new connection.
 func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 	s.endpointCacheMutex.Lock()
-	defer s.endpointCacheMutex.Unlock()
-
+	endpoints := make([]*endpoint.Endpoint, 0, len(s.endpointCache))
 	for _, ep := range s.endpointCache {
+		endpoints = append(endpoints, ep)
+	}
+	s.endpointCacheMutex.Unlock()
+	// Network ACKs must not hold the cache mutex and prevent other callers
+	// from observing their own cancellation deadlines.
+	for _, ep := range endpoints {
 		ns, err := netns.OpenPinned(ep.GetContainerNetnsPath())
 		if err != nil {
 			s.logger.Error("failed to open netns file",
