@@ -2090,6 +2090,9 @@
               },
               "type": "object"
             },
+            "requireMtls": {
+              "type": "boolean"
+            },
             "resources": {
               "properties": {
                 "requests": {

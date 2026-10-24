@@ -268,3 +268,7 @@
 {{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") (eq .Values.encryption.ztunnel.ca.type "spire") (not .Values.authentication.mutual.spire.enabled) }}
   {{- fail "encryption.ztunnel.ca.type=spire requires authentication.mutual.spire.enabled=true" }}
 {{- end }}
+
+{{- if and .Values.encryption.ztunnel.requireMtls (or (not .Values.encryption.enabled) (ne .Values.encryption.type "ztunnel")) }}
+  {{- fail "encryption.ztunnel.requireMtls requires encryption.enabled=true and encryption.type=ztunnel" }}
+{{- end }}

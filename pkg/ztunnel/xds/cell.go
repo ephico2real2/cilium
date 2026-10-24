@@ -66,6 +66,7 @@ func NewServer(params xdsServerParams) *Server {
 
 	server.caType = params.Config.CAType
 	server.trustDomain = params.Config.SpiffeTrustDomain
+	server.requireMTLS = params.Config.RequireMTLS
 
 	params.Lifecycle.Append(cell.Hook{
 		OnStart: func(_ cell.HookContext) error {

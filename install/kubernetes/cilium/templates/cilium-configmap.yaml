@@ -786,6 +786,7 @@ data:
   {{- else if eq .Values.encryption.type "ztunnel" }}
   enable-ztunnel: {{ .Values.encryption.enabled | quote }}
   ztunnel-ca-type: {{ .Values.encryption.ztunnel.ca.type | quote }}
+  ztunnel-require-mtls: {{ .Values.encryption.ztunnel.requireMtls | quote }}
   {{- end }}
   {{- if .Values.encryption.nodeEncryption }}
   encrypt-node: {{ .Values.encryption.nodeEncryption | quote }}

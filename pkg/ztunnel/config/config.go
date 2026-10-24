@@ -27,6 +27,7 @@ var DefaultConfig = Config{
 // while the agent uses this Config struct for dependency injection.
 type Config struct {
 	EnableZTunnel                  bool
+	RequireMTLS                    bool   `mapstructure:"ztunnel-require-mtls"`
 	CAType                         string `mapstructure:"ztunnel-ca-type"`
 	SpiffeTrustDomain              string `mapstructure:"mesh-auth-spiffe-trust-domain"`
 	EndpointEventChannelBufferSize int    `mapstructure:"ztunnel-endpoint-event-channel-buffer-size"`
@@ -34,6 +35,7 @@ type Config struct {
 
 func (c Config) Flags(flags *pflag.FlagSet) {
 	flags.Bool("enable-ztunnel", false, "Use zTunnel as Cilium's encryption infrastructure")
+	flags.Bool("ztunnel-require-mtls", false, "Experimental: require an authenticated peer for inbound ztunnel workload TCP connections")
 	flags.String("mesh-auth-spiffe-trust-domain", "cluster.local", "SPIFFE trust domain for ztunnel workloads")
 	flags.String("ztunnel-ca-type", CATypeInternal, "Workload CA backend: internal or spire")
 	flags.Int("ztunnel-endpoint-event-channel-buffer-size", 1, "Buffer size for the ztunnel endpoint event channel")
@@ -41,6 +43,9 @@ func (c Config) Flags(flags *pflag.FlagSet) {
 }
 
 func (c Config) Validate() error {
+	if c.RequireMTLS && !c.EnableZTunnel {
+		return fmt.Errorf("ztunnel-require-mtls requires enable-ztunnel")
+	}
 	if c.EnableZTunnel && c.CAType != CATypeInternal && c.CAType != CATypeSpire {
 		return fmt.Errorf("unsupported ztunnel-ca-type %q: expected internal or spire", c.CAType)
 	}

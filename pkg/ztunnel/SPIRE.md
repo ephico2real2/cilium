@@ -58,3 +58,21 @@ responds. A lazy grpc.NewClient is not a connection acknowledgment. This ACK
 does not establish application SVID delivery, policy installation or packet
 protection. The broader dependency/registration/proxy recovery work is tracked
 in [CMTC issue #7](https://github.com/ephico2real2/clustermesh-trust-controller/issues/7).
+
+## Experimental authenticated-only inbound policy
+
+`encryption.ztunnel.requireMtls=true` (`ztunnel-require-mtls`) publishes a native
+ztunnel GLOBAL DENY rule matching the absence of an authenticated TLS principal.
+It has no application-port predicates. The receiving plaintext listener passes
+no peer identity to RBAC; HBONE uses the verified TLS peer. Cilium currently
+supplies workload records only for enrolled namespaces, so this policy applies
+to the workloads handled by the ztunnel, not arbitrary platform pods.
+
+This option defaults to false while admission and platform compatibility are
+being qualified. The desired policy is installed before ADS accepts connections,
+but the pinned proxy can permit traffic while policy is absent. This is not a
+persistent fail-closed gate, a complete Cilium authorization compiler, or a
+`Protected` status. Startup/restart, policy loss, mandatory capture and legitimate
+platform health probes must be checked independently. Incompatible Helm/agent
+profiles reject the option instead of silently ignoring it. Do not substitute
+port-80 (or enumerated-port) network-policy denies for workload authentication.

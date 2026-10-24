@@ -59,6 +59,7 @@ type Server struct {
 	authorizations    *AuthorizationPolicies
 	caType            string
 	trustDomain       string
+	requireMTLS       bool
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -133,6 +134,9 @@ func (x *Server) newGRPCServer(creds credentials.TransportCredentials, newCA fun
 	case config.CATypeSpire:
 	default:
 		return nil, fmt.Errorf("unsupported ztunnel-ca-type %q", x.caType)
+	}
+	if err := x.configureAuthenticationPolicy(); err != nil {
+		return nil, err
 	}
 
 	// keepalive options match config values from:

@@ -45,3 +45,19 @@ func TestRejectInvalidWorkloadTrustDomain(t *testing.T) {
 		})
 	}
 }
+
+func TestRequireMTLSConfiguration(t *testing.T) {
+	cfg := DefaultConfig
+	require.False(t, cfg.RequireMTLS)
+	cfg.RequireMTLS = true
+	require.ErrorContains(t, cfg.Validate(), "requires enable-ztunnel")
+	cfg.EnableZTunnel = true
+	require.NoError(t, cfg.Validate())
+
+	flags := pflag.NewFlagSet("ztunnel", pflag.ContinueOnError)
+	DefaultConfig.Flags(flags)
+	require.NoError(t, flags.Parse([]string{"--ztunnel-require-mtls"}))
+	enabled, err := flags.GetBool("ztunnel-require-mtls")
+	require.NoError(t, err)
+	require.True(t, enabled)
+}
