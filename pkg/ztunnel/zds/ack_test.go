@@ -17,6 +17,7 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/pb"
 )
@@ -291,4 +292,13 @@ func TestZDSShutdownInterruptsStartupWaits(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestZDSEnrollmentHonorsCancellationBeforeFilesystem(t *testing.T) {
+	server := &Server{}
+	ep := &endpoint.Endpoint{ID: 19}
+	ep.SetContainerNetnsPath("/this-namespace-must-not-be-opened")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	require.ErrorIs(t, server.EnrollEndpointContext(ctx, ep), context.Canceled)
 }

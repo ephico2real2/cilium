@@ -428,19 +428,16 @@ func (s *Server) EnrollEndpoint(ep *endpoint.Endpoint) error {
 // proxy or a full update queue; installed capture rules remain fail-closed.
 func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoint) error {
 	started := time.Now()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	s.logger.Info("enrolling endpoint to ztunnel", logfields.EndpointID, ep.GetID16())
 	s.metrics.EnrollmentTotal.Inc()
 
-	// Check if endpoint is already enrolled
-	s.endpointCacheMutex.Lock()
-	if _, ok := s.endpointCache[ep.GetID16()]; ok {
-		s.endpointCacheMutex.Unlock()
-		s.logger.Info("endpoint already in ztunnel", logfields.EndpointID, ep.GetID16())
-		return nil
-	}
-	s.endpointCacheMutex.Unlock()
-
-	ns, err := netns.OpenPinned(ep.GetContainerNetnsPath())
+	// An earlier ACK does not establish that capture is still installed.
+	// Reassert capture and require a fresh ADD ACK on every retry.
+	netnsPath := ep.GetContainerNetnsPath()
+	ns, err := netns.OpenPinned(netnsPath)
 	if err != nil {
 		s.metrics.EnrollmentFailures.WithLabelValues("netns_failed").Inc()
 		s.logger.Error("failed to open netns file",
@@ -450,12 +447,19 @@ func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoin
 		return err
 	}
 	defer ns.Close()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 
 	if err = ns.Do(func() error {
 		return iptables.CreateInPodRules(s.logger, option.Config.EnableIPv4, option.Config.EnableIPv6)
 	}); err != nil {
 		s.metrics.EnrollmentFailures.WithLabelValues("iptables_failed").Inc()
 		return fmt.Errorf("unable to setup iptable rules for ztunnel inpod mode: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		// Keep installed capture while the caller retries or cancels creation.
+		return err
 	}
 
 	workload, err := endpointToWorkload(ep)
@@ -476,7 +480,7 @@ func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoin
 
 	update := zdsUpdate{
 		request:   req,
-		netnsPath: ep.GetContainerNetnsPath(),
+		netnsPath: netnsPath,
 		errCh:     make(chan error, 1),
 		onAck: func() {
 			s.endpointCacheMutex.Lock()
@@ -492,6 +496,9 @@ func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoin
 
 	s.logger.Info("Endpoint enrollment acknowledged",
 		logfields.EndpointID, ep.GetID16(),
+		logfields.K8sUID, workload.Uid,
+		logfields.K8sNamespace, workload.WorkloadInfo.Namespace,
+		logfields.Pod, workload.WorkloadInfo.Name,
 		logfields.Duration, time.Since(started),
 		logStage, "zds-enrollment",
 	)
