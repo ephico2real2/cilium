@@ -1,0 +1,19 @@
+{
+  "source": "42f89f83aa5a03ea80f7a2b8cece56b27f87385a",
+  "baseline": "8c4ff1b52e283b83e8d285decd5e73624e326a0c",
+  "go": "1.27.1",
+  "platform": "linux/arm64",
+  "runtime": "Ubuntu Colima VM cmtc-cilium on MacBook",
+  "go_image": "golang@sha256:162be5298a40ed317005c8339c6de4d10d3eef336d66dc8e9259b03ab9d3a6d2",
+  "race_detector": true,
+  "passed_tests_and_subtests": 150,
+  "passed_packages": [
+    "github.com/cilium/cilium/pkg/ztunnel/pb/security",
+    "github.com/cilium/cilium/pkg/ztunnel/xds",
+    "github.com/cilium/cilium/pkg/envoy/xds"
+  ],
+  "vet": "passed",
+  "actionlint": "passed",
+  "diff_check": "passed",
+  "transport": "actual ADS handler over in-memory gRPC; no runtime workload encryption claim"
+}
