@@ -26,6 +26,13 @@ def query(expr):
 def value(expr):
     return sum(float(item['value'][1]) for item in query(expr))
 
+def grafana_version():
+    with urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=5) as response:
+        health = json.load(response)
+    assert health['database'] == 'ok' and isinstance(health.get('version'), str) and health['version'], health
+    (LIVE / 'grafana-health.json').write_text(json.dumps(health, indent=2) + '\n')
+    return health['version']
+
 def snapshot():
     try:
         (LIVE / 'all-http-series.json').write_text(json.dumps(query('hubble_http_requests_total'), indent=2) + '\n')
@@ -41,8 +48,7 @@ def check():
     last_error = None
     while time.monotonic() - start < 300:
         try:
-            with urllib.request.urlopen('http://127.0.0.1:3000/api/health', timeout=5) as response:
-                assert json.load(response)['database'] == 'ok'
+            grafana = grafana_version()
             snapshot()
             gateway_reporters = query('sum by (reporter) (rate(hubble_http_requests_total{' + SELECTOR + ',node="poc1-worker",source_namespace="",source_workload="",status="200"}[1m]))')
             gateway = max((float(item['value'][1]) for item in gateway_reporters), default=0)
@@ -84,7 +90,7 @@ def check():
     results = {'application_load': True, 'requested_qps': {'external_gateway': 200, 'pod_gateway': 200, 'direct_pod': 20}, 'gateway_measured_http_200_qps': gateway, 'gateway_reporter': reporter, 'gateway_client': 'external Docker container on kind bridge', 'direct_measured_http_200_qps': direct, 'fixed_all_qps': total, 'baseline_enumerated_source_qps': baseline, 'baseline_query': baseline_query, 'fixed_query': total_query, 'remote_backend_node': 'poc1-control-plane', 'gateway_reporter_node': 'poc1-worker', 'source_commit': SOURCE}
     (OUT / 'live-results.json').write_text(json.dumps(results, indent=2) + '\n')
     source = json.loads((OUT / 'source.json').read_text())
-    source.update(images={'agent':expected_agent,'operator':expected_operator},kind='real two-node Cilium Gateway load', application_load=True, prometheus='kube-prometheus-stack 90.1.1', traffic='Fortio 1.75.3: external Gateway 200, pod Gateway 200, direct pod 20 req/s; six minutes each')
+    source.update(images={'agent':expected_agent,'operator':expected_operator},kind='real two-node Cilium Gateway load', application_load=True, grafana=grafana, prometheus='kube-prometheus-stack 90.1.1', traffic='Fortio 1.75.3: external Gateway 200, pod Gateway 200, direct pod 20 req/s; six minutes each')
     (OUT / 'source.json').write_text(json.dumps(source, indent=2) + '\n')
     pages = []
     cases = [('01-before-all-destination', 'baseline-hubble-l7-all', 10, reporter, True, False), ('02-after-all-destination', '3g264CZVz', 10, reporter, False, False), ('03-before-all-source', 'baseline-hubble-l7-all', 3, reporter, True, False), ('04-after-all-source', '3g264CZVz', 3, reporter, False, False), ('05-after-selected-direct-source', '3g264CZVz', 10, 'server', False, True)]
