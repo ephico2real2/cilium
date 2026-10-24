@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/cilium/cilium/pkg/lock"
 )
 
@@ -29,6 +31,9 @@ type Key struct {
 type Reference struct {
 	Key         Key
 	Incarnation uint64
+	// Epoch fences all acknowledgments to this registry execution. Counters
+	// may restart at one; evidence from an earlier execution must not match.
+	Epoch string
 }
 
 // State keeps intent and evidence separate. Active is derived only after every
@@ -87,6 +92,7 @@ type Registry struct {
 	mu lock.RWMutex
 
 	clusterID           uint32
+	epoch               string
 	nextIncarnation     uint64
 	nextZDSGeneration   uint64
 	nextADSGeneration   uint64
@@ -100,6 +106,7 @@ type Registry struct {
 func NewRegistry(clusterID uint32) *Registry {
 	return &Registry{
 		clusterID: clusterID,
+		epoch:     uuid.NewString(),
 		states:    make(map[Reference]State),
 		byPodUID:  make(map[string]Reference),
 	}
@@ -133,7 +140,7 @@ func (r *Registry) Require(namespaceUID, podUID string, endpointID uint16, netns
 	}
 
 	r.nextIncarnation++
-	ref := Reference{Key: key, Incarnation: r.nextIncarnation}
+	ref := Reference{Key: key, Incarnation: r.nextIncarnation, Epoch: r.epoch}
 	state := State{
 		Key: key, Incarnation: ref.Incarnation, EndpointID: endpointID,
 		NetnsPath: netnsPath, Required: true,
@@ -424,5 +431,6 @@ func (r *Registry) CurrentForPodUID(podUID string) (Reference, State, bool) {
 
 func (r *Registry) currentLocked(ref Reference) (State, bool) {
 	state, ok := r.states[ref]
-	return state, ok && ref.Incarnation != 0 && state.Incarnation == ref.Incarnation
+	return state, ok && ref.Epoch != "" && ref.Epoch == r.epoch &&
+		ref.Incarnation != 0 && state.Incarnation == ref.Incarnation
 }

@@ -426,3 +426,61 @@ func TestRequireRejectsIncompleteIdentityAndIsIdempotent(t *testing.T) {
 		t.Fatalf("same endpoint requirement was not idempotent: first=%+v second=%+v", first, second)
 	}
 }
+
+func TestRegistryRestartRejectsPriorExecutionAcknowledgments(t *testing.T) {
+	old := NewRegistry(17)
+	oldRef := requireMembership(t, old, "ns-uid", "pod-uid", 42, "/var/run/netns/pod-42")
+	oldZDS := establishCaptureAndZDS(t, old, oldRef)
+	oldADS := establishAddressAndPolicy(t, old, oldRef)
+	previous, _ := old.Get(oldRef)
+
+	current := NewRegistry(17)
+	ref := requireMembership(t, current, "ns-uid", "pod-uid", 42, "/var/run/netns/pod-42")
+	if ref == oldRef {
+		t.Fatal("registry restart reused the previous execution's membership reference")
+	}
+	if _, ok := current.Get(oldRef); ok {
+		t.Fatal("prior execution reference resolved in the new registry")
+	}
+	zds, ok := current.BeginZDS(ref)
+	if !ok || !current.MarkCaptured(ref, zds) {
+		t.Fatal("fresh capture could not be established")
+	}
+	if zds != oldZDS {
+		t.Fatal("test must exercise colliding per-execution ZDS counters")
+	}
+	if current.AcknowledgeZDS(oldRef, oldZDS) {
+		t.Fatal("prior execution ZDS ACK was accepted")
+	}
+	if !current.AcknowledgeZDS(ref, zds) {
+		t.Fatal("fresh ZDS ACK was rejected")
+	}
+	ads := current.BeginADSGeneration()
+	address, ok := current.PublishAddress(ref, ads)
+	if !ok || ads != oldADS || address != previous.AddressVersion {
+		t.Fatal("test must exercise colliding ADS generations and Address versions")
+	}
+	if current.AcknowledgeAddress(oldRef, oldADS, previous.AddressVersion) {
+		t.Fatal("prior execution Address ACK was accepted")
+	}
+	if !current.AcknowledgeAddress(ref, ads, address) {
+		t.Fatal("fresh Address ACK was rejected")
+	}
+	policy, ok := current.PublishPolicy(ref, ads, validPolicyEvidence(ref, address))
+	if !ok || policy != previous.PolicyVersion {
+		t.Fatal("test must exercise colliding policy versions")
+	}
+	if current.AcknowledgePolicy(oldRef, oldADS, previous.PolicyVersion) {
+		t.Fatal("prior execution policy ACK was accepted")
+	}
+	if !current.AcknowledgePolicy(ref, ads, policy) {
+		t.Fatal("fresh policy ACK was rejected")
+	}
+	if _, ok := current.BeginDrain(oldRef); ok {
+		t.Fatal("prior execution reference drained the current workload")
+	}
+	state, _ := current.Get(ref)
+	if !state.Active() {
+		t.Fatal("fresh evidence did not restore active membership")
+	}
+}
