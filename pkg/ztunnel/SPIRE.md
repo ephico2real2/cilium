@@ -42,3 +42,19 @@ and domain rejection, and issuer-domain propagation over actual initial and
 incremental ADS streams. The CMTC fixture must additionally prove real SVID
 issuance, peer identity, encrypted packets and negative cases before any runtime
 mTLS acceptance is reported.
+
+The operator's SPIRE initialization is a lifecycle-managed Hive job. It uses
+Cilium's injected slog logger and standard logfields for attempt, elapsed time,
+backoff, deadline, server address and underlying errors. Transient startup
+failures use jittered exponential backoff capped at ten seconds within a
+three-minute startup deadline; each connection attempt retains the configured
+connection timeout. Shutdown cancels both an RPC and a pending retry. Explicit
+authentication, permission and configuration rejections fail the job and its
+Hive health report. Failed attempts release their X509 source and gRPC client;
+successful resources remain alive until job shutdown.
+
+Initialization is acknowledged only after an authenticated CountEntries RPC
+responds. A lazy grpc.NewClient is not a connection acknowledgment. This ACK
+does not establish application SVID delivery, policy installation or packet
+protection. The broader dependency/registration/proxy recovery work is tracked
+in [CMTC issue #7](https://github.com/ephico2real2/clustermesh-trust-controller/issues/7).

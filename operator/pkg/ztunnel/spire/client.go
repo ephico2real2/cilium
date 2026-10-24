@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/job"
 	"github.com/spf13/pflag"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/go-spiffe/v2/spiffetls/tlsconfig"
@@ -21,10 +22,10 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	ztunnel "github.com/cilium/cilium/operator/pkg/ztunnel/config"
-	"github.com/cilium/cilium/pkg/backoff"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -89,7 +90,7 @@ type params struct {
 
 	Logger        *slog.Logger
 	K8sClient     k8sClient.Clientset
-	Lifecycle     cell.Lifecycle
+	JobGroup      job.Group
 	ClientConfig  ClientConfig
 	EntryConfig   SpireEntryConfig
 	ZtunnelConfig ztunnel.Config
@@ -126,10 +127,7 @@ func NewClient(params params) *Client {
 		initialized: make(chan struct{}),
 	}
 
-	params.Lifecycle.Append(cell.Hook{
-		OnStart: client.onStart,
-		OnStop:  func(_ cell.HookContext) error { return nil },
-	})
+	params.JobGroup.Add(job.OneShot("initialize-spire", client.run))
 	return client
 }
 
@@ -138,37 +136,18 @@ func (c *Client) Initialized() <-chan struct{} {
 	return c.initialized
 }
 
-func (c *Client) onStart(ctx cell.HookContext) error {
-	go func() {
-		c.log.InfoContext(ctx, "Initializing SPIRE client")
-		attempts := 0
-		backoffTime := backoff.Exponential{Logger: c.log, Min: 100 * time.Millisecond, Max: 10 * time.Second}
-		for {
-			attempts++
-			conn, err := c.connect(context.Background())
-			if err == nil {
-				c.entryMutex.Lock()
-				c.entry = entryv1.NewEntryClient(conn)
-				c.entryMutex.Unlock()
-				close(c.initialized)
-				break
-			}
-			c.log.WarnContext(ctx,
-				"Unable to connect to SPIRE server",
-				logfields.Attempt, attempts+1,
-				logfields.Error, err)
-			time.Sleep(backoffTime.Duration(attempts))
-		}
-		c.log.InfoContext(ctx, "Initialized SPIRE client")
-	}()
-	return nil
-}
-
-func (c *Client) connect(ctx context.Context) (*grpc.ClientConn, error) {
+func (c *Client) connect(ctx context.Context) (*spireConnection, error) {
+	trustedDomain, err := spiffeid.TrustDomainFromString(c.cfg.SpiffeTrustDomain)
+	if err != nil || trustedDomain.String() != c.cfg.SpiffeTrustDomain {
+		return nil, status.Error(codes.InvalidArgument, "invalid SPIFFE trust domain")
+	}
+	if c.cfg.SpireServerConnectionTimeout <= 0 {
+		return nil, status.Error(codes.InvalidArgument, "SPIRE connection timeout must be positive")
+	}
 	timeoutCtx, cancelFunc := context.WithTimeout(ctx, c.cfg.SpireServerConnectionTimeout)
 	defer cancelFunc()
 
-	resolvedTarget, err := resolvedK8sService(ctx, c.k8sClient, c.cfg.SpireServerAddress)
+	resolvedTarget, err := resolvedK8sService(timeoutCtx, c.k8sClient, c.cfg.SpireServerAddress)
 	if err != nil {
 		c.log.WarnContext(ctx,
 			"Unable to resolve SPIRE server address, using original value",
@@ -187,28 +166,35 @@ func (c *Client) connect(ctx context.Context) (*grpc.ClientConn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create X509 source: %w", err)
 	}
-
-	trustedDomain, err := spiffeid.TrustDomainFromString(c.cfg.SpiffeTrustDomain)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse trust domain: %w", err)
-	}
+	keepSource := false
+	defer func() {
+		if !keepSource {
+			source.Close()
+		}
+	}()
 
 	tlsConfig := tlsconfig.MTLSClientConfig(source, source, tlsconfig.AuthorizeMemberOf(trustedDomain))
 
-	c.log.InfoContext(ctx,
+	c.log.DebugContext(ctx,
 		"Trying to connect to SPIRE server",
 		logfields.Address, c.cfg.SpireServerAddress,
-		logfields.IPAddr, resolvedTarget)
+		logfields.IPAddr, *resolvedTarget)
 	conn, err := grpc.NewClient(*resolvedTarget, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create connection to SPIRE server: %w", err)
 	}
 
-	c.log.InfoContext(ctx,
-		"Connected to SPIRE server",
-		logfields.Address, c.cfg.SpireServerAddress,
-		logfields.IPAddr, resolvedTarget)
-	return conn, nil
+	// NewClient is lazy. Require an authenticated API reply before publishing
+	// the entry client or closing Initialized; socket creation is not an ACK.
+	if err := acknowledgeServer(timeoutCtx, entryv1.NewEntryClient(conn)); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("SPIRE server acknowledgment: %w", err)
+	}
+	keepSource = true
+	return &spireConnection{entry: entryv1.NewEntryClient(conn), close: func() {
+		conn.Close()
+		source.Close()
+	}}, nil
 }
 
 // Upsert creates or updates the SPIFFE ID for the given ID.
