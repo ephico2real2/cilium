@@ -86,6 +86,7 @@ jobs:
             demos/09-routes/app
             demos/shared
             demos/16-monitoring
+            demos/37-two-gateways
             scripts
       - name: Prepare and checksum-verify Prometheus tools
         run: |
@@ -103,6 +104,9 @@ jobs:
         run: |
           python3 contrib/dashboard-evidence/validate.py source
           python3 contrib/dashboard-evidence/fixture.py prepare
+          python3 poc/demos/37-two-gateways/l7-by-app-dashboard.py \
+            source/install/kubernetes/cilium/files/hubble/dashboards/hubble-l7-http-metrics-by-workload.json \
+            > artifacts/grafana/dashboards/by-app.json
       - name: Prepare native Cilium image build context
         if: env.DASHBOARD_IMAGE_LOCK_URL == ''
         run: |

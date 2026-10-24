@@ -58,7 +58,8 @@ YAML
   kubectl rollout status -n kube-system ds/cilium --timeout=5m
   kubectl create configmap dashboard-regression -n monitoring \
     --from-file=before.json=artifacts/grafana/dashboards/before.json \
-    --from-file=after.json=artifacts/grafana/dashboards/after.json
+    --from-file=after.json=artifacts/grafana/dashboards/after.json \
+    --from-file=by-app.json=artifacts/grafana/dashboards/by-app.json
   kubectl label configmap dashboard-regression -n monitoring grafana_dashboard=1
   kubectl apply -f contrib/dashboard-evidence/apps-live.yaml
   kubectl rollout status -n team-a deployment/shop --timeout=5m
