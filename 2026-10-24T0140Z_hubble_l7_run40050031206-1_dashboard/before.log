@@ -1,0 +1,10 @@
+
+
+
+  FAILED:
+    expr: "sum(round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"(loadtest)\", source_workload=~\"(load)\"}[10s])) by (cluster, source_namespace, source_workload, status), 0.001))", time: 20s,
+        exp: {} 5.5E+02
+        got: {} 5E+01
+    expr: "sum(round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"(loadtest)\", source_workload=~\"(load)\"}[10s])) by (cluster, destination_namespace, destination_workload, status), 0.001))", time: 20s,
+        exp: {} 5.5E+02
+        got: {} 5E+01
