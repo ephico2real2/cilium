@@ -1,29 +1,36 @@
-name: CMTC ztunnel authorization protocol
+name: CMTC ztunnel authorization protocol and lifecycle
 on:
   push:
-    branches: [feat/cmtc-ztunnel-authorization-protocol]
+    branches: [feat/cmtc-ztunnel-authorization-protocol, feat/ztunnel-authorization-lifecycle]
   workflow_dispatch:
+concurrency:
+  group: cmtc-ztunnel-authorization-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
   protocol:
-    name: Verify ztunnel authorization protocol
+    name: Verify ztunnel authorization wire lifecycle
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
-      - name: Checkout protocol sources
+      - name: Checkout the complete source and vendored xDS dependencies
         uses: actions/checkout@v5
-        with:
-          sparse-checkout: |
-            pkg/ztunnel/pb
-          persist-credentials: false
+        with: {persist-credentials: false}
       - name: Set up pinned Go toolchain
         uses: actions/setup-go@v6
         with: {go-version: '1.27.1', cache: true}
-      - name: Wire fixture, descriptor and type-URL tests
+      - name: Record exact source and Linux toolchain
         run: |
-          go test -race ./pkg/ztunnel/pb/...
-          go vet ./pkg/ztunnel/pb/...
+          mkdir -p artifacts
+          git rev-parse HEAD > artifacts/source.txt
+          go version > artifacts/toolchain.txt
+          uname -a > artifacts/platform.txt
+      - name: Wire fixtures, real ADS lifecycle and shared delta engine with race detection
+        run: |
+          set -euo pipefail
+          go test -race -json -count=1 -timeout=10m ./pkg/ztunnel/pb/... ./pkg/ztunnel/xds ./pkg/envoy/xds | tee artifacts/tests.jsonl
+          go vet ./pkg/ztunnel/pb/... ./pkg/ztunnel/xds ./pkg/envoy/xds
       - name: Exact protobuf generation tools
         run: |
           set -euo pipefail
@@ -42,3 +49,18 @@ jobs:
           bash pkg/ztunnel/pb/security/generate.sh
           git diff --exit-code -- pkg/ztunnel/pb/security
           test -z "$(gofmt -l pkg/ztunnel/pb/security)"
+      - name: Retain machine-readable wire-test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ztunnel-authorization-${{ github.run_id }}
+          path: artifacts/
+          retention-days: 30
+      - name: Report protocol boundary
+        if: always()
+        run: |
+          {
+            echo 'Authorization transport uses the real Go ADS service over in-memory gRPC, with the selected proxy schema.'
+            echo 'Tests cover resource versions, update/delete, subscriptions, NACK, reconnect and per-stream ACK isolation.'
+            echo 'These tests do not establish Cilium policy compilation, Rust proxy enforcement, remote discovery, workload mTLS or layered encryption.'
+          } >> "$GITHUB_STEP_SUMMARY"
