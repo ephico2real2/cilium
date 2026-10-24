@@ -10,11 +10,13 @@ import (
 	"net"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/keepalive"
 
 	"github.com/cilium/statedb"
 
 	"github.com/cilium/cilium/pkg/ztunnel/ca"
+	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/pb"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 
@@ -40,8 +42,8 @@ var _ v3.AggregatedDiscoveryServiceServer = (*Server)(nil)
 // Server is the xDS control plane for the stand-alone ztunnel proxy.
 //
 // It sends workload and service discovery events to ztunnel. The
-// certificate-signing handler lives in pkg/ztunnel/ca; Server registers it on
-// the same gRPC server alongside the ADS handler.
+// certificate-signing handler lives in pkg/ztunnel/ca and is registered only
+// for the internal CA backend. SPIRE mode serves ADS without a workload signer.
 type Server struct {
 	l                         net.Listener
 	g                         *grpc.Server
@@ -55,6 +57,8 @@ type Server struct {
 	endpointEventChan chan *EndpointEvent
 	metrics           *Metrics
 	authorizations    *AuthorizationPolicies
+	caType            string
+	trustDomain       string
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -76,6 +80,7 @@ func newServer(
 		enrolledNamespaceTable:    enrolledNamespaceTable,
 		metrics:                   metrics,
 		authorizations:            NewAuthorizationPolicies(log, metrics),
+		caType:                    config.CATypeInternal,
 	}
 }
 
@@ -87,19 +92,47 @@ func newServer(
 //
 // Server.GracefulStop() can be used to kill the running gRPC server.
 func (x *Server) Serve() error {
-	var err error
-
-	// Note: this initialization could technically be done during
-	// construction, but due to hive/cell needing construction to happen
-	// without side effects, do it right before serving.
-	caSrv, err := ca.NewServer(x.log, x.epManager)
-	if err != nil {
-		return fmt.Errorf("failed to initialize CA: %w", err)
-	}
-
 	creds, err := ca.LoadServerTLSCredentials()
 	if err != nil {
 		return fmt.Errorf("failed to create gRPC TLS credentials: %w", err)
+	}
+
+	x.g, err = x.newGRPCServer(creds, func() (pb.IstioCertificateServiceServer, error) {
+		return ca.NewServer(x.log, x.epManager)
+	})
+	if err != nil {
+		return err
+	}
+
+	x.l, err = net.Listen("tcp", "127.0.0.1:15012")
+	if err != nil {
+		return err
+	}
+
+	x.log.Info("zTunnel xDS server started")
+	go func() {
+		if err := x.g.Serve(x.l); err != nil {
+			x.log.Error("gRPC server error", logfields.Error, err)
+		}
+	}()
+	return nil
+}
+
+// newGRPCServer only initializes a workload signer for the internal backend.
+// The factory is never called for SPIRE: agent nodes need the ADS TLS server
+// identity, not the organizational or SPIRE workload signing keys.
+func (x *Server) newGRPCServer(creds credentials.TransportCredentials, newCA func() (pb.IstioCertificateServiceServer, error)) (*grpc.Server, error) {
+	var signer pb.IstioCertificateServiceServer
+	switch x.caType {
+	case config.CATypeInternal:
+		var err error
+		signer, err = newCA()
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize CA: %w", err)
+		}
+	case config.CATypeSpire:
+	default:
+		return nil, fmt.Errorf("unsupported ztunnel-ca-type %q", x.caType)
 	}
 
 	// keepalive options match config values from:
@@ -118,23 +151,12 @@ func (x *Server) Serve() error {
 		}),
 	}
 
-	x.g = grpc.NewServer(grpcOptions...)
-
-	pb.RegisterIstioCertificateServiceServer(x.g, caSrv)
-	v3.RegisterAggregatedDiscoveryServiceServer(x.g, x)
-
-	x.l, err = net.Listen("tcp", "127.0.0.1:15012")
-	if err != nil {
-		return err
+	server := grpc.NewServer(grpcOptions...)
+	if signer != nil {
+		pb.RegisterIstioCertificateServiceServer(server, signer)
 	}
-
-	x.log.Info("zTunnel xDS server started")
-	go func() {
-		if err = x.g.Serve(x.l); err != nil {
-			x.log.Error("gRPC server error", logfields.Error, err)
-		}
-	}()
-	return nil
+	v3.RegisterAggregatedDiscoveryServiceServer(server, x)
+	return server, nil
 }
 
 // GracefulStop halts the server gracefully, returning a nil error from the
@@ -143,7 +165,9 @@ func (x *Server) Serve() error {
 // This is useful to kill the server without producing a conflated error that
 // would occur when net.Listen() returns an error.
 func (x *Server) GracefulStop() {
-	x.g.GracefulStop()
+	if x.g != nil {
+		x.g.GracefulStop()
+	}
 }
 
 func (x *Server) StreamAggregatedResources(stream v3.AggregatedDiscoveryService_StreamAggregatedResourcesServer) error {
@@ -182,6 +206,7 @@ func (x *Server) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_D
 		EnrolledNamespaceTable:    x.enrolledNamespaceTable,
 		Metrics:                   x.metrics,
 		Authorizations:            x.authorizations,
+		TrustDomain:               x.trustDomain,
 	}
 
 	x.log.Debug("begin processing DeltaAggregatedResources stream")

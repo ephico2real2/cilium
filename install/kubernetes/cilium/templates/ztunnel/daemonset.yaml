@@ -70,6 +70,19 @@ spec:
               value: "/etc/ztunnel/bootstrap-root.crt"
             - name: CA_ADDRESS
               value: {{ .Values.encryption.ztunnel.caAddress | quote }}
+            {{- if eq .Values.encryption.ztunnel.ca.type "spire" }}
+            - name: SPIRE_ENABLED
+              value: "true"
+            - name: SPIRE_ADMIN_ENDPOINT_SOCKET
+              value: {{ printf "unix://%s" .Values.authentication.mutual.spire.adminSocketPath | quote }}
+            - name: CONTAINER_RUNTIME_SOCK_PATH
+              value: {{ .Values.encryption.ztunnel.spire.containerRuntimeSocketPath | quote }}
+            - name: TRUST_DOMAIN
+              value: {{ .Values.authentication.mutual.spire.trustDomain | quote }}
+            # The pinned SPIRE client selects its bundle using cluster_domain.
+            - name: CLUSTER_DOMAIN
+              value: {{ .Values.authentication.mutual.spire.trustDomain | quote }}
+            {{- end }}
             - name: ISTIO_META_DNS_CAPTURE
               value: "false"
             - name: INPOD_UDS
@@ -127,6 +140,14 @@ spec:
             - mountPath: /etc/ztunnel
               name: cilium-ztunnel-secrets
               readOnly: true
+            {{- if eq .Values.encryption.ztunnel.ca.type "spire" }}
+            - name: spire-agent-socket
+              mountPath: {{ dir .Values.authentication.mutual.spire.adminSocketPath }}
+              readOnly: true
+            - name: container-runtime-socket
+              mountPath: {{ .Values.encryption.ztunnel.spire.containerRuntimeSocketPath | quote }}
+              readOnly: true
+            {{- end }}
             {{- with .Values.encryption.ztunnel.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
@@ -164,6 +185,16 @@ spec:
               - key: bootstrap-root.crt
                 path: bootstrap-root.crt
                 mode: 420
+        {{- if eq .Values.encryption.ztunnel.ca.type "spire" }}
+        - name: spire-agent-socket
+          hostPath:
+            path: {{ dir .Values.authentication.mutual.spire.adminSocketPath }}
+            type: DirectoryOrCreate
+        - name: container-runtime-socket
+          hostPath:
+            path: {{ .Values.encryption.ztunnel.spire.containerRuntimeSocketPath | quote }}
+            type: Socket
+        {{- end }}
         {{- with .Values.encryption.ztunnel.extraVolumes }}
         {{- toYaml . | nindent 8 }}
         {{- end }}

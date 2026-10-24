@@ -24,6 +24,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	slimmetav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
+	"github.com/cilium/cilium/pkg/ztunnel/pb"
 	"github.com/cilium/cilium/pkg/ztunnel/pb/security"
 )
 
@@ -131,7 +132,7 @@ func testAuthorizationServer(t *testing.T) (*Server, *grpc.ClientConn) {
 	return testAuthorizationServerMode(t, false)
 }
 
-func testAuthorizationServerMode(t *testing.T, addresses bool) (*Server, *grpc.ClientConn) {
+func testAuthorizationServerMode(t *testing.T, addresses bool, initial ...EndpointEventCollection) (*Server, *grpc.ClientConn) {
 	t.Helper()
 	log := slog.New(slog.DiscardHandler)
 	metrics := NewMetrics()
@@ -141,7 +142,11 @@ func testAuthorizationServerMode(t *testing.T, addresses bool) (*Server, *grpc.C
 	grpcServer := grpc.NewServer()
 	var handler v3.AggregatedDiscoveryServiceServer = server
 	if addresses {
-		handler = &multiplexAuthorizationTestServer{Server: server}
+		replay := EndpointEventCollection{}
+		if len(initial) > 0 {
+			replay = initial[0]
+		}
+		handler = &multiplexAuthorizationTestServer{Server: server, initial: replay}
 	}
 	v3.RegisterAggregatedDiscoveryServiceServer(grpcServer, handler)
 	go func() { _ = grpcServer.Serve(listener) }()
@@ -345,15 +350,18 @@ func TestAuthorizationRejectsInvalidAcknowledgments(t *testing.T) {
 
 // Replace only the CEP source for the mixed-type test; the stream processor,
 // authorization store, shared delta server and gRPC transport remain real.
-type multiplexAuthorizationTestServer struct{ *Server }
+type multiplexAuthorizationTestServer struct {
+	*Server
+	initial EndpointEventCollection
+}
 
 func (s *multiplexAuthorizationTestServer) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_DeltaAggregatedResourcesServer) error {
 	sp := NewStreamProcessor(&StreamProcessorParams{
 		Stream: stream, StreamRecv: make(chan *v3.DeltaDiscoveryRequest, 1),
 		EndpointEventRecv: s.endpointEventChan, Log: s.log, Metrics: s.metrics,
-		Authorizations: s.authorizations,
+		Authorizations: s.authorizations, TrustDomain: s.trustDomain,
 	})
-	sp.endpointSource = &MockEndpointEventSource{}
+	sp.endpointSource = &MockEndpointEventSource{initial: s.initial}
 	return sp.Start()
 }
 
@@ -430,4 +438,26 @@ func TestAuthorizationSendFailureTerminatesStream(t *testing.T) {
 		t.Fatal("write error did not close ADS stream")
 	}
 	require.Equal(t, float64(1), testutil.ToFloat64(metrics.AuthorizationEvents.WithLabelValues("send_failed")))
+}
+
+func TestSpireDiscoveryBindsIssuerTrustDomain(t *testing.T) {
+	cep := makeCEP("shop", "orders", "10.0.0.5")
+	cep.OwnerReferences = []slimmetav1.OwnerReference{{Kind: "Pod", UID: k8stypes.UID("shop-pod-uid")}}
+	event := &EndpointEvent{Type: CREATE, CiliumEndpoint: cep}
+	s, conn := testAuthorizationServerMode(t, true, EndpointEventCollection{event})
+	s.trustDomain = "cmtc-a.example"
+	peer := newAuthorizationPeer(t, conn)
+	peer.send(t, &v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLAddress, Node: &corev3.Node{Id: authorizationTestNode}})
+	initial := peer.receive(t)
+	require.Len(t, initial.Resources, 1)
+	var address pb.Address
+	require.NoError(t, initial.Resources[0].Resource.UnmarshalTo(&address))
+	require.Equal(t, "cmtc-a.example", address.GetWorkload().TrustDomain)
+	peer.ack(t, initial)
+	// Both the initial snapshot and post-sync updates must use the issuer domain.
+	s.endpointEventChan <- event
+	updated := peer.receive(t)
+	require.Len(t, updated.Resources, 1)
+	require.NoError(t, updated.Resources[0].Resource.UnmarshalTo(&address))
+	require.Equal(t, "cmtc-a.example", address.GetWorkload().TrustDomain)
 }

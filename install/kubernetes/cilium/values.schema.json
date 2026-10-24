@@ -2117,6 +2117,14 @@
               },
               "type": "object"
             },
+            "spire": {
+              "properties": {
+                "containerRuntimeSocketPath": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
             "terminationGracePeriodSeconds": {
               "type": "integer"
             },

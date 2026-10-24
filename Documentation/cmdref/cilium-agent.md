@@ -356,6 +356,7 @@ cilium-agent [flags]
       --log-system-load                                           Enable periodic logging of system load
       --lrp-address-matcher-cidrs strings                         Limit address matches to specific CIDRs
       --max-connected-clusters uint32                             Maximum number of clusters to be connected in a clustermesh. Increasing this value will reduce the maximum number of identities available. Valid configurations are [255, 511]. (default 255)
+      --mesh-auth-spiffe-trust-domain string                      SPIFFE trust domain for ztunnel workloads (default "cluster.local")
       --metrics strings                                           Metrics that should be enabled or disabled from the default metric list. (+metric_foo to enable metric_foo, -metric_bar to disable metric_bar)
       --metrics-sampling-interval duration                        Set the internal metrics sampling interval (default 5m0s)
       --monitor-aggregation string                                Level of monitor aggregation for traces from the datapath (default "None")
@@ -450,6 +451,7 @@ cilium-agent [flags]
       --vtep-sync-interval duration                               Interval for VTEP sync (default 1m0s)
       --wireguard-persistent-keepalive duration                   The Wireguard keepalive interval as a Go duration string
       --write-cni-conf-when-ready string                          Write the CNI configuration to the specified path when agent is ready
+      --ztunnel-ca-type string                                    Workload CA backend: internal or spire (default "internal")
 ```
 
 ### SEE ALSO

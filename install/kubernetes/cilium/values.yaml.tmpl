@@ -1219,6 +1219,9 @@ encryption:
       # then manages SPIRE entries for enrolled namespaces). "internal" uses
       # Cilium's built-in CA and skips the SPIRE enrollment reconciler.
       type: internal
+    spire:
+      # -- Node CRI socket used to bind delegated SPIRE attestation to the workload PID.
+      containerRuntimeSocketPath: /run/containerd/containerd.sock
     # -- ztunnel container image.
     image:
       # @schema

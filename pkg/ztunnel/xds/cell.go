@@ -11,7 +11,6 @@ import (
 
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
-	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
@@ -65,12 +64,12 @@ func NewServer(params xdsServerParams) *Server {
 		params.Metrics,
 	)
 
+	server.caType = params.Config.CAType
+	server.trustDomain = params.Config.SpiffeTrustDomain
+
 	params.Lifecycle.Append(cell.Hook{
 		OnStart: func(_ cell.HookContext) error {
-			if err := server.Serve(); err != nil {
-				params.Logger.Error("failed to start ztunnel gRPC server", logfields.Error, err)
-			}
-			return nil
+			return server.Serve()
 		},
 		OnStop: func(_ cell.HookContext) error {
 			server.GracefulStop()

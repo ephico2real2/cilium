@@ -86,6 +86,7 @@ func (s *MockStream) Recv() (*v3.DeltaDiscoveryRequest, error) {
 }
 
 type MockEndpointEventSource struct {
+	initial         EndpointEventCollection
 	subscribeCalled bool
 }
 
@@ -93,7 +94,7 @@ type MockEndpointEventSource struct {
 func (m *MockEndpointEventSource) SubscribeToEndpointEvents(ctx context.Context, syncCh chan<- EndpointEventCollection) {
 	defer close(syncCh)
 	m.subscribeCalled = true
-	syncCh <- EndpointEventCollection{}
+	syncCh <- m.initial
 }
 
 func (m *MockEndpointEventSource) GetSubscriptionStatus() bool {

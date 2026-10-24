@@ -263,3 +263,8 @@
 {{- if and (.Values.networkDriver.enabled) (semverCompare "<1.34.0" (printf "%d.%d.0" (semver .Capabilities.KubeVersion.Version).Major (semver .Capabilities.KubeVersion.Version).Minor)) }}
   {{ fail ".Values.networkDriver.enabled requires kubernetes version 1.34 or greater" }}
 {{- end }}
+
+{{/* SPIRE credential delivery requires the agent/operator SPIRE integration. */}}
+{{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") (eq .Values.encryption.ztunnel.ca.type "spire") (not .Values.authentication.mutual.spire.enabled) }}
+  {{- fail "encryption.ztunnel.ca.type=spire requires authentication.mutual.spire.enabled=true" }}
+{{- end }}

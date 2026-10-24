@@ -1053,6 +1053,17 @@ spec:
       - name: cilium-ztunnel-secrets
         secret:
           secretName: cilium-ztunnel-secrets
+          items:
+            - key: bootstrap-private.key
+              path: bootstrap-private.key
+            - key: bootstrap-root.crt
+              path: bootstrap-root.crt
+            {{- if eq .Values.encryption.ztunnel.ca.type "internal" }}
+            - key: ca-private.key
+              path: ca-private.key
+            - key: ca-root.crt
+              path: ca-root.crt
+            {{- end }}
       {{- end }}
       {{- if .Values.cni.configMap }}
       - name: cni-configuration

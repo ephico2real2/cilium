@@ -57,6 +57,11 @@ func (c EndpointEventCollection) EmitTo(ctx context.Context, ch chan<- *Endpoint
 // The returned DeltaDiscoveryResponse can be sent directly on a DeltaAggregatedResources
 // stream.
 func (c EndpointEventCollection) ToDeltaDiscoveryResponse() *v3.DeltaDiscoveryResponse {
+	return c.toDeltaDiscoveryResponse("")
+}
+
+// toDeltaDiscoveryResponse binds discovery identities to the configured issuer domain.
+func (c EndpointEventCollection) toDeltaDiscoveryResponse(trustDomain string) *v3.DeltaDiscoveryResponse {
 	createResources := make([]*v3.Resource, 0)
 	removedNames := make([]string, 0)
 	for _, event := range c {
@@ -66,6 +71,8 @@ func (c EndpointEventCollection) ToDeltaDiscoveryResponse() *v3.DeltaDiscoveryRe
 			if err != nil {
 				continue
 			}
+
+			address.GetWorkload().TrustDomain = trustDomain
 
 			anyPBAddr, err := anypb.New(address)
 			if err != nil {

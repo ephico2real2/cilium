@@ -43,6 +43,19 @@ do
     spire_server entry create ${SOCKET_FLAG} -spiffeID $CILIUM_OPERATOR_SPIFFE_ID -parentID $AGENT_SPIFFE_ID $CILIUM_OPERATOR_SELECTORS
   fi
 
+  {{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") (eq .Values.encryption.ztunnel.ca.type "spire") }}
+  # The operator parents workload entries under this attested node alias.
+  ZTUNNEL_NODE_ID="spiffe://{{ .Values.authentication.mutual.spire.trustDomain }}/ztunnel"
+  if spire_server entry show ${SOCKET_FLAG} -spiffeID $ZTUNNEL_NODE_ID $AGENT_SELECTORS | grep -q "Found 0 entries" &> /dev/null; then
+    spire_server entry create ${SOCKET_FLAG} -spiffeID $ZTUNNEL_NODE_ID $AGENT_SELECTORS -node
+  fi
+  ZTUNNEL_PROXY_ID="spiffe://{{ .Values.authentication.mutual.spire.trustDomain }}/ztunnel-proxy"
+  ZTUNNEL_PROXY_SELECTORS="-selector k8s:ns:{{ include "cilium.namespace" . }} -selector k8s:sa:{{ .Values.serviceAccounts.ztunnel.name }}"
+  if spire_server entry show ${SOCKET_FLAG} -spiffeID $ZTUNNEL_PROXY_ID $ZTUNNEL_PROXY_SELECTORS | grep -q "Found 0 entries" &> /dev/null; then
+    spire_server entry create ${SOCKET_FLAG} -spiffeID $ZTUNNEL_PROXY_ID -parentID $ZTUNNEL_NODE_ID $ZTUNNEL_PROXY_SELECTORS
+  fi
+  {{- end }}
+
   echo "Cilium Spire entries are initialized successfully or already in-sync"
   sleep 30;
 done
