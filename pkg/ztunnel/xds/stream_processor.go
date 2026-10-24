@@ -5,10 +5,14 @@ package xds
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 
+	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/cilium/statedb"
 
@@ -38,6 +42,7 @@ type StreamProcessorParams struct {
 	EnrolledNamespaceTable    statedb.RWTable[*table.EnrolledNamespace]
 	Log                       *slog.Logger
 	Metrics                   *Metrics
+	Authorizations            *AuthorizationPolicies
 }
 
 // StreamProcessor implements the logic for handling xDS streams to zTunnel.
@@ -54,6 +59,7 @@ type StreamProcessor struct {
 	db                     *statedb.DB
 	enrolledNamespaceTable statedb.RWTable[*table.EnrolledNamespace]
 	metrics                *Metrics
+	authorizations         *AuthorizationPolicies
 }
 
 // CiliumEndpointsWatcher defines the interface for watching CiliumEndpoints and CiliumEndpointSlices.
@@ -100,6 +106,10 @@ func NewStreamProcessor(params *StreamProcessorParams) *StreamProcessor {
 	if metrics == nil {
 		metrics = NewMetrics()
 	}
+	authorizations := params.Authorizations
+	if authorizations == nil {
+		authorizations = NewAuthorizationPolicies(params.Log, metrics)
+	}
 	sp := &StreamProcessor{
 		stream:                 params.Stream,
 		streamRecv:             params.StreamRecv,
@@ -109,6 +119,7 @@ func NewStreamProcessor(params *StreamProcessorParams) *StreamProcessor {
 		db:                     params.DB,
 		enrolledNamespaceTable: params.EnrolledNamespaceTable,
 		metrics:                metrics,
+		authorizations:         authorizations,
 	}
 	sp.endpointSource = NewEndpointSource(params.K8sCiliumEndpointsWatcher, sp)
 	return sp
@@ -344,22 +355,10 @@ func (sp *StreamProcessor) handleAddressTypeURL(req *v3.DeltaDiscoveryRequest) e
 	return nil
 }
 
-func (sp *StreamProcessor) handleAuthorizationTypeURL(_ *v3.DeltaDiscoveryRequest) error {
-	// TODO: For MVP we do not handle Authorization policy requests.
-
-	resp := &v3.DeltaDiscoveryResponse{
-		TypeUrl:          xdsTypeURLAuthorization,
-		Resources:        []*v3.Resource{},
-		RemovedResources: []string{},
-		Nonce:            "0", // static nonce as we do not expect any further requests
-	}
-
-	sp.expectedNonce["0"] = struct{}{}
-
-	return sp.stream.SendMsg(resp)
-}
-
 func (sp *StreamProcessor) handleDeltaDiscoveryReq(req *v3.DeltaDiscoveryRequest) error {
+	if req.TypeUrl != xdsTypeURLAddress {
+		return fmt.Errorf("unexpected type URL %q for Address handler", req.TypeUrl)
+	}
 	// if the delta discovery request has a nonce, this is a ack or nack.
 	// for now, if we have a Nack we'll log the errors, retrying a Nack'd
 	// message would cause the same issue as previously encountered.
@@ -386,16 +385,7 @@ func (sp *StreamProcessor) handleDeltaDiscoveryReq(req *v3.DeltaDiscoveryRequest
 		return nil
 	}
 
-	// there is no nonce so we have a subscription request for a particular
-	// resource type. ztunnel will only subscribe to two types of events.
-	switch req.TypeUrl {
-	case xdsTypeURLAddress:
-		return sp.handleAddressTypeURL(req)
-	case xdsTypeURLAuthorization:
-		return sp.handleAuthorizationTypeURL(req)
-	default:
-		return fmt.Errorf("unexpected type URL %q, expected %q or %q", req.TypeUrl, xdsTypeURLAddress, xdsTypeURLAuthorization)
-	}
+	return sp.handleAddressTypeURL(req)
 }
 
 func (sp *StreamProcessor) handleEPEvent(epEvent *EndpointEvent) error {
@@ -424,56 +414,90 @@ drained:
 	return nil
 }
 
-// Start will begin processing both xDS and Endpoint stream events and push the
-// required information to the client stream.
-//
-// The internal event loop will halt when the stream's context is canceled
-// This will occur when the client closes the stream or any halting error is
-// encountered, such as on SendMsg().
-//
-// This function spawns one additional goroutine which is destroyed when
-// the stream is hatled.
-func (sp *StreamProcessor) Start() {
-	// goroutine to feed our streamRecv channel
+// Start multiplexes the legacy Address stream and the shared delta engine's
+// Authorization stream. A protocol or send error terminates this connection;
+// the next connection reconstructs its own subscription/nonce state.
+func (sp *StreamProcessor) Start() error {
+	ctx, cancel := context.WithCancel(sp.stream.Context())
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	stream := &serializedDeltaStream{AggregatedDiscoveryService_DeltaAggregatedResourcesServer: sp.stream, ctx: ctx}
+	sp.stream = stream
+	recvError := make(chan error, 1)
 	go func() {
 		for {
-			// goroutine exit condition
-			if err := sp.stream.Context().Err(); err != nil {
-				return
-			}
-			streamReq, err := sp.stream.Recv()
+			req, err := sp.stream.Recv()
 			if err != nil {
-				sp.log.Error(
-					"Failed to receive DeltaDiscoveryRequest from stream",
-					logfields.Error, err)
+				recvError <- err
 				return
 			}
-			sp.streamRecv <- streamReq
+			select {
+			case sp.streamRecv <- req:
+			case <-ctx.Done():
+				return
+			}
 		}
 	}()
 
-	// the event loop for stream processing
+	var node *corev3.Node
+	var authorizationRequests chan *v3.DeltaDiscoveryRequest
+	var authorizationError chan error
 	for {
 		select {
-		// event loop exit condition
-		case <-sp.stream.Context().Done():
-			sp.log.Error("Stream context done with error", logfields.Error,
-				sp.stream.Context().Err())
-			return
-		// new request from ztunnel
-		case streamReq := <-sp.streamRecv:
-			if err := sp.handleDeltaDiscoveryReq(streamReq); err != nil {
-				sp.log.Error("Failed to handle DeltaDiscoveryRequest",
-					logfields.Error, err)
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-recvError:
+			if errors.Is(err, io.EOF) {
+				return nil
 			}
-		// new endpoint event from CEP/CES watcher or enrollment reconciler.
-		case epEvent := <-sp.endpointRecv:
-			if err := sp.handleEPEvent(epEvent); err != nil {
-				sp.log.Error("Failed to handle EndpointEvent",
-					logfields.Error,
-					err,
-					logfields.EndpointID,
-					epEvent.UID)
+			return err
+		case err := <-authorizationError:
+			return err
+		case req, ok := <-sp.streamRecv:
+			if !ok || req == nil {
+				return fmt.Errorf("xDS request channel closed or nil request")
+			}
+			if req.Node != nil {
+				if node != nil && req.Node.Id != node.Id {
+					return fmt.Errorf("xDS node ID changed on stream")
+				}
+				if node == nil {
+					node = proto.Clone(req.Node).(*corev3.Node)
+				}
+			}
+			if req.TypeUrl == xdsTypeURLAuthorization {
+				if req.Node == nil && node != nil {
+					req = proto.Clone(req).(*v3.DeltaDiscoveryRequest)
+					req.Node = node
+				}
+				if authorizationRequests == nil {
+					authorizationRequests = make(chan *v3.DeltaDiscoveryRequest)
+					authorizationError = make(chan error, 1)
+					adapter := &authorizationDeltaStream{ctx: ctx, requests: authorizationRequests, stream: stream, metrics: sp.metrics}
+					go func() {
+						authorizationError <- sp.authorizations.server.HandleDeltaRequestStream(ctx, adapter, xdsTypeURLAuthorization, "")
+					}()
+				}
+				select {
+				case authorizationRequests <- req:
+				case err := <-authorizationError:
+					return err
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				continue
+			}
+			if err := sp.handleDeltaDiscoveryReq(req); err != nil {
+				return err
+			}
+		case ep, ok := <-sp.endpointRecv:
+			if !ok || ep == nil {
+				return fmt.Errorf("xDS endpoint channel closed or nil event")
+			}
+			if err := sp.handleEPEvent(ep); err != nil {
+				return err
 			}
 		}
 	}

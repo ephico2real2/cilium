@@ -21,6 +21,12 @@ var Cell = cell.Module(
 	"ztunnel-xds",
 	"ztunnel certificate authority and control plane",
 	cell.Provide(NewServer),
+	cell.Provide(func(x *Server) *AuthorizationPolicies {
+		if x == nil {
+			return nil
+		}
+		return x.authorizations
+	}),
 	cell.Provide(func(x *Server) chan *EndpointEvent {
 		if x == nil {
 			return nil

@@ -54,6 +54,7 @@ type Server struct {
 	// ztunnel reconnect are safe since xDS upserts are idempotent.
 	endpointEventChan chan *EndpointEvent
 	metrics           *Metrics
+	authorizations    *AuthorizationPolicies
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -74,6 +75,7 @@ func newServer(
 		db:                        db,
 		enrolledNamespaceTable:    enrolledNamespaceTable,
 		metrics:                   metrics,
+		authorizations:            NewAuthorizationPolicies(log, metrics),
 	}
 }
 
@@ -179,12 +181,11 @@ func (x *Server) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_D
 		DB:                        x.db,
 		EnrolledNamespaceTable:    x.enrolledNamespaceTable,
 		Metrics:                   x.metrics,
+		Authorizations:            x.authorizations,
 	}
 
 	x.log.Debug("begin processing DeltaAggregatedResources stream")
 	sp := NewStreamProcessor(&params)
 	// blocks until stream's context is killed.
-	sp.Start()
-
-	return stream.Context().Err()
+	return sp.Start()
 }

@@ -21,6 +21,8 @@ type Metrics struct {
 	// EnrollmentFailures tracks workload enrollment failures to Z-tunnel via XDS
 	// Status values: send_failed, nack_received
 	EnrollmentFailures metric.Vec[metric.Counter]
+	// AuthorizationEvents counts protocol events, not policy enforcement.
+	AuthorizationEvents metric.Vec[metric.Counter]
 }
 
 // Enable enables XDS metrics for Prometheus scraping.
@@ -29,11 +31,17 @@ func (m *Metrics) Enable() {
 		return
 	}
 	m.EnrollmentFailures.SetEnabled(true)
+	m.AuthorizationEvents.SetEnabled(true)
 }
 
 // NewMetrics creates a new Metrics instance for XDS enrollment failures
 func NewMetrics() *Metrics {
 	return &Metrics{
+		AuthorizationEvents: metric.NewCounterVec(metric.CounterOpts{
+			Disabled: true, Namespace: metrics.Namespace, Subsystem: subsystem,
+			Name: "authorization_events_total",
+			Help: "Authorization xDS protocol events by status (ack, nack, cancel, send_failed); not enforcement evidence",
+		}, []string{labelStatus}),
 		EnrollmentFailures: metric.NewCounterVec(
 			metric.CounterOpts{
 				Disabled:  true,

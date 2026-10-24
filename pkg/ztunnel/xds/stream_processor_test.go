@@ -305,7 +305,7 @@ func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 		sp.endpointSource = &MockEndpointEventSource{}
 
 		req := &v3.DeltaDiscoveryRequest{
-			TypeUrl:       "xdsTypeURLAddress",
+			TypeUrl:       xdsTypeURLAddress,
 			ResponseNonce: "x",
 		}
 		err := sp.handleDeltaDiscoveryReq(req)
@@ -325,7 +325,7 @@ func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 		}
 
 		req := &v3.DeltaDiscoveryRequest{
-			TypeUrl: "xdsTypeURLAddress",
+			TypeUrl: xdsTypeURLAddress,
 			// but response nonce sent, we should error here.
 			ResponseNonce: "x",
 			ErrorDetail: &status.Status{
@@ -378,42 +378,6 @@ func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 		err := sp.handleDeltaDiscoveryReq(req)
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "unexpected type URL")
-	})
-}
-
-func TestHandleAuthorizationTypeURL(t *testing.T) {
-	t.Run("returns empty response with static nonce", func(t *testing.T) {
-		var capturedResponse *v3.DeltaDiscoveryResponse
-		mockStream := &MockStream{}
-		mockStream.OnSendMsg = func(m any) error {
-			capturedResponse = m.(*v3.DeltaDiscoveryResponse)
-			return nil
-		}
-
-		sp := &StreamProcessor{
-			metrics:       NewMetrics(),
-			stream:        mockStream,
-			expectedNonce: make(map[string]struct{}),
-			log:           slog.New(slog.DiscardHandler),
-		}
-
-		req := &v3.DeltaDiscoveryRequest{
-			TypeUrl: xdsTypeURLAuthorization,
-		}
-
-		err := sp.handleAuthorizationTypeURL(req)
-		require.NoError(t, err)
-
-		// Verify response
-		require.NotNil(t, capturedResponse)
-		require.Equal(t, xdsTypeURLAuthorization, capturedResponse.TypeUrl)
-		require.Empty(t, capturedResponse.Resources)
-		require.Empty(t, capturedResponse.RemovedResources)
-		require.Equal(t, "0", capturedResponse.Nonce)
-
-		// Verify nonce was tracked
-		_, ok := sp.expectedNonce[capturedResponse.Nonce]
-		require.True(t, ok)
 	})
 }
 
