@@ -630,6 +630,7 @@ func TestEnrollmentReconciler_EndpointCreated(t *testing.T) {
 		endpoint         *endpoint.Endpoint
 		enrolledNs       []string
 		enrollErr        error
+		strictAdmission  bool
 		expectedEnrolled bool
 	}{
 		{
@@ -637,6 +638,13 @@ func TestEnrollmentReconciler_EndpointCreated(t *testing.T) {
 			endpoint:         createTestEndpoint(1, "test-ns", "pod-1", "/var/run/netns/test1"),
 			enrolledNs:       []string{"test-ns"},
 			expectedEnrolled: true,
+		},
+		{
+			name:             "strict creation is owned by the synchronous API gate",
+			endpoint:         createTestEndpoint(1, "test-ns", "pod-1", "/var/run/netns/test1"),
+			enrolledNs:       []string{"test-ns"},
+			strictAdmission:  true,
+			expectedEnrolled: false,
 		},
 		{
 			name:             "skip endpoint in unenrolled namespace",
@@ -671,6 +679,7 @@ func TestEnrollmentReconciler_EndpointCreated(t *testing.T) {
 			db, tbl, _, mockEnroller, ops, _ := setupTest(t)
 
 			mockEnroller.enrollErr = tt.enrollErr
+			ops.strictCreationAdmission = tt.strictAdmission
 
 			// Initialize table and add enrolled namespaces.
 			txn := db.WriteTxn(tbl)

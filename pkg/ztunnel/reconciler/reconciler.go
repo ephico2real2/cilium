@@ -51,6 +51,7 @@ type EnrollmentReconciler struct {
 	enrolledNamespaceTable      statedb.RWTable[*table.EnrolledNamespace]
 	endpointManager             endpointmanager.EndpointManager
 	endpointEnroller            zds.EndpointEnroller
+	strictCreationAdmission     bool
 	restorerPromise             promise.Promise[endpointstate.Restorer]
 	endpointEventCh             chan *xds.EndpointEvent
 	ciliumEndpointResource      resource.Resource[*types.CiliumEndpoint]
@@ -68,6 +69,7 @@ func NewEnrollmentReconciler(cfg params) reconciler.Operations[*table.EnrolledNa
 		enrolledNamespaceTable:      cfg.EnrolledNamespaceTable,
 		endpointManager:             cfg.EndpointManager,
 		endpointEnroller:            cfg.EndpointEnroller,
+		strictCreationAdmission:     cfg.Config.RequireMTLS,
 		restorerPromise:             cfg.RestorerPromise,
 		endpointEventCh:             cfg.EndpointEventChannel,
 		ciliumEndpointResource:      cfg.CiliumEndpointResource,
@@ -250,6 +252,11 @@ func (ops *EnrollmentReconciler) Stop(cell.HookContext) error {
 }
 
 func (ops *EnrollmentReconciler) EndpointCreated(ep *endpoint.Endpoint) {
+	if ops.strictCreationAdmission {
+		// The synchronous Endpoint API gate owns new-pod admission. This void
+		// callback cannot propagate errors and must not consume its time budget.
+		return
+	}
 	epNamespace := ep.GetK8sNamespace()
 	// If namespace is not enrolled or endpoint has no netns path or is ztunnel itself, skip
 	if epNamespace == "" || ep.GetContainerNetnsPath() == "" || isZtunnelPod(ep) {

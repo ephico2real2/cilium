@@ -57,6 +57,7 @@ type endpointAPIManager struct {
 	endpointCreations     EndpointCreationManager
 	endpointMetadata      endpointmetadata.EndpointMetadataFetcher
 	endpointRoutingWaiter endpointmanager.EndpointRoutingWaiter
+	endpointCreationGates []endpointmanager.EndpointCreationGate
 
 	bandwidthManager bandwidth.Manager
 	clientset        k8sClient.Clientset
@@ -82,6 +83,18 @@ func (m *endpointAPIManager) errorDuringCreation(ep *endpoint.Endpoint, err erro
 	})
 	ep.Logger(endpointAPIModuleID).Warn("Creation of endpoint failed", logfields.Error, err)
 	return nil, PutEndpointIDFailedCode, err
+}
+
+func (m *endpointAPIManager) waitForEndpointCreationGates(ctx context.Context, ep *endpoint.Endpoint) error {
+	for _, gate := range m.endpointCreationGates {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := gate.WaitForEndpoint(ctx, ep); err != nil {
+			return fmt.Errorf("endpoint startup admission failed: %w", err)
+		}
+	}
+	return ctx.Err()
 }
 
 // createEndpoint attempts to create the endpoint corresponding to the change
@@ -341,6 +354,10 @@ func (m *endpointAPIManager) CreateEndpoint(ctx context.Context, epTemplate *mod
 
 	if err := m.endpointRoutingWaiter.WaitForEndpointRouting(ctx, ep); err != nil {
 		return m.errorDuringCreation(ep, fmt.Errorf("unable to reconcile endpoint routing: %w", err))
+	}
+
+	if err := m.waitForEndpointCreationGates(ctx, ep); err != nil {
+		return m.errorDuringCreation(ep, err)
 	}
 
 	// The endpoint has been successfully created, stop the expiration

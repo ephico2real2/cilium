@@ -63,6 +63,7 @@ type endpointAPIManagerParams struct {
 	EndpointCreations     EndpointCreationManager
 	EndpointMetadata      endpointmetadata.EndpointMetadataFetcher
 	EndpointRoutingWaiter endpointmanager.EndpointRoutingWaiter
+	EndpointCreationGates []endpointmanager.EndpointCreationGate `group:"endpoint-creation-gates"`
 
 	BandwidthManager bandwidth.Manager
 	Clientset        k8sClient.Clientset
@@ -78,6 +79,7 @@ func newEndpointAPIManager(params endpointAPIManagerParams) EndpointAPIManager {
 		endpointCreations:     params.EndpointCreations,
 		endpointMetadata:      params.EndpointMetadata,
 		endpointRoutingWaiter: params.EndpointRoutingWaiter,
+		endpointCreationGates: params.EndpointCreationGates,
 		bandwidthManager:      params.BandwidthManager,
 		clientset:             params.Clientset,
 		cniConfigManager:      params.CNIConfigManager,
