@@ -46,6 +46,31 @@ type WatchStoreBackend interface {
 
 type RWSOpt func(*restartableWatchStore)
 
+// WatchSessionObserver receives ordered notifications for every Watch invocation,
+// including reconnects. Callbacks run synchronously on the watch goroutine and
+// must be bounded: they must not perform network IO or block on unbounded work.
+// Consumers must invalidate previous admission on Begin, Invalid, and End and
+// stage initial updates until ListDone. ListDone does not undo an Invalid event;
+// recovery requires a new, complete, valid session. These notifications alone
+// establish neither workload authenticity nor authorization. End runs before
+// Watch returns and may receive a canceled context; it must still invalidate
+// admission. Callbacks must not reenter Watch or Drain on this store.
+type WatchSessionObserver interface {
+	Begin(context.Context)
+	ListDone(context.Context)
+	Invalid(key string, err error)
+	End(context.Context)
+}
+
+// RWSWithSessionObserver installs a lifecycle observer before Watch starts.
+// Unlike RWSWithOnSyncCallback, its notifications recur on every session.
+// Configure one observer; if repeated, the last option wins.
+func RWSWithSessionObserver(observer WatchSessionObserver) RWSOpt {
+	return func(rws *restartableWatchStore) {
+		rws.sessionObserver = observer
+	}
+}
+
 // WSWithOnSyncCallback registers a function to be executed after
 // listing all keys from the kvstore for the first time. Multiple
 // callback functions can be registered.
@@ -81,6 +106,7 @@ type restartableWatchStore struct {
 	watching        atomic.Bool
 	synced          atomic.Bool
 	onSyncCallbacks []func(ctx context.Context)
+	sessionObserver WatchSessionObserver
 
 	// Using a separate entries counter avoids the need for synchronizing the
 	// access to the state map, since the only concurrent reader is represented
@@ -146,9 +172,16 @@ func (rws *restartableWatchStore) Watch(ctx context.Context, backend WatchStoreB
 	defer func() {
 		rws.log.Info("Stopped restartable watch store")
 		syncedMetric.Set(metrics.BoolToFloat64(false))
-		rws.watching.Store(false)
 		rws.synced.Store(false)
+		if rws.sessionObserver != nil {
+			rws.sessionObserver.End(ctx)
+		}
+		rws.watching.Store(false)
 	}()
+
+	if rws.sessionObserver != nil {
+		rws.sessionObserver.Begin(ctx)
+	}
 
 	// Mark all known keys as stale.
 	for _, entry := range rws.state {
@@ -163,6 +196,9 @@ func (rws *restartableWatchStore) Watch(ctx context.Context, backend WatchStoreB
 			rws.drainKeys(true)
 			syncedMetric.Set(metrics.BoolToFloat64(true))
 			rws.synced.Store(true)
+			if rws.sessionObserver != nil {
+				rws.sessionObserver.ListDone(ctx)
+			}
 
 			for _, callback := range rws.onSyncCallbacks {
 				callback(ctx)
@@ -233,6 +269,9 @@ func (rws *restartableWatchStore) drainKeys(staleOnly bool) {
 func (rws *restartableWatchStore) handleUpsert(key string, value []byte) {
 	entry := &rwsEntry{key: rws.keyCreator()}
 	if err := entry.key.Unmarshal(key, value); err != nil {
+		if rws.sessionObserver != nil {
+			rws.sessionObserver.Invalid(key, err)
+		}
 		rws.log.Warn(
 			"Unable to unmarshal value",
 			logfields.Error, err,
