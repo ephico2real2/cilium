@@ -59,7 +59,13 @@ spec:
           image: {{ include "cilium.image" .Values.encryption.ztunnel.image | quote }}
           imagePullPolicy: {{ .Values.encryption.ztunnel.image.pullPolicy }}
           args:
+            {{- if .Values.encryption.ztunnel.requireMtls }}
+            # Older proxy images reject this command rather than silently
+            # ignoring the persistent authentication requirement.
+            - proxy-mtls
+            {{- else }}
             - proxy
+            {{- end }}
             - ztunnel
           env:
             - name: XDS_ADDRESS
