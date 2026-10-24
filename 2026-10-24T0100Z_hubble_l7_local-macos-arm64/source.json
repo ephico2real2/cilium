@@ -1,0 +1,13 @@
+{
+  "source": "93041b3f7ec55ff12c83ecd266f14fb392ea5c93",
+  "upstream_base": "fe561573e0a8adc43bacbcc70bda0c9e01d6676d",
+  "kind": "real two-node Cilium Gateway load",
+  "grafana": "13.2.1",
+  "prometheus": "kube-prometheus-stack 90.1.1",
+  "application_load": true,
+  "images": {
+    "agent": "ghcr.io/ephico2real2/cilium-dev@sha256:44420ee067b2b6b2ad998121b24781ea849122a0aed28d7a27e1011ec81b9ee6",
+    "operator": "ghcr.io/ephico2real2/cilium-dev@sha256:a1acf77a3dc01bce2161537495a0ccdabab56696ea3ad0b131fb1c4e7811a069"
+  },
+  "traffic": "Fortio 1.75.3: external Gateway 200, pod Gateway 200, direct pod 20 req/s; six minutes each"
+}

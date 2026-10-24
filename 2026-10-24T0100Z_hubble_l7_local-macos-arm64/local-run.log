@@ -1,0 +1,487 @@
+ghcr.io/ephico2real2/cilium-dev@sha256:44420ee067b2b6b2ad998121b24781ea849122a0aed28d7a27e1011ec81b9ee6: Pulling from ephico2real2/cilium-dev
+Digest: sha256:44420ee067b2b6b2ad998121b24781ea849122a0aed28d7a27e1011ec81b9ee6
+Status: Downloaded newer image for ghcr.io/ephico2real2/cilium-dev@sha256:44420ee067b2b6b2ad998121b24781ea849122a0aed28d7a27e1011ec81b9ee6
+ghcr.io/ephico2real2/cilium-dev@sha256:44420ee067b2b6b2ad998121b24781ea849122a0aed28d7a27e1011ec81b9ee6
+ghcr.io/ephico2real2/cilium-dev@sha256:a1acf77a3dc01bce2161537495a0ccdabab56696ea3ad0b131fb1c4e7811a069: Pulling from ephico2real2/cilium-dev
+9b903c245239: Pulling fs layer
+3977477f9d2b: Pulling fs layer
+4310296f1e66: Pulling fs layer
+e3904ddaff1d: Pulling fs layer
+3128de5b2ccd: Pulling fs layer
+44136fa355b3: Already exists
+278d0cb69306: Download complete
+3977477f9d2b: Download complete
+9b903c245239: Download complete
+e3904ddaff1d: Download complete
+9b903c245239: Pull complete
+3128de5b2ccd: Download complete
+3128de5b2ccd: Pull complete
+4310296f1e66: Download complete
+3977477f9d2b: Pull complete
+e3904ddaff1d: Pull complete
+4310296f1e66: Pull complete
+Digest: sha256:a1acf77a3dc01bce2161537495a0ccdabab56696ea3ad0b131fb1c4e7811a069
+Status: Downloaded newer image for ghcr.io/ephico2real2/cilium-dev@sha256:a1acf77a3dc01bce2161537495a0ccdabab56696ea3ad0b131fb1c4e7811a069
+ghcr.io/ephico2real2/cilium-dev@sha256:a1acf77a3dc01bce2161537495a0ccdabab56696ea3ad0b131fb1c4e7811a069
+Published fork images selected; kubelet will pull their public digests into kind
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Containerfile
+#1 transferring dockerfile: 1.31kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24-alpine
+#2 ...
+
+#3 [internal] load metadata for gcr.io/distroless/static-debian12:nonroot
+#3 DONE 0.5s
+
+#2 [internal] load metadata for docker.io/library/golang:1.24-alpine
+#2 DONE 0.9s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 2B done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 26.71kB done
+#5 DONE 0.0s
+
+#6 [stage-1 1/2] FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+#6 resolve gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab done
+#6 DONE 0.1s
+
+#7 [build 1/8] FROM docker.io/library/golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191
+#7 resolve docker.io/library/golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191 done
+#7 sha256:0967cf60864b908575d28f945a5205b71a8c9f31c257aa7ef3eb74438d790a98 124B / 124B 0.1s done
+#7 sha256:2b15849378b44c08f252c20f78b44186fe48e31a46e2085dc3020ba5f7d6b7c0 0B / 298.84kB 0.2s
+#7 sha256:2b15849378b44c08f252c20f78b44186fe48e31a46e2085dc3020ba5f7d6b7c0 298.84kB / 298.84kB 0.2s done
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 4.19MB / 75.37MB 0.3s
+#7 sha256:d8ad8cd72600f46cc068e16c39046ebc76526e41051f43a8c249884b200936c0 0B / 4.20MB 0.2s
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 11.53MB / 75.37MB 0.5s
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 18.87MB / 75.37MB 0.6s
+#7 ...
+
+#6 [stage-1 1/2] FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+#6 sha256:4db96f2c7ae9e90f3fd5e91cf947d19cced1d8a778d12923113f62c7fff3ec3e 143.35kB / 143.35kB 0.3s done
+#6 sha256:dcaa5a89b0ccda4b283e16d0b4d0891cd93d5fe05c6798f7806781a6a2d84354 314B / 314B 0.2s done
+#6 sha256:bf7a4185f01524837d19abde915ffde84e64368b250f5b5e9f6f75aea62a11d4 29.00kB / 29.00kB 0.3s done
+#6 sha256:39dc083afc39bd8dc43d456fe7ff7d39292e593bb2769972c11bb2e5f9119386 445.71kB / 445.71kB 0.4s done
+#6 sha256:990a9c434e5e0f11549a8d4a41a1991e621b04e30cd63269adbc97b1dc38fd7e 12.48kB / 12.48kB 0.2s done
+#6 sha256:f7c03e5221c3717bfa68250498f74132c03d9d7271f301c9b2a9cfc00fc6e231 83.90kB / 83.90kB 0.4s done
+#6 extracting sha256:f7c03e5221c3717bfa68250498f74132c03d9d7271f301c9b2a9cfc00fc6e231 done
+#6 extracting sha256:990a9c434e5e0f11549a8d4a41a1991e621b04e30cd63269adbc97b1dc38fd7e done
+#6 DONE 0.8s
+
+#7 [build 1/8] FROM docker.io/library/golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191
+#7 sha256:d8ad8cd72600f46cc068e16c39046ebc76526e41051f43a8c249884b200936c0 1.05MB / 4.20MB 0.6s
+#7 ...
+
+#6 [stage-1 1/2] FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
+#6 extracting sha256:39dc083afc39bd8dc43d456fe7ff7d39292e593bb2769972c11bb2e5f9119386 0.0s done
+#6 extracting sha256:bf7a4185f01524837d19abde915ffde84e64368b250f5b5e9f6f75aea62a11d4 done
+#6 extracting sha256:2780920e5dbfbe103d03a583ed75345306e572ec5a48cb10361f046767d9f29a done
+#6 extracting sha256:7c12895b777bcaa8ccae0605b4de635b68fc32d60fa08f421dc3818bf55ee212 done
+#6 extracting sha256:3214acf345c0cc6bbdb56b698a41ccdefc624a09d6beb0d38b5de0b2303ecaf4 done
+#6 extracting sha256:52630fc75a18675c530ed9eba5f55eca09b03e91bd5bc15307918bbc1a7e7296 done
+#6 extracting sha256:dd64bf2dd177757451a98fcdc999a339c35dee5d9872d8f4dc69c8f3c4dd0112 done
+#6 extracting sha256:b839dfae01f66e15c6a8b63520557ed315bdfe036342fa7a0c537259f10d7a9a done
+#6 extracting sha256:dcaa5a89b0ccda4b283e16d0b4d0891cd93d5fe05c6798f7806781a6a2d84354 done
+#6 extracting sha256:4db96f2c7ae9e90f3fd5e91cf947d19cced1d8a778d12923113f62c7fff3ec3e done
+#6 DONE 0.8s
+
+#7 [build 1/8] FROM docker.io/library/golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 32.51MB / 75.37MB 0.9s
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 39.85MB / 75.37MB 1.1s
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 47.19MB / 75.37MB 1.2s
+#7 sha256:d8ad8cd72600f46cc068e16c39046ebc76526e41051f43a8c249884b200936c0 2.10MB / 4.20MB 1.1s
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 54.53MB / 75.37MB 1.4s
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 61.87MB / 75.37MB 1.5s
+#7 sha256:d8ad8cd72600f46cc068e16c39046ebc76526e41051f43a8c249884b200936c0 3.15MB / 4.20MB 1.4s
+#7 sha256:d8ad8cd72600f46cc068e16c39046ebc76526e41051f43a8c249884b200936c0 4.20MB / 4.20MB 1.6s done
+#7 extracting sha256:d8ad8cd72600f46cc068e16c39046ebc76526e41051f43a8c249884b200936c0 0.0s done
+#7 sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 75.37MB / 75.37MB 1.8s done
+#7 extracting sha256:2b15849378b44c08f252c20f78b44186fe48e31a46e2085dc3020ba5f7d6b7c0 0.0s done
+#7 extracting sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027
+#7 extracting sha256:f5657497bb4612f95697098fd984bb9e638887aa2070ae81081ed7887c453027 0.9s done
+#7 DONE 2.8s
+
+#7 [build 1/8] FROM docker.io/library/golang:1.24-alpine@sha256:8bee1901f1e530bfb4a7850aa7a479d17ae3a18beb6e09064ed54cfd245b7191
+#7 extracting sha256:0967cf60864b908575d28f945a5205b71a8c9f31c257aa7ef3eb74438d790a98 done
+#7 extracting sha256:4f4fb700ef54461cfa02571ae0db9a0dc1e0cdb5577484a6d75e68dc38e8acc1 done
+#7 DONE 2.8s
+
+#8 [build 2/8] WORKDIR /src
+#8 DONE 0.1s
+
+#9 [build 3/8] COPY shared/jsonview/ ./shared/jsonview/
+#9 DONE 0.0s
+
+#10 [build 4/8] COPY 09-routes/app/go.mod 09-routes/app/go.sum ./09-routes/app/
+#10 DONE 0.0s
+
+#11 [build 5/8] WORKDIR /src/09-routes/app
+#11 DONE 0.0s
+
+#12 [build 6/8] RUN go mod download
+#12 DONE 1.1s
+
+#13 [build 7/8] COPY 09-routes/app/main.go .
+#13 DONE 0.0s
+
+#14 [build 8/8] RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o /routedemo .
+#14 DONE 3.9s
+
+#15 [stage-1 2/2] COPY --from=build /routedemo /routedemo
+#15 DONE 0.0s
+
+#16 exporting to image
+#16 exporting layers
+#16 exporting layers 0.3s done
+#16 exporting manifest sha256:b253022839c537b7fb1f5617ffdd5b960d6a76ff14940bfbbdd79c76d78ba57a done
+#16 exporting config sha256:0ae73ad86cee699238af08ce343d9ed41768d5f28d441a8fe12082d4fb320c80 done
+#16 exporting attestation manifest sha256:017b0c2d6e98a1e03d5dba89fa58e4df57b72cda206de4b9b0bd7139a3349729 done
+#16 exporting manifest list sha256:054dd06c7c17e9435eb3afe17853e6e3cd7ad475822a76b6e7fe2c1be3089dbd done
+#16 naming to docker.io/library/routedemo:local done
+#16 unpacking to docker.io/library/routedemo:local 0.1s done
+#16 DONE 0.4s
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 702B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+#2 DONE 0.1s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/7] FROM mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+#4 resolve mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27 done
+#4 DONE 0.0s
+
+#5 [internal] load build context
+#5 transferring context: 17.35kB done
+#5 DONE 0.0s
+
+#6 [2/7] WORKDIR /opt/cmtc-capture
+#6 CACHED
+
+#7 [3/7] COPY package.json package-lock.json ./
+#7 CACHED
+
+#8 [4/7] RUN npm ci --omit=dev --no-audit --no-fund     && node -e "const {chromium}=require('playwright');(async()=>{const b=await chromium.launch();await b.close()})().catch(e=>{console.error(e);process.exit(1)})"
+#8 0.577 
+#8 0.577 added 4 packages in 459ms
+#8 0.578 npm notice
+#8 0.578 npm notice New major version of npm available! 11.19.0 -> 12.2.1
+#8 0.578 npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+#8 0.578 npm notice To update run: npm install -g npm@12.2.1
+#8 0.578 npm notice
+#8 DONE 0.9s
+
+#9 [5/7] COPY walk.cjs walk-smoke.cjs ./
+#9 DONE 0.0s
+
+#10 [6/7] RUN node walk-smoke.cjs
+#10 11.34 Browser walk smoke passed: YAML/JSON specs, JSON variables, allowed future panel, unexpected No data denial, missing text denial, retained PNGs
+#10 DONE 11.4s
+
+#11 [7/7] WORKDIR /workspace
+#11 DONE 0.0s
+
+#12 exporting to image
+#12 exporting layers
+#12 exporting layers 0.4s done
+#12 exporting manifest sha256:f33d947eae67802cf5d9a5ed0f5e69e3d4d5dd8220a3fad9f5e6a85119947c5d done
+#12 exporting config sha256:670417ee51564338f99ef86532045daf4360fe8eb44376d7bd7285c1565a7b4f done
+#12 exporting attestation manifest sha256:989ebb5e342b3d182fc61df7b7f992c88f6715fc6e645ab88cdb4128a6f0e318 done
+#12 exporting manifest list sha256:f311e6f3c993ad5b7fbba42a14fbb7e5cccb7fac377193c71f5f387e2c4bb66d done
+#12 naming to docker.io/library/cilium-dashboard-capture:dev done
+#12 unpacking to docker.io/library/cilium-dashboard-capture:dev 0.1s done
+#12 DONE 0.5s
+
+== the host: Ubuntu 24.04.4 LTS on aarch64 (arm64), kernel 6.8.0-117-generic, 8 CPUs, 15 GiB
+
+== kind v0.33.0 (kubernetes-sigs/kind releases)
+  at the pin: kind v0.33.0 go1.26.7 linux/arm64
+
+== kubectl v1.36.4 (dl.k8s.io)
+  at the pin: kubectl v1.36.4
+
+== cilium-cli v0.20.0 (cilium/cilium-cli releases)
+  at the pin: cilium-cli: v0.20.0 compiled with go1.27.0 on linux/arm64
+
+== hubble 1.19.4 (cilium/hubble releases) — the demo scripts' hubble observe
+  sha256 ok: hubble.tgz = ba7f521458147de3…
+  installed /usr/local/bin/hubble (hubble v1.19.4@HEAD-39037bd compiled with go1.26.4 on linux/arm64)
+
+== helm v3.21.4 (get.helm.sh — the runner's preinstalled version, the one the lab was measured with)
+  at the pin: v3.21.4+g813176c
+
+== docker — Ubuntu's docker.io when absent (kind's provider)
+  present: Docker version 29.5.2, build 79eb04c, engine 29.5.2 (kept)
+
+== tcp_bbr
+  congestion=reno cubic bbr
+
+== the toolchain
+  kind v0.33.0 | kubectl v1.36.4 | helm v3.21.4+g813176c | cilium-cli v0.20.0 | hubble 1.19.4 | docker 29.5.2 | kernel 6.8.0-117-generic
+grep: clusters/ci/poc1.yaml: No such file or directory
+
+== lab preflight on Linux aarch64 — measured, every row (rules: docs/SETUP.md Steps 0–2, Cilium 1.20.2 system requirements)
+  STATUS        WHAT                       MEASURED                                     RULE
+  ok            host                       Ubuntu 24.04.4 LTS on aarch64, 8 CPUs, 15 GiB the nodes share THIS kernel
+  ok            bash (env bash)            5.2.21(1)-release at /usr/bin/bash           ≥ 4.4 for the lab's scripts (the runner: 5.2)
+  ok            docker                     engine 29.5.2                                
+  warn          memory for the nodes       15 GiB                                       enough for clusters/ci (the runner: 5 GB used, meshed); the full-size poc1 wants 16 (SETUP 2.3)
+  ok            CPUs for the nodes         8                                            ≥ 8 for the full-size clusters (SETUP 0.4); the runner's 4 carried clusters/ci
+  ok            netkit (kernel 6.8.0-117-generic) ≥ 6.8 and CONFIG_NETKIT in /boot/config    Cilium 1.20.2 system requirements: netkit ≥ 6.8 + CONFIG_NETKIT
+  ok            Tetragon base sensor       security_bprm_committing_creds exported      demo 17 blocker 1 (CONFIG_SECURITY); blocker 2, /procHost, is in clusters/ci/*.yaml
+  no            bandwidth manager + BBR    off inside kind nodes (host default_qdisc=fq_codel) net.core.default_qdisc is host-netns only; a kind node is a container — any kernel (gotcha #103)
+  no            BIG TCP                    not with the lab's VXLAN tunnel              needs native routing (the agent: 'BIG TCP in tunneling mode requires pending kernel support', gotcha #103)
+  ok            net.ipv4.ip_forward        1 (the kernel the nodes egress through)      Docker sets it at start (--ip-forward, default true); nothing for the lab to set
+  REQUIRED-FAIL node image for arm64       index platforms: unreadable                  the pinned image has no arm64 manifest
+  ok            route to the LB blocks     the docker bridge is on this host: on-link   scripts/lab-route.sh verifies Docker's connected route
+  ok            IPv6 on a docker network   a container got fd00:1ab:9:9::/64            LAB_IPFAMILY=dual is possible (cilium/values-ci-features.yaml)
+  warn          existing kind network      fc00:f853:ccd:e793::/64 172.18.0.0/16        not the lab's 172.18.0.0/16: lab-up.sh will stop — remove it when no cluster is on it (gotcha #95)
+
+Creating cluster "poc1" ...
+ • Ensuring node image (kindest/node:v1.36.4) 🖼️  ...
+ ✓ Ensuring node image (kindest/node:v1.36.4) 🖼️
+ • Preparing nodes 📦 📦   ...
+ ✓ Preparing nodes 📦 📦 
+ • Writing configuration 📜  ...
+ ✓ Writing configuration 📜
+ • Starting control-plane 🕹️  ...
+ ✓ Starting control-plane 🕹️
+ • Installing StorageClass 💾  ...
+ ✓ Installing StorageClass 💾
+ • Joining worker nodes 🚜  ...
+ ✓ Joining worker nodes 🚜
+ • Waiting ≤ 1m0s for control-plane = Ready ⏳  ...
+ ✗ Waiting ≤ 1m0s for control-plane = Ready ⏳
+ • WARNING: Timed out waiting for Ready ⚠️
+Set kubectl context to "kind-poc1"
+You can now use your cluster with:
+
+kubectl cluster-info --context kind-poc1
+
+Have a nice day! 👋
+Image: "routedemo:local" with ID "sha256:054dd06c7c17e9435eb3afe17853e6e3cd7ad475822a76b6e7fe2c1be3089dbd" not yet present on node "poc1-control-plane", loading...
+Image: "routedemo:local" with ID "sha256:054dd06c7c17e9435eb3afe17853e6e3cd7ad475822a76b6e7fe2c1be3089dbd" not yet present on node "poc1-worker", loading...
+customresourcedefinition.apiextensions.k8s.io/backendtlspolicies.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gatewayclasses.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/grpcroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/listenersets.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/referencegrants.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tcproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tlsroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/udproutes.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/xbackends.gateway.networking.x-k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/xbackendtrafficpolicies.gateway.networking.x-k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/xmeshes.gateway.networking.x-k8s.io serverside-applied
+NAME: cilium
+LAST DEPLOYED: Fri Oct 23 19:56:36 2026
+NAMESPACE: kube-system
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+You have successfully installed Cilium with Hubble.
+
+Your release version is 1.21.0-dev.
+
+For any further help, visit https://docs.cilium.io/en/v1.21/gettinghelp
+Waiting for daemon set "cilium" rollout to finish: 0 of 2 updated pods are available...
+Waiting for daemon set "cilium" rollout to finish: 1 of 2 updated pods are available...
+daemon set "cilium" successfully rolled out
+Waiting for daemon set "cilium-envoy" rollout to finish: 1 of 2 updated pods are available...
+daemon set "cilium-envoy" successfully rolled out
+node/poc1-control-plane condition met
+node/poc1-worker condition met
+"prometheus-community" has been added to your repositories
+Release "monitoring" does not exist. Installing it now.
+NAME: monitoring
+LAST DEPLOYED: Fri Oct 23 19:57:33 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+kube-prometheus-stack has been installed. Check its status by running:
+  kubectl --namespace monitoring get pods -l "release=monitoring"
+
+Get Grafana 'admin' user password by running:
+
+  kubectl --namespace monitoring get secrets monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+Access Grafana local instance:
+
+  export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=monitoring" -oname)
+  kubectl --namespace monitoring port-forward $POD_NAME 3000
+
+Get your grafana admin user password by running:
+
+  kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+
+
+Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+Release "cilium" has been upgraded. Happy Helming!
+NAME: cilium
+LAST DEPLOYED: Fri Oct 23 19:59:35 2026
+NAMESPACE: kube-system
+STATUS: deployed
+REVISION: 2
+TEST SUITE: None
+NOTES:
+You have successfully installed Cilium with Hubble.
+
+Your release version is 1.21.0-dev.
+
+For any further help, visit https://docs.cilium.io/en/v1.21/gettinghelp
+Waiting for daemon set "cilium" rollout to finish: 0 of 2 updated pods are available...
+Waiting for daemon set "cilium" rollout to finish: 1 of 2 updated pods are available...
+daemon set "cilium" successfully rolled out
+configmap/dashboard-regression created
+configmap/dashboard-regression labeled
+namespace/team-a created
+namespace/loadtest created
+deployment.apps/shop created
+service/shop created
+deployment.apps/load created
+gateway.gateway.networking.k8s.io/shop created
+httproute.gateway.networking.k8s.io/shop created
+ciliumnetworkpolicy.cilium.io/http-observe created
+Waiting for deployment "shop" rollout to finish: 0 of 1 updated replicas are available...
+deployment "shop" successfully rolled out
+Waiting for deployment "load" rollout to finish: 0 of 1 updated replicas are available...
+deployment "load" successfully rolled out
+gateway.gateway.networking.k8s.io/shop condition met
+{"ts":1792803589.144453,"level":"info","r":1,"file":"scli.go","line":124,"msg":"Starting","command":"Φορτίο","version":"1.75.3 h1:2et+WGrx6FHBEyQb2kYz07q+/AXzHIio7amwuDDn6vM= go1.25.14 arm64 linux","go-max-procs":8}
+HTTP/1.1 200 OK
+content-type: application/json
+date: Sat, 24 Oct 2026 00:59:49 GMT
+content-length: 110
+x-envoy-upstream-service-time: 0
+server: envoy
+
+{"ts":1792803589.232903,"level":"info","r":1,"file":"scli.go","line":124,"msg":"Starting","command":"Φορτίο","version":"1.75.3 h1:2et+WGrx6FHBEyQb2kYz07q+/AXzHIio7amwuDDn6vM= go1.25.14 arm64 linux","go-max-procs":8}
+HTTP/1.1 200 OK
+content-type: application/json
+date: Sat, 24 Oct 2026 00:59:49 GMT
+content-length: 130
+x-envoy-upstream-service-time: 0
+server: envoy
+
+7cde8efdf12d32f4e34ab907206b2126de10b3304984bfb6e9529c676f62ce29
+Gateway HTTP200=0.000/s; direct HTTP200=0.000/s
+Gateway HTTP200=0.000/s; direct HTTP200=0.000/s
+Gateway HTTP200=0.000/s; direct HTTP200=3.445/s
+Gateway HTTP200=50.980/s; direct HTTP200=5.139/s
+Gateway HTTP200=67.807/s; direct HTTP200=6.796/s
+Gateway HTTP200=84.614/s; direct HTTP200=8.478/s
+Gateway HTTP200=101.433/s; direct HTTP200=10.161/s
+Gateway HTTP200=118.261/s; direct HTTP200=11.843/s
+Gateway HTTP200=135.085/s; direct HTTP200=13.526/s
+Gateway HTTP200=151.915/s; direct HTTP200=15.209/s
+Gateway HTTP200=168.803/s; direct HTTP200=16.898/s
+Gateway HTTP200=185.629/s; direct HTTP200=18.580/s
+Gateway HTTP200=199.980/s; direct HTTP200=19.980/s
+Gateway HTTP200=199.980/s; direct HTTP200=19.980/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.960/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.960/s; direct HTTP200=20.000/s
+{
+  "application_load": true,
+  "requested_qps": {
+    "external_gateway": 200,
+    "pod_gateway": 200,
+    "direct_pod": 20
+  },
+  "gateway_measured_http_200_qps": 199.96,
+  "gateway_reporter": "client",
+  "gateway_client": "external Docker container on kind bridge",
+  "direct_measured_http_200_qps": 20.0,
+  "fixed_all_qps": 399.94000000000005,
+  "baseline_enumerated_source_qps": 199.98000000000002,
+  "baseline_query": "sum(rate(hubble_http_requests_total{cluster=\"poc1\",destination_namespace=\"team-a\",destination_workload=\"shop\",reporter=\"client\",source_namespace=~\"(loadtest)\",source_workload=~\"(load)\"}[1m]))",
+  "fixed_query": "sum(rate(hubble_http_requests_total{cluster=\"poc1\",destination_namespace=\"team-a\",destination_workload=\"shop\",reporter=\"client\",source_namespace=~\".*\",source_workload=~\".*\"}[1m]))",
+  "remote_backend_node": "poc1-control-plane",
+  "gateway_reporter_node": "poc1-worker",
+  "source_commit": "93041b3f7ec55ff12c83ecd266f14fb392ea5c93"
+}
+01-before-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=199.967, series=1 — expectations met
+02-after-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=399.967, series=1 — expectations met
+03-before-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=199.967, series=1 — expectations met
+04-after-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=399.934, series=2 — expectations met
+05-after-selected-direct-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=20, series=1 — expectations met
+06-after-selected-pod-gateway-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=200, series=1 — expectations met
+07-after-live-dashboard-overview: scrolled 3 screens for the lazy panels
+07-after-live-dashboard-overview: settled 6s; panels=11; "No data"=0; first: Incoming Request Volume | Incoming Request Success Rate (non-5xx responses) | Request Duration | Incoming Requests by Source and Response Code | Incoming Request Success Rate (non-5xx responses) By Source; browser Prometheus total=399.933, series=1 — expectations met
+Waiting for measured gateway load results (1/48)
+Waiting for measured gateway load results (2/48)
+Waiting for measured gateway load results (3/48)
+Waiting for measured gateway load results (4/48)
+Waiting for measured gateway load results (5/48)
+Waiting for measured gateway load results (6/48)
+Waiting for measured gateway load results (7/48)
+Waiting for measured gateway load results (8/48)
+Waiting for measured gateway load results (9/48)
+Waiting for measured gateway load results (10/48)
+Waiting for measured gateway load results (11/48)
+Waiting for measured gateway load results (12/48)
+Waiting for measured gateway load results (13/48)
+Waiting for measured gateway load results (14/48)
+Waiting for measured gateway load results (15/48)
+Waiting for measured gateway load results (16/48)
+Waiting for measured gateway load results (17/48)
+Waiting for measured gateway load results (18/48)
+Waiting for measured gateway load results (19/48)
+Waiting for measured gateway load results (20/48)
+Waiting for measured gateway load results (21/48)
+Waiting for measured gateway load results (22/48)
+Waiting for measured gateway load results (23/48)
+Waiting for measured gateway load results (24/48)
+Waiting for measured gateway load results (25/48)
+Waiting for measured gateway load results (26/48)
+{
+  "gateway": {
+    "requests": 72000,
+    "http_status_counts": {
+      "200": 72000
+    },
+    "actual_qps": 199.9797685717605,
+    "duration_ns": 360036420255
+  },
+  "pod-gateway": {
+    "requests": 72000,
+    "http_status_counts": {
+      "200": 72000
+    },
+    "actual_qps": 199.9796764265592,
+    "duration_ns": 360036586150
+  },
+  "direct": {
+    "requests": 7200,
+    "http_status_counts": {
+      "200": 7200
+    },
+    "actual_qps": 19.997139289686153,
+    "duration_ns": 360051500152
+  }
+}
