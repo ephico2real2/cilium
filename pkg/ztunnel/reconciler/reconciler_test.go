@@ -41,6 +41,7 @@ type MockEndpointEnroller struct {
 	disenrolledIDs    []uint16
 	enrollErr         error
 	disenrollErr      error
+	deletedEndpoints  []*endpoint.Endpoint
 }
 
 // NewMockEndpointEnroller creates a new mock endpoint enroller.
@@ -68,6 +69,11 @@ func (m *MockEndpointEnroller) DisenrollEndpoint(ep *endpoint.Endpoint) error {
 	delete(m.enrolledEndpoints, ep.ID)
 	m.disenrolledIDs = append(m.disenrolledIDs, ep.ID)
 	return nil
+}
+
+func (m *MockEndpointEnroller) CleanupDeletedEndpointContext(_ context.Context, ep *endpoint.Endpoint) error {
+	m.deletedEndpoints = append(m.deletedEndpoints, ep)
+	return m.disenrollErr
 }
 
 // SeedInitialSnapshot sends an initial snapshot of endpoints to ztunnel.
@@ -271,7 +277,7 @@ func setupTest(t *testing.T) (*statedb.DB, statedb.RWTable[*table.EnrolledNamesp
 	// and queues Stop() for test cleanup.
 	lc := hivetest.Lifecycle(t)
 
-	ops := NewEnrollmentReconciler(params{
+	ops, err := NewEnrollmentReconciler(params{
 		Config:                      config.Config{EnableZTunnel: true},
 		DB:                          db,
 		EnrolledNamespaceTable:      tbl,
@@ -279,11 +285,13 @@ func setupTest(t *testing.T) (*statedb.DB, statedb.RWTable[*table.EnrolledNamesp
 		Lifecycle:                   lc,
 		EndpointManager:             mockEpMgr,
 		EndpointEnroller:            mockEnroller,
+		EndpointDeletionCleaner:     mockEnroller,
 		RestorerPromise:             restorerPromise,
 		EndpointEventChannel:        endpointEventCh,
 		CiliumEndpointResource:      mockCEPResource,
 		CiliumEndpointSliceResource: mockCESResource,
 	})
+	require.NoError(t, err)
 
 	reconcilerOps := ops.(*EnrollmentReconciler)
 
@@ -780,4 +788,22 @@ func TestEnrollmentReconciler_EndpointDeleted(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStrictEnrollmentRequiresDeletionCleaner(t *testing.T) {
+	ops, err := NewEnrollmentReconciler(params{Config: config.Config{EnableZTunnel: true, RequireMTLS: true}})
+	require.ErrorContains(t, err, "requires deleted-endpoint cleanup")
+	require.Nil(t, ops)
+}
+
+func TestStrictDeletionUsesCleanerWithoutNamespaceOrProxyLabelExemption(t *testing.T) {
+	_, _, _, mockEnroller, ops, _ := setupTest(t)
+	ops.strictCreationAdmission = true
+	ep := createTestEndpointWithLabels(77, "namespace-no-longer-enrolled", "old-pod", "/missing-deleted-netns", labels.Labels{
+		"k8s:app": labels.NewLabel("app", "ztunnel-cilium", labels.LabelSourceK8s),
+	})
+	ep.K8sUID = "immutable-deleted-uid"
+	ops.EndpointDeleted(ep, endpoint.DeleteConfig{})
+	require.Equal(t, []*endpoint.Endpoint{ep}, mockEnroller.deletedEndpoints)
+	require.Empty(t, mockEnroller.disenrolledIDs, "Strict deletion must not remove capture through legacy unenrollment")
 }

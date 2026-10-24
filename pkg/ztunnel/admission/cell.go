@@ -52,7 +52,7 @@ type out struct {
 type gate struct {
 	enabled        bool
 	core           slimcore.CoreV1Interface
-	enroll         func(context.Context, *endpoint.Endpoint) error
+	enroll         func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error
 	validateNetns  func(string) error
 	nodeName       func() string
 	agentNamespace string
@@ -84,7 +84,7 @@ func newGate(p params) (out, error) {
 			return out{}, fmt.Errorf("strict ztunnel admission requires Kubernetes, ZDS and configured agent namespace")
 		}
 		g.core = p.Clientset.Slim().CoreV1()
-		g.enroll = p.Server.EnrollEndpointContext
+		g.enroll = p.Server.EnrollEndpointForOwnerContext
 	}
 	return out{Gate: g}, nil
 }
@@ -135,6 +135,9 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 		if err := ctx.Err(); err != nil {
 			return errors.Join(err, lastErr)
 		}
+		if !ep.IsAlive() {
+			return permanent("managed endpoint disconnected during CNI admission")
+		}
 		attemptCtx, cancelAttempt := context.WithTimeout(ctx, g.attemptTimeout)
 		err := g.once(attemptCtx, ep, &namespaceUID, &required)
 		if err == nil {
@@ -145,6 +148,9 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 		}
 		lastErr = err
 		cancelAttempt() // ZDS joins its cancellation callback before publishing success.
+		if err == nil && !ep.IsAlive() {
+			err = permanent("managed endpoint disconnected during CNI admission")
+		}
 		if err == nil {
 			return nil
 		}
@@ -205,8 +211,8 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 	if pod.Spec.ServiceAccountName == "" || pod.Spec.NodeName == "" || pod.Spec.NodeName != g.nodeName() {
 		return permanent("live Pod service account or node binding is invalid")
 	}
-	// Current deletion still reads the managed endpoint's Pod pointer.
-	// Do not create an ACK/cache state that this existing path cannot name.
+	// Require the managed Pod metadata to name this immutable CNI identity
+	// before admitting startup; wire metadata below comes from the live API.
 	if enrolled {
 		managedPod := ep.GetPod()
 		if managedPod == nil || string(managedPod.UID) != ep.K8sUID ||
@@ -231,7 +237,7 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 			K8sNamespace: namespace, K8sPodName: name}
 		view.SetContainerNetnsPath(path)
 		view.SetPod(pod.DeepCopy())
-		if err := g.enroll(ctx, view); err != nil {
+		if err := g.enroll(ctx, ep, view); err != nil {
 			return fmt.Errorf("capture/proxy enrollment: %w", err)
 		}
 		if err := g.validateNetns(path); err != nil {

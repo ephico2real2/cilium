@@ -169,6 +169,7 @@ type serverOut struct {
 	cell.Out
 	*Server
 	EndpointEnroller
+	EndpointDeletionCleaner
 }
 
 // EndpointEnroller allows enrolling and disenrolling endpoints to/from the ztunnel.
@@ -184,8 +185,10 @@ type Server struct {
 	l      *net.UnixListener
 	logger *slog.Logger
 
-	endpointCache      map[uint16]*endpoint.Endpoint
-	endpointCacheMutex lock.Mutex
+	endpointCache                map[uint16]*endpoint.Endpoint
+	endpointCacheMutex           lock.Mutex
+	strictDeletedEndpointCleanup bool
+	endpointOperationGate        chan struct{}
 
 	updates               chan zdsUpdate // updates to send to ztunnel
 	initialSnapshotSeeded chan struct{}
@@ -212,11 +215,12 @@ func newZDSServer(p serverParams) serverOut {
 	}
 	p.Metrics.Enable()
 	server := &Server{
-		logger:                p.Logger,
-		updates:               make(chan zdsUpdate, 100),
-		endpointCache:         make(map[uint16]*endpoint.Endpoint),
-		initialSnapshotSeeded: make(chan struct{}),
-		metrics:               p.Metrics,
+		logger:                       p.Logger,
+		updates:                      make(chan zdsUpdate, 100),
+		endpointCache:                make(map[uint16]*endpoint.Endpoint),
+		initialSnapshotSeeded:        make(chan struct{}),
+		metrics:                      p.Metrics,
+		strictDeletedEndpointCleanup: p.Config.RequireMTLS,
 	}
 
 	zdsUnixAddr := defaultZDSUnixAddress
@@ -262,8 +266,9 @@ func newZDSServer(p serverParams) serverOut {
 	})
 
 	out := serverOut{
-		Server:           server,
-		EndpointEnroller: server,
+		Server:                  server,
+		EndpointEnroller:        server,
+		EndpointDeletionCleaner: server,
 	}
 
 	return out
@@ -427,9 +432,34 @@ func (s *Server) EnrollEndpoint(ep *endpoint.Endpoint) error {
 // proxy acknowledgment. Cancellation also bounds waiting for a disconnected
 // proxy or a full update queue; installed capture rules remain fail-closed.
 func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoint) error {
+	return s.EnrollEndpointForOwnerContext(ctx, ep, ep)
+}
+
+// EnrollEndpointForOwnerContext uses fresh private wire metadata while binding
+// the acknowledged cache entry to the managed endpoint's actual lifetime.
+func (s *Server) EnrollEndpointForOwnerContext(ctx context.Context, owner, ep *endpoint.Endpoint) error {
+	if owner == nil || ep == nil {
+		return fmt.Errorf("endpoint enrollment requires managed owner and wire metadata")
+	}
+	if s.strictDeletedEndpointCleanup && owner != ep {
+		ownerKey, err := incarnation(owner)
+		if err != nil || !sameIncarnation(ep, ownerKey) || owner.GetK8sNamespace() != ep.GetK8sNamespace() || owner.GetK8sPodName() != ep.GetK8sPodName() {
+			return fmt.Errorf("enrollment wire metadata does not match managed endpoint incarnation")
+		}
+	}
 	started := time.Now()
 	if err := ctx.Err(); err != nil {
 		return err
+	}
+	if s.strictDeletedEndpointCleanup {
+		release, err := s.acquireEndpointOperation(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+		if !owner.IsAlive() {
+			return fmt.Errorf("cannot enroll disconnected endpoint %d", ep.GetID16())
+		}
 	}
 	s.logger.Info("enrolling endpoint to ztunnel", logfields.EndpointID, ep.GetID16())
 	s.metrics.EnrollmentTotal.Inc()
@@ -471,6 +501,14 @@ func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoin
 		)
 		return err
 	}
+	var acknowledged *endpoint.Endpoint
+	if s.strictDeletedEndpointCleanup {
+		if ep.K8sUID == "" || workload.Uid != ep.K8sUID {
+			s.metrics.EnrollmentFailures.WithLabelValues("uid_mismatch").Inc()
+			return fmt.Errorf("endpoint %d Pod metadata UID does not match immutable CNI UID", ep.GetID16())
+		}
+		acknowledged = freezeAcknowledgedEndpoint(ep, workload, netnsPath)
+	}
 
 	req := &pb.WorkloadRequest{
 		Payload: &pb.WorkloadRequest_Add{
@@ -483,6 +521,10 @@ func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoin
 		netnsPath: netnsPath,
 		errCh:     make(chan error, 1),
 		onAck: func() {
+			if s.strictDeletedEndpointCleanup {
+				s.commitStrictEnrollment(ctx, owner, acknowledged)
+				return
+			}
 			s.endpointCacheMutex.Lock()
 			s.endpointCache[ep.GetID16()] = ep
 			s.endpointCacheMutex.Unlock()
@@ -492,6 +534,12 @@ func (s *Server) EnrollEndpointContext(ctx context.Context, ep *endpoint.Endpoin
 	if err := s.sendUpdateAndWaitForAck(ctx, update); err != nil {
 		s.metrics.EnrollmentFailures.WithLabelValues("send_failed").Inc()
 		return fmt.Errorf("sending update failed: %w", err)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if s.strictDeletedEndpointCleanup && !owner.IsAlive() {
+		return fmt.Errorf("endpoint %d disconnected during enrollment", ep.GetID16())
 	}
 
 	s.logger.Info("Endpoint enrollment acknowledged",
@@ -527,58 +575,74 @@ func (s *Server) sendUpdateAndWaitForAck(ctx context.Context, update zdsUpdate) 
 }
 
 func (s *Server) DisenrollEndpoint(ep *endpoint.Endpoint) error {
-	s.logger.Info("disenrolling endpoint from ztunnel", logfields.EndpointID, ep.GetID16())
+	ctx, cancel := context.WithTimeout(context.Background(), defaultZDSAckTimeout)
+	defer cancel()
+	return s.DisenrollEndpointContext(ctx, ep)
+}
 
-	ns, err := netns.OpenPinned(ep.GetContainerNetnsPath())
-	if err != nil {
-		s.logger.Error("failed to open netns file",
-			logfields.EndpointID, ep.GetID16(),
-			logfields.Error, err,
-		)
+// Live namespace unenrollment remains an unqualified lifecycle transition:
+// this preserves its existing remove-capture-before-ACK behavior. Do not use
+// this path for failed strict CNI creation or strict endpoint deletion.
+func (s *Server) DisenrollEndpointContext(ctx context.Context, ep *endpoint.Endpoint) error {
+	if err := ctx.Err(); err != nil {
 		return err
 	}
+	var key endpointIncarnation
+	if s.strictDeletedEndpointCleanup {
+		var err error
+		key, err = incarnation(ep)
+		if err != nil {
+			return err
+		}
+		release, err := s.acquireEndpointOperation(ctx)
+		if err != nil {
+			return err
+		}
+		defer release()
+	}
+	s.logger.Info("disenrolling endpoint from ztunnel", logfields.EndpointID, ep.GetID16())
+	ns, err := netns.OpenPinned(ep.GetContainerNetnsPath())
+	if err != nil {
+		return fmt.Errorf("opening namespace for live unenrollment: %w", err)
+	}
 	defer ns.Close()
-
-	if err = ns.Do(func() error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := ns.Do(func() error {
 		return iptables.DeleteInPodRules(s.logger, option.Config.EnableIPv4, option.Config.EnableIPv6)
 	}); err != nil {
 		return fmt.Errorf("unable to remove iptable rules for ztunnel inpod mode: %w", err)
 	}
-
-	pod := ep.GetPod()
-	if pod == nil {
-		s.logger.Error("endpoint has no pod metadata, cannot disenroll",
-			logfields.EndpointID, ep.GetID16(),
-		)
-		return fmt.Errorf("endpoint %d has no pod metadata", ep.GetID16())
+	var uid string
+	if s.strictDeletedEndpointCleanup {
+		uid = key.uid
+	} else {
+		pod := ep.GetPod()
+		if pod == nil {
+			return fmt.Errorf("endpoint %d has no pod metadata", ep.GetID16())
+		}
+		uid = string(pod.GetUID())
 	}
-
-	req := &pb.WorkloadRequest{
-		Payload: &pb.WorkloadRequest_Del{
-			Del: &pb.DelWorkload{
-				Uid: string(pod.GetUID()),
-			},
-		},
-	}
-
 	update := zdsUpdate{
-		request:   req,
-		netnsPath: "",
-		errCh:     make(chan error, 1),
+		request: &pb.WorkloadRequest{Payload: &pb.WorkloadRequest_Del{Del: &pb.DelWorkload{Uid: uid}}},
+		errCh:   make(chan error, 1),
 		onAck: func() {
 			s.endpointCacheMutex.Lock()
-			delete(s.endpointCache, ep.GetID16())
-			s.endpointCacheMutex.Unlock()
+			defer s.endpointCacheMutex.Unlock()
+			if s.strictDeletedEndpointCleanup {
+				if ctx.Err() == nil && sameIncarnation(s.endpointCache[key.id], key) {
+					delete(s.endpointCache, key.id)
+				}
+			} else {
+				delete(s.endpointCache, ep.GetID16())
+			}
 		},
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), defaultZDSAckTimeout)
-	defer cancel()
 	if err := s.sendUpdateAndWaitForAck(ctx, update); err != nil {
 		return fmt.Errorf("sending update failed: %w", err)
 	}
-
-	return nil
+	return ctx.Err()
 }
 
 // SeedInitialSnapshot seeds the initial snapshot that will be sent to each new ztunnel connection.
@@ -591,6 +655,28 @@ func (s *Server) SeedInitialSnapshot(eps ...*endpoint.Endpoint) {
 
 	// Add all endpoints to the cache
 	for _, ep := range eps {
+		if s.strictDeletedEndpointCleanup {
+			// A snapshot list can have been captured before managed deletion.
+			// Check lifetime under the retirement mutex so it cannot reinsert
+			// an endpoint whose deletion callback already retired its cache.
+			if !ep.IsAlive() {
+				continue
+			}
+			// An acknowledged owner takes precedence over a bootstrap list.
+			if s.endpointCache[ep.GetID16()] != nil {
+				continue
+			}
+			ownedUID := false
+			for _, cached := range s.endpointCache {
+				if ep.K8sUID != "" && cached.K8sUID == ep.K8sUID {
+					ownedUID = true
+					break
+				}
+			}
+			if ownedUID {
+				continue
+			}
+		}
 		s.endpointCache[ep.GetID16()] = ep
 	}
 
@@ -610,13 +696,23 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 	// Network ACKs must not hold the cache mutex and prevent other callers
 	// from observing their own cancellation deadlines.
 	for _, ep := range endpoints {
+		if !s.strictSnapshotStillDesired(ep) {
+			continue
+		}
 		ns, err := netns.OpenPinned(ep.GetContainerNetnsPath())
 		if err != nil {
+			if !s.strictSnapshotStillDesired(ep) {
+				continue
+			}
 			s.logger.Error("failed to open netns file",
 				logfields.EndpointID, ep.GetID16(),
 				logfields.Error, err,
 			)
 			return err
+		}
+		if !s.strictSnapshotStillDesired(ep) {
+			ns.Close()
+			continue
 		}
 
 		if err = ns.Do(func() error {
@@ -626,6 +722,9 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 			return fmt.Errorf("unable to setup iptable rules for ztunnel inpod mode: %w", err)
 		}
 		ns.Close()
+		if !s.strictSnapshotStillDesired(ep) {
+			continue
+		}
 
 		workload, err := endpointToWorkload(ep)
 		if err != nil {
@@ -642,6 +741,9 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 			},
 		}
 
+		if !s.strictSnapshotStillDesired(ep) {
+			continue
+		}
 		if err := zc.sendAndWaitForAck(req, ep.GetContainerNetnsPath()); err != nil {
 			return fmt.Errorf("failed to send endpoint message: %w", err)
 		}

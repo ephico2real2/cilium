@@ -19,6 +19,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/promise"
+	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 	"github.com/cilium/cilium/pkg/ztunnel/xds"
@@ -39,6 +40,7 @@ type params struct {
 	Lifecycle                   cell.Lifecycle
 	EndpointManager             endpointmanager.EndpointManager
 	EndpointEnroller            zds.EndpointEnroller
+	EndpointDeletionCleaner     zds.EndpointDeletionCleaner
 	RestorerPromise             promise.Promise[endpointstate.Restorer]
 	EndpointEventChannel        chan *xds.EndpointEvent
 	CiliumEndpointResource      resource.Resource[*types.CiliumEndpoint]
@@ -51,6 +53,7 @@ type EnrollmentReconciler struct {
 	enrolledNamespaceTable      statedb.RWTable[*table.EnrolledNamespace]
 	endpointManager             endpointmanager.EndpointManager
 	endpointEnroller            zds.EndpointEnroller
+	endpointDeletionCleaner     zds.EndpointDeletionCleaner
 	strictCreationAdmission     bool
 	restorerPromise             promise.Promise[endpointstate.Restorer]
 	endpointEventCh             chan *xds.EndpointEvent
@@ -58,9 +61,12 @@ type EnrollmentReconciler struct {
 	ciliumEndpointSliceResource resource.Resource[*v2alpha1.CiliumEndpointSlice]
 }
 
-func NewEnrollmentReconciler(cfg params) reconciler.Operations[*table.EnrolledNamespace] {
+func NewEnrollmentReconciler(cfg params) (reconciler.Operations[*table.EnrolledNamespace], error) {
 	if !cfg.Config.EnableZTunnel {
-		return nil
+		return nil, nil
+	}
+	if cfg.Config.RequireMTLS && cfg.EndpointDeletionCleaner == nil {
+		return nil, fmt.Errorf("strict ztunnel enrollment requires deleted-endpoint cleanup")
 	}
 
 	ops := &EnrollmentReconciler{
@@ -69,6 +75,7 @@ func NewEnrollmentReconciler(cfg params) reconciler.Operations[*table.EnrolledNa
 		enrolledNamespaceTable:      cfg.EnrolledNamespaceTable,
 		endpointManager:             cfg.EndpointManager,
 		endpointEnroller:            cfg.EndpointEnroller,
+		endpointDeletionCleaner:     cfg.EndpointDeletionCleaner,
 		strictCreationAdmission:     cfg.Config.RequireMTLS,
 		restorerPromise:             cfg.RestorerPromise,
 		endpointEventCh:             cfg.EndpointEventChannel,
@@ -76,7 +83,7 @@ func NewEnrollmentReconciler(cfg params) reconciler.Operations[*table.EnrolledNa
 		ciliumEndpointSliceResource: cfg.CiliumEndpointSliceResource,
 	}
 	cfg.Lifecycle.Append(ops)
-	return ops
+	return ops, nil
 }
 
 // emitEndpointEvents sends endpoint events for all CiliumEndpoints/CiliumEndpointSlices
@@ -283,6 +290,22 @@ func (ops *EnrollmentReconciler) EndpointCreated(ep *endpoint.Endpoint) {
 }
 
 func (ops *EnrollmentReconciler) EndpointDeleted(ep *endpoint.Endpoint, _ endpoint.DeleteConfig) {
+	if ops.strictCreationAdmission {
+		if ep.K8sUID == "" && ep.GetK8sNamespace() == "" && ep.GetK8sPodName() == "" {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := ops.endpointDeletionCleaner.CleanupDeletedEndpointContext(ctx, ep); err != nil {
+			ops.logger.Error("Strict deleted endpoint proxy cleanup incomplete",
+				logfields.EndpointID, ep.GetID16(),
+				logfields.K8sUID, ep.K8sUID,
+				logfields.K8sNamespace, ep.GetK8sNamespace(),
+				logfields.Error, err,
+			)
+		}
+		return
+	}
 	epNamespace := ep.GetK8sNamespace()
 	// If namespace is not enrolled or endpoint has no netns path or is ztunnel itself, skip
 	if epNamespace == "" || ep.GetContainerNetnsPath() == "" || isZtunnelPod(ep) {

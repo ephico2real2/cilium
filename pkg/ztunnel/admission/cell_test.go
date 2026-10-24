@@ -19,6 +19,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/cilium/cilium/api/v1/models"
+	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/hive"
@@ -28,7 +30,9 @@ import (
 	slimmeta "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	slimfake "github.com/cilium/cilium/pkg/k8s/slim/k8s/client/clientset/versioned/fake"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/policy"
 	testendpointmanager "github.com/cilium/cilium/pkg/testutils/endpointmanager"
+	testpolicy "github.com/cilium/cilium/pkg/testutils/policy"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/zds"
@@ -55,7 +59,7 @@ func cniGateFixture(t *testing.T) (*gate, *slimfake.Clientset, *endpoint.Endpoin
 		budget: 250 * time.Millisecond, attemptTimeout: 30 * time.Millisecond,
 		initialBackoff: time.Millisecond,
 		validateNetns:  func(string) error { return nil },
-		enroll:         func(context.Context, *endpoint.Endpoint) error { return nil },
+		enroll:         func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error { return nil },
 	}
 	return g, client, ep
 }
@@ -74,7 +78,8 @@ func TestAdmissionUsesFreshPrivateMetadataAndRequiresEnrollment(t *testing.T) {
 		validated.Add(1)
 		return nil
 	}
-	g.enroll = func(ctx context.Context, view *endpoint.Endpoint) error {
+	g.enroll = func(ctx context.Context, owner, view *endpoint.Endpoint) error {
+		require.Same(t, managed, owner)
 		require.NotSame(t, managed, view)
 		require.Equal(t, managed.GetID16(), view.GetID16())
 		require.Equal(t, managed.K8sUID, view.K8sUID)
@@ -104,7 +109,7 @@ func TestAdmissionDoesNotAckMissingOrStaleManagedIdentity(t *testing.T) {
 				ep.SetPod(&slimv1.Pod{ObjectMeta: slimmeta.ObjectMeta{UID: "stale-generation", Name: "server", Namespace: "apps"}})
 			}
 			var enrolled atomic.Int32
-			g.enroll = func(context.Context, *endpoint.Endpoint) error { enrolled.Add(1); return nil }
+			g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error { enrolled.Add(1); return nil }
 			require.ErrorContains(t, g.WaitForEndpoint(t.Context(), ep), "managed endpoint metadata is not synchronized")
 			require.Zero(t, enrolled.Load())
 		})
@@ -126,7 +131,7 @@ func TestAdmissionRecoversWhenManagedMetadataSynchronizes(t *testing.T) {
 		}
 		return false, nil, nil
 	})
-	g.enroll = func(_ context.Context, view *endpoint.Endpoint) error {
+	g.enroll = func(_ context.Context, owner, view *endpoint.Endpoint) error {
 		enrolled.Add(1)
 		require.Equal(t, "pod-generation", string(view.GetPod().UID))
 		return nil
@@ -175,7 +180,7 @@ func TestAdmissionRejectsInvalidIdentityAndNamespaceInputs(t *testing.T) {
 				require.NoError(t, err)
 			}
 			var called atomic.Int32
-			g.enroll = func(context.Context, *endpoint.Endpoint) error { called.Add(1); return nil }
+			g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error { called.Add(1); return nil }
 			require.Error(t, g.WaitForEndpoint(t.Context(), ep))
 			require.Zero(t, called.Load(), "Invalid inputs must never result in enrollment or success")
 		})
@@ -188,7 +193,7 @@ func TestAdmissionRejectsNamespaceTypeFailureBeforeEnrollment(t *testing.T) {
 	expected := errors.New("injected non-network namespace")
 	g.validateNetns = func(string) error { return expected }
 	var calls atomic.Int32
-	g.enroll = func(context.Context, *endpoint.Endpoint) error { calls.Add(1); return nil }
+	g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error { calls.Add(1); return nil }
 	require.ErrorIs(t, g.WaitForEndpoint(t.Context(), ep), expected)
 	require.Zero(t, calls.Load())
 }
@@ -198,7 +203,7 @@ func TestAdmissionCanRecoverFromDisconnectedProxyAndNack(t *testing.T) {
 		t.Run(scenario, func(t *testing.T) {
 			g, client, ep := cniGateFixture(t)
 			var calls atomic.Int32
-			g.enroll = func(ctx context.Context, _ *endpoint.Endpoint) error {
+			g.enroll = func(ctx context.Context, _, _ *endpoint.Endpoint) error {
 				if calls.Add(1) == 1 {
 					if scenario == "disconnected" {
 						<-ctx.Done()
@@ -222,7 +227,7 @@ func TestAdmissionCancellationNeverReportsSuccess(t *testing.T) {
 	defer cancel()
 	entered := make(chan struct{})
 	var attempts atomic.Int32
-	g.enroll = func(ctx context.Context, _ *endpoint.Endpoint) error {
+	g.enroll = func(ctx context.Context, _, _ *endpoint.Endpoint) error {
 		attempts.Add(1)
 		close(entered)
 		<-ctx.Done()
@@ -249,7 +254,7 @@ func TestAdmissionChecksCancellationEvenIfEnrollerReturnsNil(t *testing.T) {
 	g, _, ep := cniGateFixture(t)
 	parent, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	g.enroll = func(context.Context, *endpoint.Endpoint) error { cancel(); return nil }
+	g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error { cancel(); return nil }
 	require.ErrorIs(t, g.WaitForEndpoint(parent, ep), context.Canceled)
 }
 
@@ -268,7 +273,7 @@ func TestAdmissionDoesNotFailOpenOnApiForbidden(t *testing.T) {
 func TestAdmissionPinsNamespaceUidAcrossRetries(t *testing.T) {
 	g, client, ep := cniGateFixture(t)
 	var calls atomic.Int32
-	g.enroll = func(ctx context.Context, _ *endpoint.Endpoint) error {
+	g.enroll = func(ctx context.Context, _, _ *endpoint.Endpoint) error {
 		calls.Add(1)
 		ns, err := client.CoreV1().Namespaces().Get(ctx, "apps", metav1.GetOptions{})
 		require.NoError(t, err)
@@ -286,7 +291,7 @@ func TestAdmissionPinsNamespaceUidAcrossRetries(t *testing.T) {
 func TestAdmissionCannotDowngradeRequiredIntentAfterAck(t *testing.T) {
 	g, client, ep := cniGateFixture(t)
 	var calls atomic.Int32
-	g.enroll = func(ctx context.Context, _ *endpoint.Endpoint) error {
+	g.enroll = func(ctx context.Context, _, _ *endpoint.Endpoint) error {
 		calls.Add(1)
 		ns, err := client.CoreV1().Namespaces().Get(ctx, "apps", metav1.GetOptions{})
 		require.NoError(t, err)
@@ -303,7 +308,7 @@ func TestAdmissionCannotDowngradeRequiredIntentAfterAck(t *testing.T) {
 func TestAdmissionRetriesChangedNamespaceRvWithFreshAck(t *testing.T) {
 	g, client, ep := cniGateFixture(t)
 	var calls atomic.Int32
-	g.enroll = func(ctx context.Context, _ *endpoint.Endpoint) error {
+	g.enroll = func(ctx context.Context, _, _ *endpoint.Endpoint) error {
 		if calls.Add(1) == 1 {
 			ns, err := client.CoreV1().Namespaces().Get(ctx, "apps", metav1.GetOptions{})
 			require.NoError(t, err)
@@ -336,7 +341,8 @@ func TestAdmissionPrivateMetadataIsStableDuringManagedMetadataUpdates(t *testing
 		}
 	}()
 	defer func() { close(stop); <-stopped }()
-	g.enroll = func(_ context.Context, view *endpoint.Endpoint) error {
+	g.enroll = func(_ context.Context, owner, view *endpoint.Endpoint) error {
+		require.Same(t, managed, owner)
 		require.NotSame(t, managed, view)
 		require.Equal(t, "pod-generation", string(view.GetPod().UID))
 		require.Equal(t, "server", view.GetPod().Spec.ServiceAccountName)
@@ -347,7 +353,7 @@ func TestAdmissionPrivateMetadataIsStableDuringManagedMetadataUpdates(t *testing
 
 func TestAdmissionRejectsPodUidChangeAfterAck(t *testing.T) {
 	g, client, ep := cniGateFixture(t)
-	g.enroll = func(ctx context.Context, _ *endpoint.Endpoint) error {
+	g.enroll = func(ctx context.Context, _, _ *endpoint.Endpoint) error {
 		pod, err := client.CoreV1().Pods("apps").Get(ctx, "server", metav1.GetOptions{})
 		require.NoError(t, err)
 		pod.UID = "changed-after-ack"
@@ -379,7 +385,7 @@ func TestAdmissionUnenrolledIntentDoesNotEnroll(t *testing.T) {
 	_, err = client.CoreV1().Namespaces().Update(t.Context(), ns, metav1.UpdateOptions{})
 	require.NoError(t, err)
 	client.ClearActions()
-	g.enroll = func(context.Context, *endpoint.Endpoint) error {
+	g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error {
 		t.Fatal("Unenrolled intent must not enroll")
 		return nil
 	}
@@ -395,7 +401,7 @@ func TestAdmissionRejectsNamespaceWithoutResourceVersion(t *testing.T) {
 	ns.ResourceVersion = ""
 	_, err = client.CoreV1().Namespaces().Update(t.Context(), ns, metav1.UpdateOptions{})
 	require.NoError(t, err)
-	g.enroll = func(context.Context, *endpoint.Endpoint) error {
+	g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error {
 		t.Fatal("Incomplete namespace identity must not enroll")
 		return nil
 	}
@@ -431,6 +437,56 @@ func TestAdmissionHiveUsesRealZdsProviderAndTypedGroup(t *testing.T) {
 			require.NoError(t, h.Populate(logger))
 			require.Len(t, received, 1)
 			require.NotNil(t, received[0])
+		})
+	}
+}
+
+func TestAdmissionRejectsManagedDeletionBeforeAndAfterACK(t *testing.T) {
+	for _, when := range []string{"before-attempt", "during-ack", "after-api-recheck"} {
+		t.Run(when, func(t *testing.T) {
+			g, client, view := cniGateFixture(t)
+			logger := hivetest.Logger(t)
+			repo := policy.NewPolicyRepository(logger, cmtypes.DefaultClusterInfo, nil, nil, nil, nil, testpolicy.NewPolicyMetricsNoop())
+			ep, err := endpoint.NewEndpointFromChangeModel(endpoint.EndpointParams{Logger: logger, PolicyRepo: repo}, nil, nil,
+				&models.EndpointChangeRequest{ID: int64(view.ID), K8sUID: view.K8sUID, K8sNamespace: view.K8sNamespace,
+					K8sPodName: view.K8sPodName, ContainerNetnsPath: view.GetContainerNetnsPath()}, nil)
+			require.NoError(t, err)
+			ep.UpdateLogger(nil)
+			ep.SetPod(view.GetPod().DeepCopy())
+			require.True(t, ep.SetState(endpoint.StateWaitingForIdentity, "admission test"))
+			disconnect := func() {
+				require.True(t, ep.SetState(endpoint.StateDisconnecting, "concurrent deletion"))
+				require.True(t, ep.SetState(endpoint.StateDisconnected, "deletion complete"))
+			}
+			calls := 0
+			g.enroll = func(_ context.Context, owner, private *endpoint.Endpoint) error {
+				require.Same(t, ep, owner)
+				require.NotSame(t, owner, private)
+				calls++
+				if when == "during-ack" {
+					disconnect()
+				}
+				return nil
+			}
+			if when == "before-attempt" {
+				disconnect()
+			}
+			if when == "after-api-recheck" {
+				reads := 0
+				client.PrependReactor("get", "namespaces", func(ktesting.Action) (bool, runtime.Object, error) {
+					reads++
+					if reads == 2 {
+						disconnect()
+					}
+					return false, nil, nil
+				})
+			}
+			require.ErrorContains(t, g.WaitForEndpoint(t.Context(), ep), "managed endpoint disconnected")
+			if when == "before-attempt" {
+				require.Zero(t, calls)
+			} else {
+				require.Equal(t, 1, calls)
+			}
 		})
 	}
 }

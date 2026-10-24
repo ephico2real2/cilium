@@ -40,7 +40,7 @@ func TestAdmissionCancellationDuringBackoffLogsTerminalOutcome(t *testing.T) {
 	g.logger = slog.New(slog.NewJSONHandler(output, nil))
 	g.initialBackoff = time.Second
 	g.budget = 2 * time.Second
-	g.enroll = func(context.Context, *endpoint.Endpoint) error {
+	g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error {
 		return errors.New("injected missing proxy ACK")
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -86,7 +86,7 @@ func TestAdmissionDoesNotExemptCopiedProxyAppLabel(t *testing.T) {
 	require.NoError(t, err)
 	ep.SetPod(pod.DeepCopy())
 	calls := 0
-	g.enroll = func(context.Context, *endpoint.Endpoint) error {
+	g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error {
 		calls++
 		return nil
 	}
