@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"sort"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
@@ -25,6 +26,10 @@ import (
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 )
+
+const logStage = "stage"
+
+const maxEndpointEventsPerBatch = 256
 
 type StreamProcessorParams struct {
 	// The backing gRPC bidi stream initiated by zTunnel
@@ -44,6 +49,9 @@ type StreamProcessorParams struct {
 	Metrics                   *Metrics
 	Authorizations            *AuthorizationPolicies
 	TrustDomain               string
+	// ClusterName is the canonical local name expected by ztunnel's cluster inventory.
+	ClusterName string
+	RequireMTLS bool
 }
 
 // StreamProcessor implements the logic for handling xDS streams to zTunnel.
@@ -62,6 +70,8 @@ type StreamProcessor struct {
 	metrics                *Metrics
 	authorizations         *AuthorizationPolicies
 	trustDomain            string
+	clusterName            string
+	requireMTLS            bool
 }
 
 // CiliumEndpointsWatcher defines the interface for watching CiliumEndpoints and CiliumEndpointSlices.
@@ -123,6 +133,8 @@ func NewStreamProcessor(params *StreamProcessorParams) *StreamProcessor {
 		metrics:                metrics,
 		authorizations:         authorizations,
 		trustDomain:            params.TrustDomain,
+		clusterName:            params.ClusterName,
+		requireMTLS:            params.RequireMTLS,
 	}
 	sp.endpointSource = NewEndpointSource(params.K8sCiliumEndpointsWatcher, sp)
 	return sp
@@ -138,6 +150,24 @@ func convertCESToEndpointMap(ces *v2alpha1.CiliumEndpointSlice) map[string]*type
 		result[cepName] = cep
 	}
 	return result
+}
+
+func validateStrictCESKeys(ces *v2alpha1.CiliumEndpointSlice) error {
+	if ces == nil {
+		return wrapValidationError(errInvalidWorkloadData, "missing CiliumEndpointSlice")
+	}
+	seen := make(map[string]struct{}, len(ces.Endpoints))
+	for i := range ces.Endpoints {
+		coreCEP := &ces.Endpoints[i]
+		if coreCEP.Name == "" {
+			return wrapValidationError(errInvalidWorkloadData, "CiliumEndpointSlice %q contains an unnamed endpoint", ces.Name)
+		}
+		if _, exists := seen[coreCEP.Name]; exists {
+			return wrapValidationError(errInvalidWorkloadData, "CiliumEndpointSlice %q contains duplicate endpoint %q", ces.Name, coreCEP.Name)
+		}
+		seen[coreCEP.Name] = struct{}{}
+	}
+	return nil
 }
 
 // computeEndpointDiff compares old and new endpoint maps and returns lists of
@@ -156,8 +186,17 @@ func computeEndpointDiff(oldCEPs, newCEPs map[string]*types.CiliumEndpoint) (add
 			// New endpoint
 			added = append(added, newCEP)
 		} else if !oldCEP.DeepEqual(newCEP) {
-			// Updated endpoint
-			updated = append(updated, newCEP)
+			oldUID := (&EndpointEvent{CiliumEndpoint: oldCEP}).getPodUID()
+			newUID := (&EndpointEvent{CiliumEndpoint: newCEP}).getPodUID()
+			if oldUID != "" && newUID != "" && oldUID != newUID {
+				// Delta resources are keyed by Pod UID, not CEP name. A Pod
+				// recreated under the same CEP key must retire the old identity.
+				removed = append(removed, oldCEP)
+				added = append(added, newCEP)
+			} else {
+				// Updates with the same Pod UID are treated as CREATE.
+				updated = append(updated, newCEP)
+			}
 		}
 	}
 
@@ -187,7 +226,10 @@ func (es *EndpointSource) handleCESUpsert(ces *v2alpha1.CiliumEndpointSlice, ces
 // handleCESDelete processes a delete event for a CiliumEndpointSlice.
 // Returns an EndpointEventCollection containing REMOVED events for all endpoints.
 func (es *EndpointSource) handleCESDelete(ces *v2alpha1.CiliumEndpointSlice, cesCache map[resource.Key]map[string]*types.CiliumEndpoint, key resource.Key) EndpointEventCollection {
-	endpoints := convertCESToEndpointMap(ces)
+	endpoints := cesCache[key]
+	if endpoints == nil {
+		endpoints = convertCESToEndpointMap(ces)
+	}
 	events := make(EndpointEventCollection, 0, len(endpoints))
 	for _, ep := range endpoints {
 		events = append(events, &EndpointEvent{Type: REMOVED, CiliumEndpoint: ep})
@@ -203,6 +245,7 @@ func (es *EndpointSource) SubscribeToEndpointEvents(ctx context.Context, syncCh 
 		newSliceEvents := es.k8sCiliumEndpointsWatcher.GetCiliumEndpointSliceResource().Events(ctx, resource.WithErrorHandler(resource.AlwaysRetry))
 		// Keep track of CEPs in each CES to detect deletions on updates
 		cesCache := make(map[resource.Key]map[string]*types.CiliumEndpoint)
+		sourceErrors := make(map[resource.Key]error)
 		var synced bool
 		var initialBatch EndpointEventCollection
 
@@ -213,6 +256,44 @@ func (es *EndpointSource) SubscribeToEndpointEvents(ctx context.Context, syncCh 
 			}
 			if e.Kind == resource.Sync {
 				if !synced {
+					if es.sp.requireMTLS {
+						initialBatch = make(EndpointEventCollection, 0)
+						keys := make([]resource.Key, 0, len(cesCache))
+						for key := range cesCache {
+							keys = append(keys, key)
+						}
+						sort.Slice(keys, func(i, j int) bool {
+							if keys[i].Namespace != keys[j].Namespace {
+								return keys[i].Namespace < keys[j].Namespace
+							}
+							return keys[i].Name < keys[j].Name
+						})
+						for _, key := range keys {
+							endpoints := cesCache[key]
+							names := make([]string, 0, len(endpoints))
+							for name := range endpoints {
+								names = append(names, name)
+							}
+							sort.Strings(names)
+							for _, name := range names {
+								initialBatch = append(initialBatch, &EndpointEvent{Type: CREATE, CiliumEndpoint: endpoints[name]})
+							}
+						}
+						errorKeys := make([]resource.Key, 0, len(sourceErrors))
+						for key := range sourceErrors {
+							errorKeys = append(errorKeys, key)
+						}
+						sort.Slice(errorKeys, func(i, j int) bool {
+							if errorKeys[i].Namespace != errorKeys[j].Namespace {
+								return errorKeys[i].Namespace < errorKeys[j].Namespace
+							}
+							return errorKeys[i].Name < errorKeys[j].Name
+						})
+						for _, key := range errorKeys {
+							err := fmt.Errorf("invalid CiliumEndpointSlice %s/%s: %w", key.Namespace, key.Name, sourceErrors[key])
+							initialBatch = append(initialBatch, strictEndpointSourceError(err))
+						}
+					}
 					syncCh <- initialBatch
 					synced = true
 				}
@@ -221,6 +302,71 @@ func (es *EndpointSource) SubscribeToEndpointEvents(ctx context.Context, syncCh 
 			}
 			if e.Object == nil {
 				e.Done(nil)
+				continue
+			}
+
+			if !synced && es.sp.requireMTLS {
+				switch e.Kind {
+				case resource.Upsert:
+					if es.isNamespaceEnrolled(e.Object.Namespace) {
+						if err := validateStrictCESKeys(e.Object); err != nil {
+							delete(cesCache, e.Key)
+							sourceErrors[e.Key] = err
+							if es.sp.log != nil {
+								es.sp.log.Error("Rejecting malformed strict CiliumEndpointSlice",
+									logfields.K8sNamespace, e.Key.Namespace,
+									logfields.Name, e.Key.Name,
+									logfields.Error, err,
+								)
+							}
+							e.Done(err)
+							continue
+						}
+						cesCache[e.Key] = convertCESToEndpointMap(e.Object)
+						delete(sourceErrors, e.Key)
+					} else {
+						delete(cesCache, e.Key)
+						delete(sourceErrors, e.Key)
+					}
+				case resource.Delete:
+					delete(cesCache, e.Key)
+					delete(sourceErrors, e.Key)
+				}
+				e.Done(nil)
+				continue
+			}
+
+			if synced && es.sp.requireMTLS {
+				var events EndpointEventCollection
+				var sourceErr error
+				switch e.Kind {
+				case resource.Upsert:
+					if es.isNamespaceEnrolled(e.Object.Namespace) {
+						if err := validateStrictCESKeys(e.Object); err != nil {
+							sourceErr = err
+							wrappedErr := fmt.Errorf("invalid CiliumEndpointSlice %s/%s: %w", e.Key.Namespace, e.Key.Name, err)
+							events = append(events, strictEndpointSourceError(wrappedErr))
+							if es.sp.log != nil {
+								es.sp.log.Error("Rejecting malformed strict CiliumEndpointSlice",
+									logfields.K8sNamespace, e.Key.Namespace,
+									logfields.Name, e.Key.Name,
+									logfields.Error, err,
+								)
+							}
+						} else {
+							events = es.handleCESUpsert(e.Object, cesCache, e.Key)
+						}
+					} else {
+						for _, endpoint := range cesCache[e.Key] {
+							events = append(events, &EndpointEvent{Type: REMOVED, CiliumEndpoint: endpoint})
+						}
+						delete(cesCache, e.Key)
+					}
+				case resource.Delete:
+					events = es.handleCESDelete(e.Object, cesCache, e.Key)
+				}
+				events.EmitTo(ctx, es.sp.endpointRecv)
+				e.Done(sourceErr)
 				continue
 			}
 
@@ -256,6 +402,7 @@ func (es *EndpointSource) SubscribeToEndpointEvents(ctx context.Context, syncCh 
 	newEvents := es.k8sCiliumEndpointsWatcher.GetCiliumEndpointResource().Events(ctx, resource.WithErrorHandler(resource.AlwaysRetry))
 	var synced bool
 	var initialBatch EndpointEventCollection
+	initialCEPs := make(map[resource.Key]*types.CiliumEndpoint)
 
 	for e := range newEvents {
 		if ctx.Err() != nil {
@@ -264,6 +411,22 @@ func (es *EndpointSource) SubscribeToEndpointEvents(ctx context.Context, syncCh 
 		}
 		if e.Kind == resource.Sync {
 			if !synced {
+				if es.sp.requireMTLS {
+					keys := make([]resource.Key, 0, len(initialCEPs))
+					for key := range initialCEPs {
+						keys = append(keys, key)
+					}
+					sort.Slice(keys, func(i, j int) bool {
+						if keys[i].Namespace != keys[j].Namespace {
+							return keys[i].Namespace < keys[j].Namespace
+						}
+						return keys[i].Name < keys[j].Name
+					})
+					initialBatch = make(EndpointEventCollection, 0, len(keys))
+					for _, key := range keys {
+						initialBatch = append(initialBatch, &EndpointEvent{Type: CREATE, CiliumEndpoint: initialCEPs[key]})
+					}
+				}
 				syncCh <- initialBatch
 				synced = true
 			}
@@ -271,6 +434,61 @@ func (es *EndpointSource) SubscribeToEndpointEvents(ctx context.Context, syncCh 
 			continue
 		}
 		if e.Object == nil {
+			e.Done(nil)
+			continue
+		}
+
+		if !synced && es.sp.requireMTLS {
+			key := e.Key
+			switch e.Kind {
+			case resource.Upsert:
+				if es.isNamespaceEnrolled(e.Object.GetNamespace()) {
+					initialCEPs[key] = e.Object.DeepCopy()
+				} else {
+					delete(initialCEPs, key)
+				}
+			case resource.Delete:
+				delete(initialCEPs, key)
+			}
+			e.Done(nil)
+			continue
+		}
+
+		if synced && es.sp.requireMTLS {
+			key := e.Key
+			var events EndpointEventCollection
+			switch e.Kind {
+			case resource.Upsert:
+				previous, found := initialCEPs[key]
+				if !es.isNamespaceEnrolled(e.Object.GetNamespace()) {
+					if found {
+						events = append(events, &EndpointEvent{Type: REMOVED, CiliumEndpoint: previous})
+						delete(initialCEPs, key)
+					}
+				} else {
+					current := e.Object.DeepCopy()
+					oldUID := ""
+					if found {
+						oldUID = (&EndpointEvent{CiliumEndpoint: previous}).getPodUID()
+					}
+					newUID := (&EndpointEvent{CiliumEndpoint: current}).getPodUID()
+					if found && oldUID != "" && newUID != "" && oldUID != newUID {
+						events = append(events, &EndpointEvent{Type: REMOVED, CiliumEndpoint: previous})
+					}
+					events = append(events, &EndpointEvent{Type: CREATE, CiliumEndpoint: current})
+					initialCEPs[key] = current
+				}
+			case resource.Delete:
+				previous, found := initialCEPs[key]
+				if !found {
+					previous = e.Object
+				}
+				if previous != nil {
+					events = append(events, &EndpointEvent{Type: REMOVED, CiliumEndpoint: previous})
+				}
+				delete(initialCEPs, key)
+			}
+			events.EmitTo(ctx, es.sp.endpointRecv)
 			e.Done(nil)
 			continue
 		}
@@ -321,7 +539,7 @@ func (sp *StreamProcessor) handleAddressTypeURL(req *v3.DeltaDiscoveryRequest) e
 	// For now, we expect Cilium's socket-lb to be handling service translation,
 	// so we will only send Workload events to support pod-to-pod proxying.
 	if len(req.ResourceNamesSubscribe) != 0 && len(req.ResourceNamesUnsubscribe) != 0 {
-		return fmt.Errorf("unexpected resource names subscribe %v or unsubscribe %v for Address type URL",
+		return wrapValidationError(errInvalidDiscoveryState, "unexpected resource names subscribe %v or unsubscribe %v for Address type URL",
 			req.ResourceNamesSubscribe, req.ResourceNamesUnsubscribe)
 	}
 
@@ -338,18 +556,33 @@ func (sp *StreamProcessor) handleAddressTypeURL(req *v3.DeltaDiscoveryRequest) e
 	var collection EndpointEventCollection
 	select {
 	case batch, ok := <-syncCh:
-		if ok {
-			collection = batch
+		if !ok {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return wrapValidationError(errEndpointSourceClosed, "workload subscription ended before initial synchronization")
 		}
+		collection = batch
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 
-	resp := collection.toDeltaDiscoveryResponse(sp.trustDomain)
-	sp.expectedNonce[resp.Nonce] = struct{}{}
-
-	if err := sp.stream.SendMsg(resp); err != nil {
-		sp.metrics.EnrollmentFailures.WithLabelValues("send_failed").Inc()
+	resp, err := sp.addressResponse(collection)
+	if err != nil {
+		sp.metrics.EnrollmentFailures.WithLabelValues("invalid_workload_snapshot").Inc()
+		sp.log.Error("Rejecting incomplete strict workload Address snapshot",
+			logStage, "xds-address-snapshot",
+			logfields.Resource, xdsTypeURLAddress,
+			logfields.Error, err,
+		)
+		return fmt.Errorf("failed to build workload Address response: %w", err)
+	}
+	if sp.requireMTLS {
+		if err := addStrictInitialRemovals(resp, req); err != nil {
+			return fmt.Errorf("failed to reconcile retained workload resources: %w", err)
+		}
+	}
+	if err := sp.sendAddressResponse(resp, "xds-address-snapshot"); err != nil {
 		return err
 	}
 
@@ -358,17 +591,82 @@ func (sp *StreamProcessor) handleAddressTypeURL(req *v3.DeltaDiscoveryRequest) e
 	return nil
 }
 
+func addStrictInitialRemovals(response *v3.DeltaDiscoveryResponse, request *v3.DeltaDiscoveryRequest) error {
+	if response == nil {
+		return wrapValidationError(errInvalidDiscoveryState, "missing initial workload response")
+	}
+	if request == nil {
+		return wrapValidationError(errInvalidDiscoveryState, "missing initial workload request")
+	}
+	retained := make(map[string]struct{}, len(response.Resources))
+	for _, resource := range response.Resources {
+		if resource == nil || resource.Name == "" {
+			return wrapValidationError(errInvalidDiscoveryState, "initial workload response contains an unnamed resource")
+		}
+		retained[resource.Name] = struct{}{}
+	}
+	removed := make(map[string]struct{}, len(response.RemovedResources)+len(request.InitialResourceVersions))
+	for _, name := range response.RemovedResources {
+		if name == "" {
+			return wrapValidationError(errInvalidDiscoveryState, "initial workload response contains an empty removed name")
+		}
+		removed[name] = struct{}{}
+	}
+	for name := range request.InitialResourceVersions {
+		if name == "" {
+			return wrapValidationError(errInvalidDiscoveryState, "initial resource versions contain an empty workload name")
+		}
+		if _, exists := retained[name]; !exists {
+			removed[name] = struct{}{}
+		}
+	}
+	response.RemovedResources = response.RemovedResources[:0]
+	for name := range removed {
+		response.RemovedResources = append(response.RemovedResources, name)
+	}
+	sort.Strings(response.RemovedResources)
+	return nil
+}
+
+func (sp *StreamProcessor) sendAddressResponse(response *v3.DeltaDiscoveryResponse, stage string) error {
+	if response == nil || response.Nonce == "" {
+		return wrapValidationError(errInvalidDiscoveryState, "cannot send an empty workload Address response or nonce")
+	}
+	if sp.stream == nil {
+		return wrapValidationError(errInvalidDiscoveryState, "cannot send workload Address response without an xDS stream")
+	}
+	if err := sp.stream.SendMsg(response); err != nil {
+		if sp.metrics != nil {
+			sp.metrics.EnrollmentFailures.WithLabelValues("send_failed").Inc()
+		}
+		if sp.log != nil {
+			sp.log.Error("Failed to send workload Address response",
+				logStage, stage,
+				logfields.Resource, xdsTypeURLAddress,
+				logfields.Error, err,
+			)
+		}
+		return err
+	}
+	if sp.expectedNonce == nil {
+		sp.expectedNonce = make(map[string]struct{})
+	}
+	sp.expectedNonce[response.Nonce] = struct{}{}
+	return nil
+}
+
 func (sp *StreamProcessor) handleDeltaDiscoveryReq(req *v3.DeltaDiscoveryRequest) error {
 	if req.TypeUrl != xdsTypeURLAddress {
-		return fmt.Errorf("unexpected type URL %q for Address handler", req.TypeUrl)
+		return wrapValidationError(errInvalidDiscoveryState, "unexpected type URL %q for Address handler", req.TypeUrl)
 	}
 	// if the delta discovery request has a nonce, this is a ack or nack.
-	// for now, if we have a Nack we'll log the errors, retrying a Nack'd
-	// message would cause the same issue as previously encountered.
+	// In Observe mode, report a NACK and leave the stream alive for compatibility.
+	// Strict mode closes the stream so ztunnel reconnects for a fresh full snapshot;
+	// continuing would leave the two peers with different authorization state.
 	if req.ResponseNonce != "" {
 		// check if this is an expected nonce, if not, its an error
 		if _, ok := sp.expectedNonce[req.ResponseNonce]; !ok {
-			return fmt.Errorf("unexpected nonce %q received", req.ResponseNonce)
+			return wrapValidationError(errInvalidDiscoveryState, "unexpected nonce %q received", req.ResponseNonce)
 		}
 
 		// remove expected Nonce
@@ -381,8 +679,10 @@ func (sp *StreamProcessor) handleDeltaDiscoveryReq(req *v3.DeltaDiscoveryRequest
 				req.ErrorDetail.Message,
 				logfields.Code,
 				req.ErrorDetail.Code)
-			// return nil here, we did not encounter a stream error,
-			// instead we log the Nack to display an application level error.
+			if sp.requireMTLS {
+				return wrapValidationError(errInvalidDiscoveryState,
+					"ztunnel rejected strict Address response with code %d", req.ErrorDetail.Code)
+			}
 			return nil
 		}
 		return nil
@@ -392,29 +692,75 @@ func (sp *StreamProcessor) handleDeltaDiscoveryReq(req *v3.DeltaDiscoveryRequest
 }
 
 func (sp *StreamProcessor) handleEPEvent(epEvent *EndpointEvent) error {
-	collection := EndpointEventCollection{epEvent}
-
-drained:
-	for {
-		select {
-		case ep := <-sp.endpointRecv:
-			collection = append(collection, ep)
-		default:
-			break drained
-		}
-	}
-
-	resp := collection.toDeltaDiscoveryResponse(sp.trustDomain)
-
-	// record the generated Nonce so we can link up any Ack or Nack in our main
-	// event loop.
-	sp.expectedNonce[resp.Nonce] = struct{}{}
-
-	err := sp.stream.SendMsg(resp)
+	collection, err := sp.drainEndpointEvents(epEvent)
 	if err != nil {
 		return err
 	}
-	return nil
+	if sp.requireMTLS {
+		collection, err = collection.coalesceStrictEndpointEvents()
+		if err != nil {
+			sp.metrics.EnrollmentFailures.WithLabelValues("invalid_workload_event").Inc()
+			sp.log.Error("Rejecting malformed strict workload event batch",
+				logStage, "xds-address-event",
+				logfields.Resource, xdsTypeURLAddress,
+				logfields.Error, err,
+			)
+			return fmt.Errorf("failed to coalesce workload Address events: %w", err)
+		}
+	}
+
+	resp, err := sp.addressResponse(collection)
+	if err != nil {
+		sp.metrics.EnrollmentFailures.WithLabelValues("invalid_workload_event").Inc()
+		sp.log.Error("Rejecting incomplete strict workload Address event",
+			logStage, "xds-address-event",
+			logfields.Resource, xdsTypeURLAddress,
+			logfields.Error, err,
+		)
+		return fmt.Errorf("failed to build workload Address event response: %w", err)
+	}
+
+	return sp.sendAddressResponse(resp, "xds-address-event")
+}
+
+func (sp *StreamProcessor) drainEndpointEvents(first *EndpointEvent) (EndpointEventCollection, error) {
+	if first == nil {
+		return nil, wrapValidationError(errInvalidWorkloadData, "cannot process a nil workload event")
+	}
+	collection := make(EndpointEventCollection, 0, maxEndpointEventsPerBatch)
+	collection = append(collection, first)
+	ctx := context.Background()
+	if sp.stream != nil && sp.stream.Context() != nil {
+		ctx = sp.stream.Context()
+	}
+
+	for len(collection) < maxEndpointEventsPerBatch {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case event, ok := <-sp.endpointRecv:
+			if !ok {
+				return nil, wrapValidationError(errEndpointSourceClosed, "workload endpoint event channel closed")
+			}
+			if event == nil {
+				return nil, wrapValidationError(errInvalidWorkloadData, "workload endpoint event channel contains a nil event")
+			}
+			collection = append(collection, event)
+		default:
+			return collection, nil
+		}
+	}
+	return collection, nil
+}
+
+func (sp *StreamProcessor) addressResponse(collection EndpointEventCollection) (*v3.DeltaDiscoveryResponse, error) {
+	if sp.requireMTLS {
+		return collection.toValidatedDeltaDiscoveryResponse(sp.trustDomain, sp.clusterName)
+	}
+	return collection.toDeltaDiscoveryResponse(sp.trustDomain, sp.clusterName), nil
 }
 
 // Start multiplexes the legacy Address stream and the shared delta engine's
@@ -460,11 +806,11 @@ func (sp *StreamProcessor) Start() error {
 			return err
 		case req, ok := <-sp.streamRecv:
 			if !ok || req == nil {
-				return fmt.Errorf("xDS request channel closed or nil request")
+				return wrapValidationError(errInvalidDiscoveryState, "xDS request channel closed or nil request")
 			}
 			if req.Node != nil {
 				if node != nil && req.Node.Id != node.Id {
-					return fmt.Errorf("xDS node ID changed on stream")
+					return wrapValidationError(errInvalidDiscoveryState, "xDS node ID changed on stream")
 				}
 				if node == nil {
 					node = proto.Clone(req.Node).(*corev3.Node)
@@ -497,7 +843,7 @@ func (sp *StreamProcessor) Start() error {
 			}
 		case ep, ok := <-sp.endpointRecv:
 			if !ok || ep == nil {
-				return fmt.Errorf("xDS endpoint channel closed or nil event")
+				return wrapValidationError(errEndpointSourceClosed, "xDS endpoint channel closed or nil event")
 			}
 			if err := sp.handleEPEvent(ep); err != nil {
 				return err

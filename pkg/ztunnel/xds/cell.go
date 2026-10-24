@@ -9,6 +9,7 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb"
 
+	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
 	"github.com/cilium/cilium/pkg/metrics"
@@ -38,12 +39,15 @@ var Cell = cell.Module(
 type xdsServerParams struct {
 	cell.In
 
-	Lifecycle              cell.Lifecycle
-	DB                     *statedb.DB
-	Logger                 *slog.Logger
-	EPManager              endpointmanager.EndpointManager
-	K8sWatcher             *watchers.K8sWatcher
-	Config                 config.Config
+	Lifecycle  cell.Lifecycle
+	DB         *statedb.DB
+	Logger     *slog.Logger
+	EPManager  endpointmanager.EndpointManager
+	K8sWatcher *watchers.K8sWatcher
+	Config     config.Config
+	// ClusterInfo is Cilium's validated local identity. Name must match the
+	// clusterId configured in ztunnel's workload inventory.
+	ClusterInfo            cmtypes.ClusterInfo
 	EnrolledNamespaceTable statedb.RWTable[*table.EnrolledNamespace]
 	Metrics                *Metrics
 }
@@ -66,6 +70,7 @@ func NewServer(params xdsServerParams) *Server {
 
 	server.caType = params.Config.CAType
 	server.trustDomain = params.Config.SpiffeTrustDomain
+	server.clusterName = params.ClusterInfo.Name
 	server.requireMTLS = params.Config.RequireMTLS
 
 	params.Lifecycle.Append(cell.Hook{

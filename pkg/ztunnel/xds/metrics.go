@@ -19,7 +19,8 @@ const (
 // Metrics holds XDS-related metrics for ztunnel workload discovery
 type Metrics struct {
 	// EnrollmentFailures tracks workload enrollment failures to Z-tunnel via XDS
-	// Status values: send_failed, nack_received
+	// Status values include send_failed, nack_received, invalid_workload_snapshot,
+	// and invalid_workload_event.
 	EnrollmentFailures metric.Vec[metric.Counter]
 	// AuthorizationEvents counts protocol events, not policy enforcement.
 	AuthorizationEvents metric.Vec[metric.Counter]
@@ -48,7 +49,7 @@ func NewMetrics() *Metrics {
 				Namespace: metrics.Namespace,
 				Subsystem: subsystem,
 				Name:      "enrollment_failures_total",
-				Help:      "Total number of workload enrollment failures to ztunnel via XDS by status (send_failed, nack_received)",
+				Help:      "Total number of workload enrollment failures to ztunnel via XDS by status",
 			},
 			[]string{labelStatus},
 		),

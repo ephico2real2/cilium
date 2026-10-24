@@ -319,3 +319,226 @@ func TestEndpointEventCollectionToDeltaDiscoveryResponse(t *testing.T) {
 		require.Equal(t, testUIDs[1], response.RemovedResources[0], "REMOVE resource UID should match removeEp UID")
 	})
 }
+
+func TestEndpointEventCollectionToValidatedDeltaDiscoveryResponse(t *testing.T) {
+	newEvent := func(uid string, eventType EndpointEventType) *EndpointEvent {
+		ep := &endpoint.Endpoint{
+			K8sUID:       uid,
+			K8sPodName:   "api",
+			K8sNamespace: "orders",
+			IPv4:         netip.MustParseAddr("10.0.0.10"),
+		}
+		ep.SetPod(&slim_corev1.Pod{
+			Spec:   slim_corev1.PodSpec{ServiceAccountName: "api"},
+			Status: slim_corev1.PodStatus{HostIP: "10.0.0.1"},
+		})
+		return &EndpointEvent{Type: eventType, CiliumEndpoint: endpointToCiliumEndpoint(ep)}
+	}
+
+	t.Run("valid batch binds trust domain and removes exact UID", func(t *testing.T) {
+		collection := EndpointEventCollection{
+			newEvent("pod-current", CREATE),
+			newEvent("pod-retired", REMOVED),
+		}
+		response, err := collection.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		require.NoError(t, err)
+		require.Equal(t, xdsTypeURLAddress, response.TypeUrl)
+		require.NotEmpty(t, response.Nonce)
+		require.Len(t, response.Resources, 1)
+		require.Equal(t, "pod-current", response.Resources[0].Name)
+		var address pb.Address
+		require.NoError(t, response.Resources[0].Resource.UnmarshalTo(&address))
+		require.Equal(t, "mesh.example.com", address.GetWorkload().TrustDomain)
+		require.Equal(t, "cluster-alpha", address.GetWorkload().ClusterId)
+		require.Equal(t, pb.TunnelProtocol_HBONE, address.GetWorkload().TunnelProtocol)
+		require.Equal(t, []string{"pod-retired"}, response.RemovedResources)
+	})
+
+	t.Run("empty synchronized snapshot is valid", func(t *testing.T) {
+		response, err := (EndpointEventCollection{}).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		require.NoError(t, err)
+		require.Empty(t, response.Resources)
+		require.Empty(t, response.RemovedResources)
+	})
+
+	t.Run("missing cluster ID fails closed", func(t *testing.T) {
+		response, err := (EndpointEventCollection{}).toValidatedDeltaDiscoveryResponse("mesh.example.com", " ")
+		require.ErrorContains(t, err, "requires a cluster name")
+		require.Nil(t, response)
+	})
+
+	t.Run("different Pod UIDs cannot claim the same address", func(t *testing.T) {
+		response, err := EndpointEventCollection{
+			newEvent("pod-one", CREATE),
+			newEvent("pod-two", CREATE),
+		}.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		require.ErrorContains(t, err, "assigns one address to multiple Pod UIDs")
+		require.Nil(t, response)
+	})
+
+	t.Run("address reuse after old UID removal is valid", func(t *testing.T) {
+		response, err := EndpointEventCollection{
+			newEvent("pod-old", REMOVED),
+			newEvent("pod-new", CREATE),
+		}.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		require.NoError(t, err)
+		require.Equal(t, []string{"pod-old"}, response.RemovedResources)
+		require.Len(t, response.Resources, 1)
+		require.Equal(t, "pod-new", response.Resources[0].Name)
+	})
+
+	tests := []struct {
+		name       string
+		collection EndpointEventCollection
+		trust      string
+		wantError  string
+	}{
+		{name: "missing trust domain", collection: EndpointEventCollection{}, trust: " ", wantError: "requires a trust domain"},
+		{name: "nil event", collection: EndpointEventCollection{nil}, trust: "mesh.example.com", wantError: "event 0 is nil"},
+		{name: "missing CiliumEndpoint", collection: EndpointEventCollection{{Type: CREATE}}, trust: "mesh.example.com", wantError: "missing CiliumEndpoint"},
+		{name: "missing pod UID", collection: EndpointEventCollection{{Type: CREATE, CiliumEndpoint: &types.CiliumEndpoint{}}}, trust: "mesh.example.com", wantError: "missing Pod owner reference"},
+		{name: "missing networking", collection: func() EndpointEventCollection {
+			event := newEvent("pod-no-network", CREATE)
+			event.Networking = nil
+			return EndpointEventCollection{event}
+		}(), trust: "mesh.example.com", wantError: "missing networking information"},
+		{name: "no pod address", collection: func() EndpointEventCollection {
+			event := newEvent("pod-no-address", CREATE)
+			event.Networking.Addressing = nil
+			return EndpointEventCollection{event}
+		}(), trust: "mesh.example.com", wantError: "no workload IP addresses"},
+		{name: "invalid pod address", collection: func() EndpointEventCollection {
+			event := newEvent("pod-bad-address", CREATE)
+			event.Networking.Addressing[0].IPV4 = "not-an-ip"
+			return EndpointEventCollection{event}
+		}(), trust: "mesh.example.com", wantError: "invalid IPv4 address"},
+		{name: "loopback pod address", collection: func() EndpointEventCollection {
+			event := newEvent("pod-loopback", CREATE)
+			event.Networking.Addressing[0].IPV4 = "127.0.0.1"
+			return EndpointEventCollection{event}
+		}(), trust: "mesh.example.com", wantError: "invalid IPv4 address"},
+		{name: "link local pod address", collection: func() EndpointEventCollection {
+			event := newEvent("pod-link-local", CREATE)
+			event.Networking.Addressing[0].IPV4 = "169.254.1.2"
+			return EndpointEventCollection{event}
+		}(), trust: "mesh.example.com", wantError: "invalid IPv4 address"},
+		{name: "invalid node address", collection: func() EndpointEventCollection {
+			event := newEvent("pod-bad-node", CREATE)
+			event.Networking.NodeIP = "127.0.0.1"
+			return EndpointEventCollection{event}
+		}(), trust: "mesh.example.com", wantError: "invalid node address"},
+		{name: "duplicate pod address", collection: func() EndpointEventCollection {
+			event := newEvent("pod-duplicate-address", CREATE)
+			event.Networking.Addressing = append(event.Networking.Addressing, &v2.AddressPair{IPV4: event.Networking.Addressing[0].IPV4})
+			return EndpointEventCollection{event}
+		}(), trust: "mesh.example.com", wantError: "duplicate workload address"},
+		{name: "mapped IPv4 in IPv6 field", collection: func() EndpointEventCollection {
+			event := newEvent("pod-mapped-ipv4", CREATE)
+			event.Networking.Addressing[0].IPV6 = "::ffff:10.0.0.10"
+			return EndpointEventCollection{event}
+		}(), trust: "mesh.example.com", wantError: "invalid IPv6 address"},
+		{name: "duplicate pod UID in batch", collection: EndpointEventCollection{
+			newEvent("pod-duplicate", CREATE), newEvent("pod-duplicate", REMOVED),
+		}, trust: "mesh.example.com", wantError: "conflicting events"},
+		{name: "unknown event kind", collection: EndpointEventCollection{
+			newEvent("pod-unknown-kind", EndpointEventType(99)),
+		}, trust: "mesh.example.com", wantError: "unknown event type"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			response, err := tt.collection.toValidatedDeltaDiscoveryResponse(tt.trust, "cluster-alpha")
+			require.ErrorContains(t, err, tt.wantError)
+			require.Nil(t, response)
+		})
+	}
+}
+
+func TestStreamProcessorAddressResponseCarriesClusterID(t *testing.T) {
+	ep := &endpoint.Endpoint{
+		K8sUID:       "pod-cluster-identity",
+		K8sPodName:   "api",
+		K8sNamespace: "orders",
+		IPv4:         netip.MustParseAddr("10.0.0.10"),
+	}
+	ep.SetPod(&slim_corev1.Pod{
+		Spec:   slim_corev1.PodSpec{ServiceAccountName: "api"},
+		Status: slim_corev1.PodStatus{HostIP: "10.0.0.1"},
+	})
+	collection := EndpointEventCollection{{Type: CREATE, CiliumEndpoint: endpointToCiliumEndpoint(ep)}}
+
+	for _, clusterName := range []string{"cluster-alpha", "cluster-beta"} {
+		for _, requireMTLS := range []bool{true, false} {
+			sp := &StreamProcessor{
+				trustDomain: "mesh.example.com",
+				clusterName: clusterName,
+				requireMTLS: requireMTLS,
+			}
+			response, err := sp.addressResponse(collection)
+			require.NoError(t, err)
+			require.Len(t, response.Resources, 1)
+			var address pb.Address
+			require.NoError(t, response.Resources[0].Resource.UnmarshalTo(&address))
+			require.Equal(t, clusterName, address.GetWorkload().ClusterId)
+		}
+	}
+}
+
+func TestEndpointEventCollectionCoalesceStrictEndpointEvents(t *testing.T) {
+	newEvent := func(uid, ip string, eventType EndpointEventType) *EndpointEvent {
+		ep := &endpoint.Endpoint{
+			K8sUID:       uid,
+			K8sPodName:   "api",
+			K8sNamespace: "orders",
+			IPv4:         netip.MustParseAddr(ip),
+		}
+		ep.SetPod(&slim_corev1.Pod{
+			Spec:   slim_corev1.PodSpec{ServiceAccountName: "api"},
+			Status: slim_corev1.PodStatus{HostIP: "10.0.0.1"},
+		})
+		return &EndpointEvent{Type: eventType, CiliumEndpoint: endpointToCiliumEndpoint(ep)}
+	}
+
+	t.Run("last create wins", func(t *testing.T) {
+		batch, err := EndpointEventCollection{
+			newEvent("pod-1", "10.0.0.10", CREATE),
+			newEvent("pod-1", "10.0.0.11", CREATE),
+		}.coalesceStrictEndpointEvents()
+		require.NoError(t, err)
+		require.Len(t, batch, 1)
+		response, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		require.NoError(t, err)
+		require.Empty(t, response.RemovedResources)
+		require.Len(t, response.Resources, 1)
+		var address pb.Address
+		require.NoError(t, response.Resources[0].Resource.UnmarshalTo(&address))
+		require.Equal(t, netip.MustParseAddr("10.0.0.11").AsSlice(), address.GetWorkload().Addresses[0])
+	})
+
+	t.Run("last remove wins", func(t *testing.T) {
+		batch, err := EndpointEventCollection{
+			newEvent("pod-1", "10.0.0.10", CREATE),
+			newEvent("pod-1", "10.0.0.11", REMOVED),
+		}.coalesceStrictEndpointEvents()
+		require.NoError(t, err)
+		response, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		require.NoError(t, err)
+		require.Empty(t, response.Resources)
+		require.Equal(t, []string{"pod-1"}, response.RemovedResources)
+	})
+
+	t.Run("last create restores after remove", func(t *testing.T) {
+		batch, err := EndpointEventCollection{
+			newEvent("pod-1", "10.0.0.10", REMOVED),
+			newEvent("pod-1", "10.0.0.12", CREATE),
+		}.coalesceStrictEndpointEvents()
+		require.NoError(t, err)
+		response, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		require.NoError(t, err)
+		require.Empty(t, response.RemovedResources)
+		require.Len(t, response.Resources, 1)
+		var address pb.Address
+		require.NoError(t, response.Resources[0].Resource.UnmarshalTo(&address))
+		require.Equal(t, netip.MustParseAddr("10.0.0.12").AsSlice(), address.GetWorkload().Addresses[0])
+	})
+}

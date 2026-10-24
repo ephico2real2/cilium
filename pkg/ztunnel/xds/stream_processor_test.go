@@ -5,12 +5,14 @@ package xds
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/netip"
 	"testing"
 	"time"
 
 	v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	status "google.golang.org/genproto/googleapis/rpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,8 +30,11 @@ import (
 	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/ztunnel/pb"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 )
+
+var errTestStreamSendFailed = errors.New("send failed")
 
 // makeCEP is a test helper that creates a CiliumEndpoint with the given parameters.
 // Pass empty strings for optional parameters to use defaults.
@@ -54,6 +59,16 @@ func makeCEP(name, namespace, ip string) *types.CiliumEndpoint {
 		}
 	}
 
+	return cep
+}
+
+func makeStrictCEP(name, namespace, podUID, ip string) *types.CiliumEndpoint {
+	cep := makeCEP(name, namespace, ip)
+	cep.ServiceAccount = "api"
+	cep.OwnerReferences = []slim_metav1.OwnerReference{{Kind: "Pod", UID: apimachineryTypes.UID(podUID)}}
+	if cep.Networking != nil {
+		cep.Networking.NodeIP = "10.0.0.1"
+	}
 	return cep
 }
 
@@ -86,14 +101,18 @@ func (s *MockStream) Recv() (*v3.DeltaDiscoveryRequest, error) {
 }
 
 type MockEndpointEventSource struct {
-	initial         EndpointEventCollection
-	subscribeCalled bool
+	initial          EndpointEventCollection
+	subscribeCalled  bool
+	closeWithoutSync bool
 }
 
 // SubscribeToEndpointEvents sends an empty initial batch on syncCh and closes it.
 func (m *MockEndpointEventSource) SubscribeToEndpointEvents(ctx context.Context, syncCh chan<- EndpointEventCollection) {
 	defer close(syncCh)
 	m.subscribeCalled = true
+	if m.closeWithoutSync {
+		return
+	}
 	syncCh <- m.initial
 }
 
@@ -228,6 +247,7 @@ func TestStreamProcessorEndpointEvents(t *testing.T) {
 		// Setup mock stream to capture the response
 		var capturedResponse *v3.DeltaDiscoveryResponse
 		mockStream := &MockStream{}
+		mockStream.OnContext = func() context.Context { return context.Background() }
 		mockStream.OnSendMsg = func(m any) error {
 			capturedResponse = m.(*v3.DeltaDiscoveryResponse)
 			return nil
@@ -290,6 +310,332 @@ func TestStreamProcessorEndpointEvents(t *testing.T) {
 			// Channel is empty as expected
 		}
 	})
+}
+
+func TestStrictAddressSnapshotRejectsIncompleteWorkload(t *testing.T) {
+	cep := makeCEP("api", "orders", "10.0.0.5")
+	cep.OwnerReferences = []slim_metav1.OwnerReference{{Kind: "Pod", UID: apimachineryTypes.UID("api-pod-uid")}}
+	stream := &MockStream{}
+	stream.OnContext = func() context.Context { return context.Background() }
+	sent := 0
+	stream.OnSendMsg = func(any) error {
+		sent++
+		return nil
+	}
+	sp := &StreamProcessor{
+		stream:        stream,
+		metrics:       NewMetrics(),
+		expectedNonce: make(map[string]struct{}),
+		log:           slog.New(slog.DiscardHandler),
+		trustDomain:   "mesh.example.com",
+		clusterName:   "cluster-alpha",
+		requireMTLS:   true,
+	}
+	sp.endpointSource = &MockEndpointEventSource{initial: EndpointEventCollection{{Type: CREATE, CiliumEndpoint: cep}}}
+
+	err := sp.handleAddressTypeURL(&v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLAddress})
+	require.ErrorContains(t, err, "missing service account")
+	require.Zero(t, sent, "strict xDS must not publish a partial workload snapshot")
+	require.Empty(t, sp.expectedNonce, "a rejected snapshot must not create an ACK nonce")
+}
+
+func TestStrictAddressInitialSubscriptionRequiresSync(t *testing.T) {
+	stream := &MockStream{}
+	stream.OnContext = func() context.Context { return context.Background() }
+	sent := 0
+	stream.OnSendMsg = func(any) error {
+		sent++
+		return nil
+	}
+	sp := &StreamProcessor{
+		stream:        stream,
+		metrics:       NewMetrics(),
+		expectedNonce: make(map[string]struct{}),
+		log:           slog.New(slog.DiscardHandler),
+		trustDomain:   "mesh.example.com",
+		clusterName:   "cluster-alpha",
+		requireMTLS:   true,
+	}
+	sp.endpointSource = &MockEndpointEventSource{closeWithoutSync: true}
+
+	err := sp.handleAddressTypeURL(&v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLAddress})
+	require.ErrorContains(t, err, "ended before initial synchronization")
+	require.Zero(t, sent)
+	require.Empty(t, sp.expectedNonce)
+}
+
+func TestStrictAddressExplicitEmptySnapshotIsValid(t *testing.T) {
+	stream := &MockStream{}
+	stream.OnContext = func() context.Context { return context.Background() }
+	var response *v3.DeltaDiscoveryResponse
+	stream.OnSendMsg = func(message any) error {
+		response = message.(*v3.DeltaDiscoveryResponse)
+		return nil
+	}
+	sp := &StreamProcessor{
+		stream:        stream,
+		metrics:       NewMetrics(),
+		expectedNonce: make(map[string]struct{}),
+		log:           slog.New(slog.DiscardHandler),
+		trustDomain:   "mesh.example.com",
+		clusterName:   "cluster-alpha",
+		requireMTLS:   true,
+	}
+	sp.endpointSource = &MockEndpointEventSource{initial: EndpointEventCollection{}}
+
+	err := sp.handleAddressTypeURL(&v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLAddress})
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.Empty(t, response.Resources)
+	require.Empty(t, response.RemovedResources)
+	require.Contains(t, sp.expectedNonce, response.Nonce)
+}
+
+func TestStrictAddressInitialSnapshotRemovesStaleClientResources(t *testing.T) {
+	stream := &MockStream{}
+	stream.OnContext = func() context.Context { return context.Background() }
+	var response *v3.DeltaDiscoveryResponse
+	stream.OnSendMsg = func(message any) error {
+		response = message.(*v3.DeltaDiscoveryResponse)
+		return nil
+	}
+	current := makeStrictCEP("api", "orders", "pod-current", "10.0.0.20")
+	sp := &StreamProcessor{
+		stream:        stream,
+		metrics:       NewMetrics(),
+		expectedNonce: make(map[string]struct{}),
+		log:           slog.New(slog.DiscardHandler),
+		trustDomain:   "mesh.example.com",
+		clusterName:   "cluster-alpha",
+		requireMTLS:   true,
+	}
+	sp.endpointSource = &MockEndpointEventSource{initial: EndpointEventCollection{{Type: CREATE, CiliumEndpoint: current}}}
+
+	err := sp.handleAddressTypeURL(&v3.DeltaDiscoveryRequest{
+		TypeUrl: xdsTypeURLAddress,
+		InitialResourceVersions: map[string]string{
+			"pod-stale":   "version-1",
+			"pod-current": "version-2",
+		},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	require.Equal(t, []string{"pod-stale"}, response.RemovedResources)
+	require.Len(t, response.Resources, 1)
+	require.Equal(t, "pod-current", response.Resources[0].Name)
+	require.Contains(t, sp.expectedNonce, response.Nonce)
+}
+
+func TestStrictAddressSendFailureDoesNotTrackNonce(t *testing.T) {
+	t.Run("initial snapshot", func(t *testing.T) {
+		stream := &MockStream{}
+		stream.OnContext = func() context.Context { return context.Background() }
+		stream.OnSendMsg = func(any) error { return errTestStreamSendFailed }
+		metrics := NewMetrics()
+		metrics.Enable()
+		sp := &StreamProcessor{
+			stream:        stream,
+			metrics:       metrics,
+			expectedNonce: make(map[string]struct{}),
+			log:           slog.New(slog.DiscardHandler),
+			trustDomain:   "mesh.example.com",
+			clusterName:   "cluster-alpha",
+			requireMTLS:   true,
+		}
+		sp.endpointSource = &MockEndpointEventSource{}
+
+		err := sp.handleAddressTypeURL(&v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLAddress})
+		require.ErrorContains(t, err, "send failed")
+		require.Empty(t, sp.expectedNonce)
+		require.Equal(t, float64(1), testutil.ToFloat64(metrics.EnrollmentFailures.WithLabelValues("send_failed")))
+	})
+
+	t.Run("incremental event", func(t *testing.T) {
+		stream := &MockStream{}
+		stream.OnContext = func() context.Context { return context.Background() }
+		stream.OnSendMsg = func(any) error { return errTestStreamSendFailed }
+		metrics := NewMetrics()
+		metrics.Enable()
+		sp := &StreamProcessor{
+			stream:        stream,
+			endpointRecv:  make(chan *EndpointEvent),
+			metrics:       metrics,
+			expectedNonce: make(map[string]struct{}),
+			log:           slog.New(slog.DiscardHandler),
+			trustDomain:   "mesh.example.com",
+			clusterName:   "cluster-alpha",
+			requireMTLS:   true,
+		}
+
+		err := sp.handleEPEvent(&EndpointEvent{Type: CREATE, CiliumEndpoint: makeStrictCEP("api", "orders", "pod-1", "10.0.0.21")})
+		require.ErrorContains(t, err, "send failed")
+		require.Empty(t, sp.expectedNonce)
+		require.Equal(t, float64(1), testutil.ToFloat64(metrics.EnrollmentFailures.WithLabelValues("send_failed")))
+	})
+}
+
+func TestDrainEndpointEventsRejectsInvalidOrUnboundedInput(t *testing.T) {
+	t.Run("closed channel", func(t *testing.T) {
+		stream := &MockStream{}
+		stream.OnContext = func() context.Context { return context.Background() }
+		sp := &StreamProcessor{stream: stream, endpointRecv: make(chan *EndpointEvent)}
+		close(sp.endpointRecv)
+		_, err := sp.drainEndpointEvents(&EndpointEvent{})
+		require.ErrorContains(t, err, "channel closed")
+	})
+
+	t.Run("nil queued event", func(t *testing.T) {
+		stream := &MockStream{}
+		stream.OnContext = func() context.Context { return context.Background() }
+		endpointRecv := make(chan *EndpointEvent, 1)
+		endpointRecv <- nil
+		sp := &StreamProcessor{stream: stream, endpointRecv: endpointRecv}
+		_, err := sp.drainEndpointEvents(&EndpointEvent{})
+		require.ErrorContains(t, err, "contains a nil event")
+	})
+
+	t.Run("batch is bounded under queued churn", func(t *testing.T) {
+		stream := &MockStream{}
+		stream.OnContext = func() context.Context { return context.Background() }
+		endpointRecv := make(chan *EndpointEvent, maxEndpointEventsPerBatch+50)
+		for range maxEndpointEventsPerBatch + 50 {
+			endpointRecv <- &EndpointEvent{}
+		}
+		sp := &StreamProcessor{stream: stream, endpointRecv: endpointRecv}
+		batch, err := sp.drainEndpointEvents(&EndpointEvent{})
+		require.NoError(t, err)
+		require.Len(t, batch, maxEndpointEventsPerBatch)
+		require.Len(t, endpointRecv, 51, "the first event is supplied separately from the receive queue")
+	})
+
+	t.Run("cancellation interrupts draining", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		stream := &MockStream{}
+		stream.OnContext = func() context.Context { return ctx }
+		sp := &StreamProcessor{stream: stream, endpointRecv: make(chan *EndpointEvent, 1)}
+		_, err := sp.drainEndpointEvents(&EndpointEvent{})
+		require.ErrorIs(t, err, context.Canceled)
+	})
+}
+
+func TestStrictStreamProcessorCoalescesQueuedEndpointChurn(t *testing.T) {
+	newEvent := func(uid, ip string, eventType EndpointEventType) *EndpointEvent {
+		cep := makeCEP("api", "orders", ip)
+		cep.OwnerReferences = []slim_metav1.OwnerReference{{Kind: "Pod", UID: apimachineryTypes.UID(uid)}}
+		cep.ServiceAccount = "api"
+		cep.Networking.NodeIP = "10.0.0.1"
+		return &EndpointEvent{Type: eventType, CiliumEndpoint: cep}
+	}
+
+	tests := []struct {
+		name             string
+		first            *EndpointEvent
+		queued           []*EndpointEvent
+		wantResourceIP   string
+		wantRemovedNames []string
+	}{
+		{
+			name:             "create then remove leaves no resource",
+			first:            newEvent("pod-1", "10.0.0.10", CREATE),
+			queued:           []*EndpointEvent{newEvent("pod-1", "10.0.0.10", REMOVED)},
+			wantRemovedNames: []string{"pod-1"},
+		},
+		{
+			name:           "remove then create restores the latest resource",
+			first:          newEvent("pod-1", "10.0.0.10", REMOVED),
+			queued:         []*EndpointEvent{newEvent("pod-1", "10.0.0.12", CREATE)},
+			wantResourceIP: "10.0.0.12",
+		},
+		{
+			name:           "repeated creates publish the latest address",
+			first:          newEvent("pod-1", "10.0.0.10", CREATE),
+			queued:         []*EndpointEvent{newEvent("pod-1", "10.0.0.11", CREATE)},
+			wantResourceIP: "10.0.0.11",
+		},
+		{
+			name: "malformed superseded create does not poison final state",
+			first: func() *EndpointEvent {
+				event := newEvent("pod-1", "10.0.0.10", CREATE)
+				event.Networking = nil
+				return event
+			}(),
+			queued:         []*EndpointEvent{newEvent("pod-1", "10.0.0.13", CREATE)},
+			wantResourceIP: "10.0.0.13",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stream := &MockStream{}
+			stream.OnContext = func() context.Context { return context.Background() }
+			var response *v3.DeltaDiscoveryResponse
+			stream.OnSendMsg = func(message any) error {
+				var ok bool
+				response, ok = message.(*v3.DeltaDiscoveryResponse)
+				require.True(t, ok, "stream must send a DeltaDiscoveryResponse")
+				return nil
+			}
+			endpointRecv := make(chan *EndpointEvent, len(tt.queued))
+			for _, event := range tt.queued {
+				endpointRecv <- event
+			}
+			sp := &StreamProcessor{
+				stream:        stream,
+				endpointRecv:  endpointRecv,
+				metrics:       NewMetrics(),
+				expectedNonce: make(map[string]struct{}),
+				log:           slog.New(slog.DiscardHandler),
+				trustDomain:   "mesh.example.com",
+				clusterName:   "cluster-alpha",
+				requireMTLS:   true,
+			}
+
+			require.NoError(t, sp.handleEPEvent(tt.first))
+			require.NotNil(t, response)
+			require.Len(t, sp.expectedNonce, 1, "the sent response nonce must be tracked")
+			if tt.wantResourceIP == "" {
+				require.Empty(t, response.Resources)
+				require.Equal(t, tt.wantRemovedNames, response.RemovedResources)
+				return
+			}
+			require.Len(t, response.Resources, 1)
+			require.Equal(t, "pod-1", response.Resources[0].Name)
+			var address pb.Address
+			require.NoError(t, response.Resources[0].Resource.UnmarshalTo(&address))
+			require.Equal(t, netip.MustParseAddr(tt.wantResourceIP).AsSlice(), address.GetWorkload().Addresses[0])
+		})
+	}
+}
+
+func TestStrictIncrementalInvalidWorkloadIsNotSent(t *testing.T) {
+	stream := &MockStream{}
+	stream.OnContext = func() context.Context { return context.Background() }
+	sent := 0
+	stream.OnSendMsg = func(any) error {
+		sent++
+		return nil
+	}
+	metrics := NewMetrics()
+	metrics.Enable()
+	sp := &StreamProcessor{
+		stream:        stream,
+		endpointRecv:  make(chan *EndpointEvent),
+		metrics:       metrics,
+		expectedNonce: make(map[string]struct{}),
+		log:           slog.New(slog.DiscardHandler),
+		trustDomain:   "mesh.example.com",
+		clusterName:   "cluster-alpha",
+		requireMTLS:   true,
+	}
+	invalid := &EndpointEvent{Type: CREATE, CiliumEndpoint: makeStrictCEP("api", "orders", "pod-1", "10.0.0.50")}
+	invalid.CiliumEndpoint.ServiceAccount = ""
+
+	err := sp.handleEPEvent(invalid)
+	require.ErrorContains(t, err, "missing service account")
+	require.Zero(t, sent)
+	require.Empty(t, sp.expectedNonce)
+	require.Equal(t, float64(1), testutil.ToFloat64(metrics.EnrollmentFailures.WithLabelValues("invalid_workload_event")))
 }
 
 // TestStreamProcessorDeltaDiscoveryRequest ensures correctness when handling a
@@ -363,6 +709,35 @@ func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 		// Verify nonce was removed
 		_, ok := sp.expectedNonce[req.ResponseNonce]
 		require.False(t, ok, "Nonce should be removed after Nack")
+	})
+
+	t.Run("Strict Nack terminates the stream for full snapshot recovery", func(t *testing.T) {
+		sp := &StreamProcessor{
+			metrics:     NewMetrics(),
+			clusterName: "cluster-alpha", requireMTLS: true,
+			expectedNonce: map[string]struct{}{
+				"strict-nack-nonce": {},
+			},
+			log: slog.New(slog.DiscardHandler),
+		}
+		sp.endpointSource = &MockEndpointEventSource{}
+
+		req := &v3.DeltaDiscoveryRequest{
+			TypeUrl:       xdsTypeURLAddress,
+			ResponseNonce: "strict-nack-nonce",
+			ErrorDetail: &status.Status{
+				Code:    3,
+				Message: "test strict NACK",
+			},
+		}
+		err := sp.handleDeltaDiscoveryReq(req)
+		require.Error(t, err, "strict mode must terminate a stream after NACK")
+		require.Contains(t, err.Error(), "rejected strict Address response")
+		_, ok := sp.expectedNonce[req.ResponseNonce]
+		require.False(t, ok, "the rejected response nonce must be retired")
+		require.Equal(t, float64(1), testutil.ToFloat64(
+			sp.metrics.EnrollmentFailures.WithLabelValues("nack_received"),
+		))
 	})
 
 	t.Run("Unexpected TypeURL returns error", func(t *testing.T) {
@@ -1349,4 +1724,450 @@ func TestSubscribeToEndpointEvents_CES(t *testing.T) {
 		require.Empty(t, batch)
 		require.Empty(t, endpointRecv)
 	})
+}
+
+func TestStrictPreSyncCEPReplayBuildsFinalSnapshot(t *testing.T) {
+	originalEnableCES := option.Config.EnableCiliumEndpointSlice
+	defer func() { option.Config.EnableCiliumEndpointSlice = originalEnableCES }()
+	option.Config.EnableCiliumEndpointSlice = false
+
+	tests := []struct {
+		name      string
+		events    []resource.Event[*types.CiliumEndpoint]
+		wantUID   string
+		wantError string
+	}{
+		{
+			name: "repeated upsert and same-name recreation retain only latest UID",
+			events: []resource.Event[*types.CiliumEndpoint]{
+				{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "api"}, Object: makeStrictCEP("api", "orders", "pod-old", "10.0.0.31")},
+				{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "api"}, Object: makeStrictCEP("api", "orders", "pod-new", "10.0.0.32")},
+			},
+			wantUID: "pod-new",
+		},
+		{
+			name: "create then delete leaves empty snapshot",
+			events: []resource.Event[*types.CiliumEndpoint]{
+				{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "api"}, Object: makeStrictCEP("api", "orders", "pod-gone", "10.0.0.33")},
+				{Kind: resource.Delete, Key: resource.Key{Namespace: "orders", Name: "api"}, Object: makeStrictCEP("api", "orders", "pod-gone", "10.0.0.33")},
+			},
+		},
+		{
+			name: "delete then recreate keeps new UID",
+			events: []resource.Event[*types.CiliumEndpoint]{
+				{Kind: resource.Delete, Key: resource.Key{Namespace: "orders", Name: "api"}, Object: makeStrictCEP("api", "orders", "pod-old", "10.0.0.34")},
+				{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "api"}, Object: makeStrictCEP("api", "orders", "pod-new", "10.0.0.35")},
+			},
+			wantUID: "pod-new",
+		},
+		{
+			name: "distinct CEP source objects cannot claim one Pod UID",
+			events: []resource.Event[*types.CiliumEndpoint]{
+				{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "api-a"}, Object: makeStrictCEP("api-a", "orders", "pod-shared", "10.0.0.36")},
+				{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "api-b"}, Object: makeStrictCEP("api-b", "orders", "pod-shared", "10.0.0.37")},
+			},
+			wantError: "conflicting events for Pod UID",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eventsChan := make(chan resource.Event[*types.CiliumEndpoint], len(tt.events)+1)
+			for _, event := range tt.events {
+				event.Done = func(error) {}
+				eventsChan <- event
+			}
+			eventsChan <- resource.Event[*types.CiliumEndpoint]{Kind: resource.Sync, Done: func(error) {}}
+			close(eventsChan)
+
+			watcher := &MockCiliumEndpointsWatcher{cepResource: &MockCEPResource{eventsChan: eventsChan}}
+			db := statedb.New()
+			tbl, err := table.NewEnrolledNamespacesTable(db)
+			require.NoError(t, err)
+			enrollNamespace(t, db, tbl, "orders")
+			sp := &StreamProcessor{
+				metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl,
+				log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true,
+			}
+			es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+			batch := subscribeAndSync(es, context.Background())
+			if tt.wantError != "" {
+				_, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+				require.ErrorContains(t, err, tt.wantError)
+				return
+			}
+			if tt.wantUID == "" {
+				require.Empty(t, batch)
+				return
+			}
+			require.Len(t, batch, 1)
+			require.Equal(t, CREATE, batch[0].Type)
+			require.Equal(t, tt.wantUID, string(batch[0].CiliumEndpoint.OwnerReferences[0].UID))
+			_, err = batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestStrictPreSyncCESReplayBuildsFinalSnapshot(t *testing.T) {
+	originalEnableCES := option.Config.EnableCiliumEndpointSlice
+	defer func() { option.Config.EnableCiliumEndpointSlice = originalEnableCES }()
+	option.Config.EnableCiliumEndpointSlice = true
+
+	newCES := func(name, podUID, ip string) *v2alpha1.CiliumEndpointSlice {
+		return &v2alpha1.CiliumEndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: "ces-orders"},
+			Namespace:  "orders",
+			Endpoints: []v2alpha1.CoreCiliumEndpoint{{
+				Name: name, PodUID: podUID, ServiceAccount: "api",
+				Networking: &v2.EndpointNetworking{
+					Addressing: v2.AddressPairList{{IPV4: ip}}, NodeIP: "10.0.0.1",
+				},
+			}},
+		}
+	}
+
+	t.Run("latest slice upsert is the snapshot", func(t *testing.T) {
+		key := resource.Key{Namespace: "orders", Name: "ces-orders"}
+		first := newCES("api", "pod-old", "10.0.0.41")
+		latest := newCES("api", "pod-new", "10.0.0.42")
+		eventsChan := make(chan resource.Event[*v2alpha1.CiliumEndpointSlice], 3)
+		eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: first, Done: func(error) {}}
+		eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: latest, Done: func(error) {}}
+		eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Sync, Done: func(error) {}}
+		close(eventsChan)
+		watcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: eventsChan}}
+		db := statedb.New()
+		tbl, err := table.NewEnrolledNamespacesTable(db)
+		require.NoError(t, err)
+		enrollNamespace(t, db, tbl, "orders")
+		sp := &StreamProcessor{metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+		es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+		batch := subscribeAndSync(es, context.Background())
+		require.Len(t, batch, 1)
+		require.Equal(t, "pod-new", string(batch[0].CiliumEndpoint.OwnerReferences[0].UID))
+		_, err = batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		require.NoError(t, err)
+	})
+
+	t.Run("create then delete leaves empty snapshot", func(t *testing.T) {
+		key := resource.Key{Namespace: "orders", Name: "ces-orders"}
+		ces := newCES("api", "pod-gone", "10.0.0.43")
+		eventsChan := make(chan resource.Event[*v2alpha1.CiliumEndpointSlice], 3)
+		eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: ces, Done: func(error) {}}
+		eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Delete, Key: key, Object: ces, Done: func(error) {}}
+		eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Sync, Done: func(error) {}}
+		close(eventsChan)
+		watcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: eventsChan}}
+		db := statedb.New()
+		tbl, err := table.NewEnrolledNamespacesTable(db)
+		require.NoError(t, err)
+		enrollNamespace(t, db, tbl, "orders")
+		sp := &StreamProcessor{metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+		es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+		require.Empty(t, subscribeAndSync(es, context.Background()))
+	})
+}
+
+func TestStrictPostSyncCEPRecreationRemovesOldUID(t *testing.T) {
+	originalEnableCES := option.Config.EnableCiliumEndpointSlice
+	defer func() { option.Config.EnableCiliumEndpointSlice = originalEnableCES }()
+	option.Config.EnableCiliumEndpointSlice = false
+
+	key := resource.Key{Namespace: "orders", Name: "api"}
+	oldCEP := makeStrictCEP("api", "orders", "pod-old", "10.0.0.60")
+	newCEP := makeStrictCEP("api", "orders", "pod-new", "10.0.0.60")
+	newEndpoint := makeStrictCEP("worker", "orders", "pod-added", "10.0.0.62")
+	eventsChan := make(chan resource.Event[*types.CiliumEndpoint], 4)
+	eventsChan <- resource.Event[*types.CiliumEndpoint]{Kind: resource.Upsert, Key: key, Object: oldCEP, Done: func(error) {}}
+	eventsChan <- resource.Event[*types.CiliumEndpoint]{Kind: resource.Sync, Done: func(error) {}}
+	eventsChan <- resource.Event[*types.CiliumEndpoint]{Kind: resource.Upsert, Key: key, Object: newCEP, Done: func(error) {}}
+	eventsChan <- resource.Event[*types.CiliumEndpoint]{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "worker"}, Object: newEndpoint, Done: func(error) {}}
+	close(eventsChan)
+
+	watcher := &MockCiliumEndpointsWatcher{cepResource: &MockCEPResource{eventsChan: eventsChan}}
+	db := statedb.New()
+	tbl, err := table.NewEnrolledNamespacesTable(db)
+	require.NoError(t, err)
+	enrollNamespace(t, db, tbl, "orders")
+	endpointRecv := make(chan *EndpointEvent, 4)
+	sp := &StreamProcessor{metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+	es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+	syncCh := make(chan EndpointEventCollection, 1)
+	es.SubscribeToEndpointEvents(context.Background(), syncCh)
+
+	initial := <-syncCh
+	require.Len(t, initial, 1)
+	require.Equal(t, "pod-old", string(initial[0].CiliumEndpoint.OwnerReferences[0].UID))
+	require.Len(t, endpointRecv, 3)
+	removed, created, added := <-endpointRecv, <-endpointRecv, <-endpointRecv
+	require.Equal(t, REMOVED, removed.Type)
+	require.Equal(t, "pod-old", string(removed.CiliumEndpoint.OwnerReferences[0].UID))
+	require.Equal(t, CREATE, created.Type)
+	require.Equal(t, "pod-new", string(created.CiliumEndpoint.OwnerReferences[0].UID))
+	require.Equal(t, CREATE, added.Type, "a new CEP key after Sync must be accepted without an old snapshot entry")
+	require.Equal(t, "pod-added", string(added.CiliumEndpoint.OwnerReferences[0].UID))
+	response, err := EndpointEventCollection{removed, created, added}.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+	require.NoError(t, err, "same-address reuse is safe when the previous UID is removed in the same batch")
+	require.Equal(t, []string{"pod-old"}, response.RemovedResources)
+	require.ElementsMatch(t, []string{"pod-new", "pod-added"}, []string{response.Resources[0].Name, response.Resources[1].Name})
+}
+
+func TestStrictPostSyncCESRecreationRemovesOldUID(t *testing.T) {
+	originalEnableCES := option.Config.EnableCiliumEndpointSlice
+	defer func() { option.Config.EnableCiliumEndpointSlice = originalEnableCES }()
+	option.Config.EnableCiliumEndpointSlice = true
+
+	key := resource.Key{Namespace: "orders", Name: "ces-orders"}
+	newCES := func(uid string) *v2alpha1.CiliumEndpointSlice {
+		return &v2alpha1.CiliumEndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: key.Name},
+			Namespace:  key.Namespace,
+			Endpoints: []v2alpha1.CoreCiliumEndpoint{{
+				Name: "api", PodUID: uid, ServiceAccount: "api",
+				Networking: &v2.EndpointNetworking{Addressing: v2.AddressPairList{{IPV4: "10.0.0.61"}}, NodeIP: "10.0.0.1"},
+			}},
+		}
+	}
+	oldCES, newCESValue := newCES("pod-old"), newCES("pod-new")
+	eventsChan := make(chan resource.Event[*v2alpha1.CiliumEndpointSlice], 3)
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: oldCES, Done: func(error) {}}
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Sync, Done: func(error) {}}
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: newCESValue, Done: func(error) {}}
+	close(eventsChan)
+
+	watcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: eventsChan}}
+	db := statedb.New()
+	tbl, err := table.NewEnrolledNamespacesTable(db)
+	require.NoError(t, err)
+	enrollNamespace(t, db, tbl, "orders")
+	endpointRecv := make(chan *EndpointEvent, 4)
+	sp := &StreamProcessor{metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+	es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+	syncCh := make(chan EndpointEventCollection, 1)
+	es.SubscribeToEndpointEvents(context.Background(), syncCh)
+
+	initial := <-syncCh
+	require.Len(t, initial, 1)
+	require.Equal(t, "pod-old", string(initial[0].CiliumEndpoint.OwnerReferences[0].UID))
+	require.Len(t, endpointRecv, 2)
+	removed, created := <-endpointRecv, <-endpointRecv
+	require.Equal(t, REMOVED, removed.Type)
+	require.Equal(t, "pod-old", string(removed.CiliumEndpoint.OwnerReferences[0].UID))
+	require.Equal(t, CREATE, created.Type)
+	require.Equal(t, "pod-new", string(created.CiliumEndpoint.OwnerReferences[0].UID))
+	response, err := EndpointEventCollection{removed, created}.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+	require.NoError(t, err)
+	require.Equal(t, []string{"pod-old"}, response.RemovedResources)
+	require.Equal(t, []string{"pod-new"}, []string{response.Resources[0].Name})
+}
+
+func TestStrictCESDuplicateEndpointNamesFailClosed(t *testing.T) {
+	originalEnableCES := option.Config.EnableCiliumEndpointSlice
+	defer func() { option.Config.EnableCiliumEndpointSlice = originalEnableCES }()
+	option.Config.EnableCiliumEndpointSlice = true
+
+	newCES := func(endpoints ...v2alpha1.CoreCiliumEndpoint) *v2alpha1.CiliumEndpointSlice {
+		return &v2alpha1.CiliumEndpointSlice{
+			ObjectMeta: metav1.ObjectMeta{Name: "ces-orders"},
+			Namespace:  "orders",
+			Endpoints:  endpoints,
+		}
+	}
+	core := func(uid string) v2alpha1.CoreCiliumEndpoint {
+		return v2alpha1.CoreCiliumEndpoint{
+			Name: "api", PodUID: uid, ServiceAccount: "api",
+			Networking: &v2.EndpointNetworking{Addressing: v2.AddressPairList{{IPV4: "10.0.0.70"}}, NodeIP: "10.0.0.1"},
+		}
+	}
+
+	tests := []struct {
+		name      string
+		ces       *v2alpha1.CiliumEndpointSlice
+		wantError string
+	}{
+		{name: "duplicate name with different Pod UIDs", ces: newCES(core("pod-one"), core("pod-two")), wantError: "duplicate endpoint"},
+		{name: "duplicate name with same Pod UID", ces: newCES(core("pod-one"), core("pod-one")), wantError: "duplicate endpoint"},
+		{name: "empty endpoint name", ces: newCES(v2alpha1.CoreCiliumEndpoint{PodUID: "pod-one"}), wantError: "unnamed endpoint"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eventsChan := make(chan resource.Event[*v2alpha1.CiliumEndpointSlice], 2)
+			eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "ces-orders"}, Object: tt.ces, Done: func(error) {}}
+			eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Sync, Done: func(error) {}}
+			close(eventsChan)
+			watcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: eventsChan}}
+			db := statedb.New()
+			tbl, err := table.NewEnrolledNamespacesTable(db)
+			require.NoError(t, err)
+			enrollNamespace(t, db, tbl, "orders")
+			stream := &MockStream{}
+			stream.OnContext = func() context.Context { return context.Background() }
+			sent := 0
+			stream.OnSendMsg = func(any) error { sent++; return nil }
+			metrics := NewMetrics()
+			sp := &StreamProcessor{
+				stream: stream, metrics: metrics, expectedNonce: make(map[string]struct{}),
+				log: slog.New(slog.DiscardHandler), db: db, enrolledNamespaceTable: tbl,
+				trustDomain: "mesh.example.com", clusterName: "cluster-alpha", requireMTLS: true,
+			}
+			sp.endpointSource = &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+
+			err = sp.handleAddressTypeURL(&v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLAddress})
+			require.ErrorContains(t, err, tt.wantError)
+			require.Zero(t, sent, "invalid CES input must not publish a partial response")
+			require.Empty(t, sp.expectedNonce, "rejected source input must not create an ACK nonce")
+		})
+	}
+}
+
+func TestStrictCESReplayRecoveryAfterInvalidSliceDeleted(t *testing.T) {
+	originalEnableCES := option.Config.EnableCiliumEndpointSlice
+	defer func() { option.Config.EnableCiliumEndpointSlice = originalEnableCES }()
+	option.Config.EnableCiliumEndpointSlice = true
+
+	key := resource.Key{Namespace: "orders", Name: "ces-orders"}
+	invalid := &v2alpha1.CiliumEndpointSlice{
+		ObjectMeta: metav1.ObjectMeta{Name: key.Name},
+		Namespace:  key.Namespace,
+		Endpoints: []v2alpha1.CoreCiliumEndpoint{
+			{Name: "api", PodUID: "pod-one"},
+			{Name: "api", PodUID: "pod-two"},
+		},
+	}
+	eventsChan := make(chan resource.Event[*v2alpha1.CiliumEndpointSlice], 3)
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: invalid, Done: func(error) {}}
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Delete, Key: key, Object: invalid, Done: func(error) {}}
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Sync, Done: func(error) {}}
+	close(eventsChan)
+
+	watcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: eventsChan}}
+	db := statedb.New()
+	tbl, err := table.NewEnrolledNamespacesTable(db)
+	require.NoError(t, err)
+	enrollNamespace(t, db, tbl, "orders")
+	sp := &StreamProcessor{metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+	es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+	batch := subscribeAndSync(es, context.Background())
+	response, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+	require.NoError(t, err, "deleting the malformed CES before Sync clears the source error")
+	require.Empty(t, response.Resources)
+}
+
+func TestStrictCESReplayRecoveryAfterDuplicateEndpointFix(t *testing.T) {
+	originalEnableCES := option.Config.EnableCiliumEndpointSlice
+	defer func() { option.Config.EnableCiliumEndpointSlice = originalEnableCES }()
+	option.Config.EnableCiliumEndpointSlice = true
+
+	core := func(name, uid, ip string) v2alpha1.CoreCiliumEndpoint {
+		return v2alpha1.CoreCiliumEndpoint{
+			Name: name, PodUID: uid, ServiceAccount: "api",
+			Networking: &v2.EndpointNetworking{Addressing: v2.AddressPairList{{IPV4: ip}}, NodeIP: "10.0.0.1"},
+		}
+	}
+	makeCES := func(endpoints ...v2alpha1.CoreCiliumEndpoint) *v2alpha1.CiliumEndpointSlice {
+		return &v2alpha1.CiliumEndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "ces-orders"}, Namespace: "orders", Endpoints: endpoints}
+	}
+
+	tests := []struct {
+		name      string
+		events    []*v2alpha1.CiliumEndpointSlice
+		wantError bool
+	}{
+		{
+			name:      "valid replacement before Sync clears source error",
+			events:    []*v2alpha1.CiliumEndpointSlice{makeCES(core("api", "pod-one", "10.0.0.71"), core("api", "pod-two", "10.0.0.72")), makeCES(core("api", "pod-current", "10.0.0.73"))},
+			wantError: false,
+		},
+		{
+			name:      "invalid current slice remains an error",
+			events:    []*v2alpha1.CiliumEndpointSlice{makeCES(core("api", "pod-one", "10.0.0.71"), core("api", "pod-two", "10.0.0.72"))},
+			wantError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			eventsChan := make(chan resource.Event[*v2alpha1.CiliumEndpointSlice], len(tt.events)+1)
+			for _, ces := range tt.events {
+				eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: resource.Key{Namespace: "orders", Name: "ces-orders"}, Object: ces, Done: func(error) {}}
+			}
+			eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Sync, Done: func(error) {}}
+			close(eventsChan)
+			watcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: eventsChan}}
+			db := statedb.New()
+			tbl, err := table.NewEnrolledNamespacesTable(db)
+			require.NoError(t, err)
+			enrollNamespace(t, db, tbl, "orders")
+			sp := &StreamProcessor{metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+			es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+			batch := subscribeAndSync(es, context.Background())
+			response, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+			if tt.wantError {
+				require.ErrorContains(t, err, "duplicate endpoint")
+				require.Nil(t, response)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, response.Resources, 1)
+			require.Equal(t, "pod-current", response.Resources[0].Name)
+		})
+	}
+}
+
+func TestStrictPostSyncCESRejectsDuplicateNamesAndReconnectRecovers(t *testing.T) {
+	originalEnableCES := option.Config.EnableCiliumEndpointSlice
+	defer func() { option.Config.EnableCiliumEndpointSlice = originalEnableCES }()
+	option.Config.EnableCiliumEndpointSlice = true
+
+	core := func(name, uid, ip string) v2alpha1.CoreCiliumEndpoint {
+		return v2alpha1.CoreCiliumEndpoint{
+			Name: name, PodUID: uid, ServiceAccount: "api",
+			Networking: &v2.EndpointNetworking{Addressing: v2.AddressPairList{{IPV4: ip}}, NodeIP: "10.0.0.1"},
+		}
+	}
+	makeCES := func(endpoints ...v2alpha1.CoreCiliumEndpoint) *v2alpha1.CiliumEndpointSlice {
+		return &v2alpha1.CiliumEndpointSlice{ObjectMeta: metav1.ObjectMeta{Name: "ces-orders"}, Namespace: "orders", Endpoints: endpoints}
+	}
+	key := resource.Key{Namespace: "orders", Name: "ces-orders"}
+	initialCES := makeCES(core("api", "pod-current", "10.0.0.80"))
+	invalidCES := makeCES(core("api", "pod-one", "10.0.0.81"), core("api", "pod-two", "10.0.0.82"))
+	eventsChan := make(chan resource.Event[*v2alpha1.CiliumEndpointSlice], 3)
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: initialCES, Done: func(error) {}}
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Sync, Done: func(error) {}}
+	eventsChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: invalidCES, Done: func(error) {}}
+	close(eventsChan)
+
+	watcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: eventsChan}}
+	db := statedb.New()
+	tbl, err := table.NewEnrolledNamespacesTable(db)
+	require.NoError(t, err)
+	enrollNamespace(t, db, tbl, "orders")
+	endpointRecv := make(chan *EndpointEvent, 2)
+	sp := &StreamProcessor{metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+	es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
+	syncCh := make(chan EndpointEventCollection, 1)
+	es.SubscribeToEndpointEvents(context.Background(), syncCh)
+	initial := <-syncCh
+	require.Len(t, initial, 1)
+	require.Equal(t, "pod-current", initial[0].getPodUID())
+	require.Len(t, endpointRecv, 1, "the malformed update is reported as an error event, never as a partial resource set")
+	invalidUpdate := <-endpointRecv
+	require.ErrorContains(t, invalidUpdate.Err, "duplicate endpoint")
+	_, err = EndpointEventCollection{invalidUpdate}.coalesceStrictEndpointEvents()
+	require.ErrorContains(t, err, "duplicate endpoint")
+
+	// A new xDS subscription starts from the corrected authoritative source state.
+	recoveryChan := make(chan resource.Event[*v2alpha1.CiliumEndpointSlice], 2)
+	recoveryChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Upsert, Key: key, Object: makeCES(core("api", "pod-recovered", "10.0.0.83")), Done: func(error) {}}
+	recoveryChan <- resource.Event[*v2alpha1.CiliumEndpointSlice]{Kind: resource.Sync, Done: func(error) {}}
+	close(recoveryChan)
+	recoveryWatcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: recoveryChan}}
+	recoverySource := &EndpointSource{k8sCiliumEndpointsWatcher: recoveryWatcher, sp: sp}
+	recovered := subscribeAndSync(recoverySource, context.Background())
+	recoveryResponse, err := recovered.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+	require.NoError(t, err)
+	require.Len(t, recoveryResponse.Resources, 1)
+	require.Equal(t, "pod-recovered", recoveryResponse.Resources[0].Name)
 }
