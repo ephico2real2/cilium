@@ -1,0 +1,44 @@
+{"ts":1792805002.763786,"level":"info","r":1,"file":"scli.go","line":124,"msg":"Starting","command":"Φορτίο","version":"1.75.3 h1:2et+WGrx6FHBEyQb2kYz07q+/AXzHIio7amwuDDn6vM= go1.25.14 arm64 linux","go-max-procs":8}
+Fortio 1.75.3 running at 20 queries per second, 8->8 procs, for 6m0s: http://shop.team-a.svc.cluster.local:8080/
+{"ts":1792805002.764148,"level":"info","r":1,"file":"httprunner.go","line":121,"msg":"Starting http test","run":0,"url":"http://shop.team-a.svc.cluster.local:8080/","threads":2,"qps":"20.0","warmup":"parallel","conn-reuse":""}
+Starting at 20 qps with 2 thread(s) [gomax 8] for 6m0s : 3600 calls each (total 7200)
+{"ts":1792805362.771672,"level":"info","r":52,"file":"periodic.go","line":882,"msg":"T000 ended after 6m0.001318924s : 3600 calls. qps=9.999963363356448"}
+{"ts":1792805362.821893,"level":"info","r":53,"file":"periodic.go","line":882,"msg":"T001 ended after 6m0.001537747s : 3600 calls. qps=9.999957284988014"}
+Ended after 6m0.051586964s : 7200 calls. qps=19.997
+{"ts":1792805362.821956,"level":"info","r":1,"file":"periodic.go","line":598,"msg":"Run ended","run":0,"elapsed":360051586964,"calls":7200,"qps":19.997134468178018}
+Sleep times : count 7198 avg 0.09905378 +/- 0.0004568 min 0.081666804 max 0.099771194 sum 712.98911
+Aggregated Function Time : count 7200 avg 0.0003688289 +/- 0.0003249 min 0.000216107 max 0.017744482 sum 2.65556811
+# range, mid point, percentile, count
+>= 0.000216107 <= 0.001 , 0.000608054 , 99.46, 7161
+> 0.001 <= 0.002 , 0.0015 , 99.88, 30
+> 0.002 <= 0.003 , 0.0025 , 99.94, 5
+> 0.004 <= 0.005 , 0.0045 , 99.96, 1
+> 0.006 <= 0.007 , 0.0065 , 99.97, 1
+> 0.014 <= 0.016 , 0.015 , 99.99, 1
+> 0.016 <= 0.0177445 , 0.0168722 , 100.00, 1
+# target 50% 0.000610134
+# target 75% 0.000807202
+# target 90% 0.000925443
+# target 99% 0.000996387
+# target 99.9% 0.00236
+Error cases : no data
+# Socket and IP used for each connection:
+[0]   1 socket used, resolved to 10.96.138.61:8080, connection timing : count 1 avg 0.000346932 +/- 0 min 0.000346932 max 0.000346932 sum 0.000346932
+[1]   1 socket used, resolved to 10.96.138.61:8080, connection timing : count 1 avg 0.000669844 +/- 0 min 0.000669844 max 0.000669844 sum 0.000669844
+Connection time histogram (s) : count 2 avg 0.000508388 +/- 0.0001615 min 0.000346932 max 0.000669844 sum 0.001016776
+# range, mid point, percentile, count
+>= 0.000346932 <= 0.000669844 , 0.000508388 , 100.00, 2
+# target 50% 0.000346932
+# target 75% 0.000508388
+# target 90% 0.000605262
+# target 99% 0.000663386
+# target 99.9% 0.000669198
+Sockets used: 2 (for perfect keepalive, would be 2)
+Uniform: true, Jitter: false, Catchup allowed: false
+IP addresses distribution:
+10.96.138.61:8080: 2
+Code 200 : 7200 (100.0 %)
+Response Header Sizes : count 7200 avg 158 +/- 0 min 158 max 158 sum 1137600
+Response Body/Total Sizes : count 7200 avg 288 +/- 0 min 288 max 288 sum 2073600
+All done 7200 calls (plus 2 warmup) 0.369 ms avg, 20.0 qps
+Successfully wrote 4161 bytes of Json data to /data/direct-load.json

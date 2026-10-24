@@ -1,0 +1,22 @@
+{
+  "source_sha": "93041b3f7ec55ff12c83ecd266f14fb392ea5c93",
+  "repository": "ghcr.io/ephico2real2/cilium-dev",
+  "platforms": [
+    "linux/amd64",
+    "linux/arm64"
+  ],
+  "images": {
+    "agent": {
+      "image": "ghcr.io/ephico2real2/cilium-dev@sha256:44420ee067b2b6b2ad998121b24781ea849122a0aed28d7a27e1011ec81b9ee6",
+      "tag": "ghcr.io/ephico2real2/cilium-dev:sha-93041b3f7ec55ff12c83ecd266f14fb392ea5c93-agent"
+    },
+    "operator-generic": {
+      "image": "ghcr.io/ephico2real2/cilium-dev@sha256:a1acf77a3dc01bce2161537495a0ccdabab56696ea3ad0b131fb1c4e7811a069",
+      "tag": "ghcr.io/ephico2real2/cilium-dev:sha-93041b3f7ec55ff12c83ecd266f14fb392ea5c93-operator-generic"
+    },
+    "clustermesh-apiserver": {
+      "image": "ghcr.io/ephico2real2/cilium-dev@sha256:27493c14e52620106f9c1e10b888b84d3f96dbbd7d42ba795d6a9a21dc81ff7c",
+      "tag": "ghcr.io/ephico2real2/cilium-dev:sha-93041b3f7ec55ff12c83ecd266f14fb392ea5c93-clustermesh-apiserver"
+    }
+  }
+}

@@ -1,0 +1,122 @@
+Switched to context "kind-poc1".
+configmap/dashboard-regression unchanged
+configmap/dashboard-regression not labeled
+namespace/team-a unchanged
+namespace/loadtest unchanged
+deployment.apps/shop unchanged
+service/shop unchanged
+deployment.apps/load unchanged
+gateway.gateway.networking.k8s.io/shop unchanged
+httproute.gateway.networking.k8s.io/shop configured
+ciliumnetworkpolicy.cilium.io/http-observe unchanged
+deployment "shop" successfully rolled out
+deployment "load" successfully rolled out
+54daa8feb7da7dfdc3e44ddf7c2bb847858cea65499fda817ae5869319b9ffb6
+Gateway HTTP200=132.545/s; direct HTTP200=14.128/s
+Gateway HTTP200=132.545/s; direct HTTP200=14.128/s
+Gateway HTTP200=129.960/s; direct HTTP200=10.120/s
+Gateway HTTP200=129.960/s; direct HTTP200=10.120/s
+Gateway HTTP200=129.960/s; direct HTTP200=12.133/s
+Gateway HTTP200=129.960/s; direct HTTP200=13.817/s
+Gateway HTTP200=129.680/s; direct HTTP200=11.487/s
+Gateway HTTP200=129.680/s; direct HTTP200=13.170/s
+Gateway HTTP200=157.400/s; direct HTTP200=12.758/s
+Gateway HTTP200=157.400/s; direct HTTP200=14.442/s
+Gateway HTTP200=197.400/s; direct HTTP200=16.125/s
+Gateway HTTP200=197.400/s; direct HTTP200=17.808/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.960/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.960/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.976/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.976/s; direct HTTP200=20.000/s
+Gateway HTTP200=199.980/s; direct HTTP200=19.980/s
+Gateway HTTP200=199.980/s; direct HTTP200=19.980/s
+Gateway HTTP200=199.964/s; direct HTTP200=19.980/s
+Gateway HTTP200=199.964/s; direct HTTP200=19.980/s
+Gateway HTTP200=199.980/s; direct HTTP200=19.980/s
+{
+  "application_load": true,
+  "requested_qps": {
+    "external_gateway": 200,
+    "pod_gateway": 200,
+    "direct_pod": 20
+  },
+  "gateway_measured_http_200_qps": 199.98000000000002,
+  "gateway_reporter": "client",
+  "gateway_client": "external Docker container on kind bridge",
+  "direct_measured_http_200_qps": 19.97960040799184,
+  "fixed_all_qps": 399.96000000000004,
+  "baseline_enumerated_source_qps": 199.98000000000002,
+  "baseline_query": "sum(rate(hubble_http_requests_total{cluster=\"poc1\",destination_namespace=\"team-a\",destination_workload=\"shop\",reporter=\"client\",source_namespace=~\"(loadtest)\",source_workload=~\"(load)\"}[1m]))",
+  "fixed_query": "sum(rate(hubble_http_requests_total{cluster=\"poc1\",destination_namespace=\"team-a\",destination_workload=\"shop\",reporter=\"client\",source_namespace=~\".*\",source_workload=~\".*\"}[1m]))",
+  "remote_backend_node": "poc1-control-plane",
+  "gateway_reporter_node": "poc1-worker",
+  "source_commit": "93041b3f7ec55ff12c83ecd266f14fb392ea5c93",
+  "app_dashboard": {
+    "uid": "hubble-l7-http-by-app",
+    "generator_commit": "22fb6e14c0cca8c78af1f072d1e89ebaea6a916b",
+    "destination_app": "storefront",
+    "destination_workload": "shop",
+    "source_app": "checkout-client",
+    "source_workload": "load",
+    "all_qps": 399.96000000000004,
+    "direct_qps": 19.97960040799184,
+    "pod_gateway_qps": 199.98000000000002
+  }
+}
+01-before-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=199.973, series=1 — expectations met
+02-after-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=399.947, series=1 — expectations met
+03-before-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=199.993, series=1 — expectations met
+04-after-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=399.967, series=2 — expectations met
+05-after-selected-direct-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=20, series=1 — expectations met
+06-after-selected-pod-gateway-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=200, series=1 — expectations met
+07-after-live-dashboard-overview: scrolled 3 screens for the lazy panels
+07-after-live-dashboard-overview: settled 6s; panels=11; "No data"=0; first: Incoming Request Volume | Incoming Request Success Rate (non-5xx responses) | Request Duration | Incoming Requests by Source and Response Code | Incoming Request Success Rate (non-5xx responses) By Source; browser Prometheus total=399.933, series=1 — expectations met
+08-by-app-all: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=399.947, series=1 — expectations met
+09-by-app-selected-direct: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=20, series=1 — expectations met
+10-by-app-namespace-gateway: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=199.967, series=1 — expectations met
+11-by-app-dashboard-overview: scrolled 3 screens for the lazy panels
+11-by-app-dashboard-overview: settled 6s; panels=9; "No data"=0; first: Incoming Request Volume | Incoming Request Success Rate (non-5xx responses) | Request Duration | Incoming Requests by Source and Response Code | Incoming Request Success Rate (non-5xx responses) By Source; browser Prometheus total=399.933, series=1 — expectations met
+Waiting for measured gateway load results (1/48)
+Waiting for measured gateway load results (2/48)
+Waiting for measured gateway load results (3/48)
+Waiting for measured gateway load results (4/48)
+Waiting for measured gateway load results (5/48)
+Waiting for measured gateway load results (6/48)
+Waiting for measured gateway load results (7/48)
+Waiting for measured gateway load results (8/48)
+Waiting for measured gateway load results (9/48)
+Waiting for measured gateway load results (10/48)
+Waiting for measured gateway load results (11/48)
+Waiting for measured gateway load results (12/48)
+Waiting for measured gateway load results (13/48)
+Waiting for measured gateway load results (14/48)
+{
+  "gateway": {
+    "requests": 72000,
+    "http_status_counts": {
+      "200": 72000
+    },
+    "actual_qps": 199.97996882921777,
+    "duration_ns": 360036059719
+  },
+  "pod-gateway": {
+    "requests": 72000,
+    "http_status_counts": {
+      "200": 72000
+    },
+    "actual_qps": 199.97973944821328,
+    "duration_ns": 360036472688
+  },
+  "direct": {
+    "requests": 7200,
+    "http_status_counts": {
+      "200": 7200
+    },
+    "actual_qps": 19.997134468178018,
+    "duration_ns": 360051586964
+  }
+}

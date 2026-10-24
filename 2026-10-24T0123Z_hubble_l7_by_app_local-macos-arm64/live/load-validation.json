@@ -1,0 +1,26 @@
+{
+  "gateway": {
+    "requests": 72000,
+    "http_status_counts": {
+      "200": 72000
+    },
+    "actual_qps": 199.97996882921777,
+    "duration_ns": 360036059719
+  },
+  "pod-gateway": {
+    "requests": 72000,
+    "http_status_counts": {
+      "200": 72000
+    },
+    "actual_qps": 199.97973944821328,
+    "duration_ns": 360036472688
+  },
+  "direct": {
+    "requests": 7200,
+    "http_status_counts": {
+      "200": 7200
+    },
+    "actual_qps": 19.997134468178018,
+    "duration_ns": 360051586964
+  }
+}
