@@ -5,6 +5,7 @@ package zds
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/types"
@@ -18,6 +19,10 @@ import (
 )
 
 const logCleanupDeadline = "deadline"
+
+// ErrStrictLiveUnenrollment keeps an acknowledged live sandbox captured until
+// endpoint recreation; hot release needs generation-aware active membership.
+var ErrStrictLiveUnenrollment = errors.New("strict live unenrollment requires endpoint recreation; capture retained")
 
 // EndpointDeletionCleaner is deliberately separate from namespace
 // unenrollment. A deleted CNI endpoint must retain its fail-closed capture.

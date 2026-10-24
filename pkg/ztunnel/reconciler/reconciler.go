@@ -30,6 +30,11 @@ import (
 	"github.com/cilium/statedb/reconciler"
 )
 
+const (
+	logTransitionStage = "stage"
+	logDesiredRevision = "desiredRevision"
+)
+
 type params struct {
 	cell.In
 
@@ -162,6 +167,20 @@ func (ops *EnrollmentReconciler) Update(ctx context.Context, txn statedb.ReadTxn
 }
 
 func (ops *EnrollmentReconciler) Delete(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, ns *table.EnrolledNamespace) error {
+	if ops.strictCreationAdmission {
+		endpoints := ops.endpointManager.GetEndpointsByNamespace(ns.Name)
+		if len(endpoints) != 0 {
+			ops.logger.Warn("Strict namespace unenrollment deferred until endpoints are recreated",
+				logTransitionStage, "namespace-intent-transition",
+				logfields.K8sNamespace, ns.Name,
+				logDesiredRevision, rev,
+				logfields.LenEndpoints, len(endpoints),
+			)
+			return zds.ErrStrictLiveUnenrollment
+		}
+		// Exact sandbox deletion owns retirement, never namespace-name release.
+		return nil
+	}
 	endpoints := ops.endpointManager.GetEndpointsByNamespace(ns.Name)
 	for _, ep := range endpoints {
 		if ep.GetContainerNetnsPath() == "" || isZtunnelPod(ep) {

@@ -552,3 +552,44 @@ func TestPrivilegedStrictManagedMissingUIDRetainsCaptureWithoutADD(t *testing.T)
 	require.Empty(t, s.updates)
 	require.Empty(t, s.endpointCache)
 }
+
+func TestStrictLiveUnenrollmentNeverTouchesMissingNetnsOrQueue(t *testing.T) {
+	s := strictCleanupServer(t)
+	ep := acknowledgedView(81, "live-namespace-uid", "/missing-live-netns")
+	s.endpointCache[81] = ep
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	require.ErrorIs(t, s.DisenrollEndpointContext(ctx, ep), ErrStrictLiveUnenrollment)
+	require.Same(t, ep, s.endpointCache[81], "unsupported live transition must preserve acknowledged desired state")
+	require.Empty(t, s.updates, "strict live unenrollment cannot issue wire DEL")
+}
+
+func TestPrivilegedStrictLiveUnenrollmentRetainsCaptureAndCanRefreshEnrollment(t *testing.T) {
+	testutils.PrivilegedTest(t)
+	s := strictCleanupServer(t)
+	ep, cleanup := createTestEndpoint(t, "strict-unenroll-retained", 82)
+	defer cleanup()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() { result <- s.EnrollEndpointContext(ctx, ep) }()
+	add := receiveCleanupUpdate(t, s)
+	_, err := exchangeCleanupUpdate(t, s, add, []byte{0x0a, 0x00})
+	require.NoError(t, err)
+	require.NoError(t, <-result)
+	s.endpointCacheMutex.Lock()
+	cached := s.endpointCache[ep.GetID16()]
+	s.endpointCacheMutex.Unlock()
+	require.ErrorIs(t, s.DisenrollEndpointContext(ctx, ep), ErrStrictLiveUnenrollment)
+	require.True(t, strictCapturePresent(t, ep.GetContainerNetnsPath()))
+	require.Same(t, cached, s.endpointCache[ep.GetID16()])
+	require.Empty(t, s.updates)
+	// A true -> false -> true label sequence cannot leave a stale DEL queued
+	// behind the fresh ADD. Each refresh still requires a fresh explicit ACK.
+	go func() { result <- s.EnrollEndpointContext(ctx, ep) }()
+	add = receiveCleanupUpdate(t, s)
+	_, err = exchangeCleanupUpdate(t, s, add, []byte{0x0a, 0x00})
+	require.NoError(t, err)
+	require.NoError(t, <-result)
+	require.True(t, strictCapturePresent(t, ep.GetContainerNetnsPath()))
+}

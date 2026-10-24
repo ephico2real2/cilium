@@ -580,25 +580,15 @@ func (s *Server) DisenrollEndpoint(ep *endpoint.Endpoint) error {
 	return s.DisenrollEndpointContext(ctx, ep)
 }
 
-// Live namespace unenrollment remains an unqualified lifecycle transition:
-// this preserves its existing remove-capture-before-ACK behavior. Do not use
-// this path for failed strict CNI creation or strict endpoint deletion.
+// DisenrollEndpointContext only removes live capture in compatibility mode.
+// Strict endpoints keep their capture until exact sandbox deletion; a namespace
+// label change alone cannot authorize an unsafe partial release.
 func (s *Server) DisenrollEndpointContext(ctx context.Context, ep *endpoint.Endpoint) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var key endpointIncarnation
 	if s.strictDeletedEndpointCleanup {
-		var err error
-		key, err = incarnation(ep)
-		if err != nil {
-			return err
-		}
-		release, err := s.acquireEndpointOperation(ctx)
-		if err != nil {
-			return err
-		}
-		defer release()
+		return ErrStrictLiveUnenrollment
 	}
 	s.logger.Info("disenrolling endpoint from ztunnel", logfields.EndpointID, ep.GetID16())
 	ns, err := netns.OpenPinned(ep.GetContainerNetnsPath())
@@ -614,29 +604,17 @@ func (s *Server) DisenrollEndpointContext(ctx context.Context, ep *endpoint.Endp
 	}); err != nil {
 		return fmt.Errorf("unable to remove iptable rules for ztunnel inpod mode: %w", err)
 	}
-	var uid string
-	if s.strictDeletedEndpointCleanup {
-		uid = key.uid
-	} else {
-		pod := ep.GetPod()
-		if pod == nil {
-			return fmt.Errorf("endpoint %d has no pod metadata", ep.GetID16())
-		}
-		uid = string(pod.GetUID())
+	pod := ep.GetPod()
+	if pod == nil {
+		return fmt.Errorf("endpoint %d has no pod metadata", ep.GetID16())
 	}
 	update := zdsUpdate{
-		request: &pb.WorkloadRequest{Payload: &pb.WorkloadRequest_Del{Del: &pb.DelWorkload{Uid: uid}}},
+		request: &pb.WorkloadRequest{Payload: &pb.WorkloadRequest_Del{Del: &pb.DelWorkload{Uid: string(pod.GetUID())}}},
 		errCh:   make(chan error, 1),
 		onAck: func() {
 			s.endpointCacheMutex.Lock()
 			defer s.endpointCacheMutex.Unlock()
-			if s.strictDeletedEndpointCleanup {
-				if ctx.Err() == nil && sameIncarnation(s.endpointCache[key.id], key) {
-					delete(s.endpointCache, key.id)
-				}
-			} else {
-				delete(s.endpointCache, ep.GetID16())
-			}
+			delete(s.endpointCache, ep.GetID16())
 		},
 	}
 	if err := s.sendUpdateAndWaitForAck(ctx, update); err != nil {
