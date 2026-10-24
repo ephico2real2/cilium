@@ -1,0 +1,285 @@
+{
+  "pages": [
+    {
+      "name": "01-before-all-destination",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"loadtest\", source_workload=~\"load\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_namespace": "team-a",
+              "destination_workload": "shop",
+              "status": "200"
+            },
+            "value": 200.729
+          }
+        ],
+        "errors": [],
+        "total": 200.729
+      }
+    },
+    {
+      "name": "02-after-all-destination",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\".*\", source_workload=~\".*\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_namespace": "team-a",
+              "destination_workload": "shop",
+              "status": "200"
+            },
+            "value": 403.084
+          }
+        ],
+        "errors": [],
+        "total": 403.084
+      }
+    },
+    {
+      "name": "03-before-all-source",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"loadtest\", source_workload=~\"load\"}[$__rate_interval])) by (cluster, source_namespace, source_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "source_namespace": "loadtest",
+              "source_workload": "load",
+              "status": "200"
+            },
+            "value": 201.545
+          }
+        ],
+        "errors": [],
+        "total": 201.545
+      }
+    },
+    {
+      "name": "04-after-all-source",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\".*\", source_workload=~\".*\"}[$__rate_interval])) by (cluster, source_namespace, source_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "source_namespace": "loadtest",
+              "source_workload": "load",
+              "status": "200"
+            },
+            "value": 200.743
+          },
+          {
+            "labels": {
+              "cluster": "poc1",
+              "status": "200"
+            },
+            "value": 200.743
+          }
+        ],
+        "errors": [],
+        "total": 401.486
+      }
+    },
+    {
+      "name": "05-after-selected-direct-source",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"server\", source_namespace=~\"loadtest\", source_workload=~\"load\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_namespace": "team-a",
+              "destination_workload": "shop",
+              "status": "200"
+            },
+            "value": 20.076
+          }
+        ],
+        "errors": [],
+        "total": 20.076
+      }
+    },
+    {
+      "name": "06-after-selected-pod-gateway-source",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\"loadtest\", source_workload=~\"load\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_namespace": "team-a",
+              "destination_workload": "shop",
+              "status": "200"
+            },
+            "value": 201.525
+          }
+        ],
+        "errors": [],
+        "total": 201.525
+      }
+    },
+    {
+      "name": "07-after-live-dashboard-overview",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\".*\", source_workload=~\".*\",status!~\"5.*\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload)\n/\nsum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_workload=~\"shop\", reporter=\"client\", source_namespace=~\".*\", source_workload=~\".*\"}[$__rate_interval])) by (cluster, destination_namespace, destination_workload)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_namespace": "team-a",
+              "destination_workload": "shop"
+            },
+            "value": 1
+          }
+        ],
+        "errors": [],
+        "total": 1
+      }
+    },
+    {
+      "name": "08-by-app-all",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_app=~\"storefront\", reporter=\"client\", source_namespace=~\".*\", source_app=~\".*\"}[$__rate_interval])) by (cluster, destination_namespace, destination_app, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_app": "storefront",
+              "destination_namespace": "team-a",
+              "status": "200"
+            },
+            "value": 401.432
+          }
+        ],
+        "errors": [],
+        "total": 401.432
+      }
+    },
+    {
+      "name": "09-by-app-selected-direct",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_app=~\"storefront\", reporter=\"server\", source_namespace=~\"loadtest\", source_app=~\"checkout-client\"}[$__rate_interval])) by (cluster, destination_namespace, destination_app, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_app": "storefront",
+              "destination_namespace": "team-a",
+              "status": "200"
+            },
+            "value": 20.076
+          }
+        ],
+        "errors": [],
+        "total": 20.076
+      }
+    },
+    {
+      "name": "10-by-app-namespace-gateway",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_app=~\"storefront\", reporter=\"client\", source_namespace=~\"loadtest\", source_app=~\".*\"}[$__rate_interval])) by (cluster, destination_namespace, destination_app, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_app": "storefront",
+              "destination_namespace": "team-a",
+              "status": "200"
+            },
+            "value": 201.485
+          }
+        ],
+        "errors": [],
+        "total": 201.485
+      }
+    },
+    {
+      "name": "11-by-app-dashboard-overview",
+      "render": "passed",
+      "featureEvidence": "passed",
+      "blockedSignals": [],
+      "failures": [],
+      "queryEvidence": {
+        "expressions": [
+          "round(sum(rate(hubble_http_requests_total{cluster=~\"poc1\", destination_namespace=~\"team-a\", destination_app=~\"storefront\", reporter=\"client\", source_namespace=~\".*\", source_app=~\".*\"}[$__rate_interval])) by (cluster, destination_namespace, destination_app, status), 0.001)"
+        ],
+        "series": [
+          {
+            "labels": {
+              "cluster": "poc1",
+              "destination_app": "storefront",
+              "destination_namespace": "team-a",
+              "status": "200"
+            },
+            "value": 402.996
+          }
+        ],
+        "errors": [],
+        "total": 402.996
+      }
+    }
+  ]
+}

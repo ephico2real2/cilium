@@ -1,0 +1,133 @@
+{
+  "viewport": {
+    "width": 1600,
+    "height": 1000
+  },
+  "pages": [
+    {
+      "name": "01-before-all-destination",
+      "url": "http://127.0.0.1:3000/d-solo/baseline-hubble-l7-all/live?orgId=1&from=now-5m&to=now&panelId=10&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_workload=shop&var-reporter=client&var-source_namespace=%24__all&var-source_workload=%24__all",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "prometheusTotal": 200.85581694356833,
+        "prometheusSeries": 1
+      }
+    },
+    {
+      "name": "02-after-all-destination",
+      "url": "http://127.0.0.1:3000/d-solo/3g264CZVz/live?orgId=1&from=now-5m&to=now&panelId=10&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_workload=shop&var-reporter=client&var-source_namespace=%24__all&var-source_workload=%24__all",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "noDataAllowed": [],
+        "prometheusMin": 341.46895152379614
+      }
+    },
+    {
+      "name": "03-before-all-source",
+      "url": "http://127.0.0.1:3000/d-solo/baseline-hubble-l7-all/live?orgId=1&from=now-5m&to=now&panelId=3&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_workload=shop&var-reporter=client&var-source_namespace=%24__all&var-source_workload=%24__all",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "prometheusTotal": 200.85581694356833,
+        "prometheusSeries": 1
+      }
+    },
+    {
+      "name": "04-after-all-source",
+      "url": "http://127.0.0.1:3000/d-solo/3g264CZVz/live?orgId=1&from=now-5m&to=now&panelId=3&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_workload=shop&var-reporter=client&var-source_namespace=%24__all&var-source_workload=%24__all",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "noDataAllowed": [],
+        "prometheusMin": 341.46895152379614
+      }
+    },
+    {
+      "name": "05-after-selected-direct-source",
+      "url": "http://127.0.0.1:3000/d-solo/3g264CZVz/live?orgId=1&from=now-5m&to=now&panelId=10&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_workload=shop&var-reporter=server&var-source_namespace=loadtest&var-source_workload=load",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "noDataAllowed": [],
+        "prometheusTotal": 20.08919603037486,
+        "prometheusSeries": 1
+      }
+    },
+    {
+      "name": "06-after-selected-pod-gateway-source",
+      "url": "http://127.0.0.1:3000/d-solo/3g264CZVz/live?orgId=1&from=now-5m&to=now&panelId=10&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_workload=shop&var-reporter=client&var-source_namespace=loadtest&var-source_workload=load",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "noDataAllowed": [],
+        "prometheusTotal": 200.85581694356833,
+        "prometheusSeries": 1
+      }
+    },
+    {
+      "name": "07-after-live-dashboard-overview",
+      "url": "http://127.0.0.1:3000/d/3g264CZVz/live?orgId=1&from=now-5m&to=now&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_workload=shop&var-reporter=client&var-source_namespace=%24__all&var-source_workload=%24__all",
+      "fullPage": true,
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 11,
+        "noDataAllowed": []
+      }
+    },
+    {
+      "name": "08-by-app-all",
+      "url": "http://127.0.0.1:3000/d-solo/hubble-l7-http-by-app/live?orgId=1&from=now-5m&to=now&panelId=10&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_app=storefront&var-reporter=client&var-source_namespace=%24__all&var-source_app=%24__all",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "noDataAllowed": [],
+        "prometheusMin": 341.46895152379614
+      }
+    },
+    {
+      "name": "09-by-app-selected-direct",
+      "url": "http://127.0.0.1:3000/d-solo/hubble-l7-http-by-app/live?orgId=1&from=now-5m&to=now&panelId=10&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_app=storefront&var-reporter=server&var-source_namespace=loadtest&var-source_app=checkout-client",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "noDataAllowed": [],
+        "prometheusTotal": 20.08919603037486,
+        "prometheusSeries": 1
+      }
+    },
+    {
+      "name": "10-by-app-namespace-gateway",
+      "url": "http://127.0.0.1:3000/d-solo/hubble-l7-http-by-app/live?orgId=1&from=now-5m&to=now&panelId=10&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_app=storefront&var-reporter=client&var-source_namespace=loadtest&var-source_app=%24__all",
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 1,
+        "noDataAllowed": [],
+        "prometheusTotal": 200.85581694356833,
+        "prometheusSeries": 1
+      }
+    },
+    {
+      "name": "11-by-app-dashboard-overview",
+      "url": "http://127.0.0.1:3000/d/hubble-l7-http-by-app/live?orgId=1&from=now-5m&to=now&var-DS_PROMETHEUS=prometheus&var-cluster=poc1&var-destination_namespace=team-a&var-destination_app=storefront&var-reporter=client&var-source_namespace=%24__all&var-source_app=%24__all",
+      "fullPage": true,
+      "before": 6000,
+      "evidence": "panels",
+      "expect": {
+        "panelsMin": 9,
+        "noDataAllowed": []
+      }
+    }
+  ]
+}

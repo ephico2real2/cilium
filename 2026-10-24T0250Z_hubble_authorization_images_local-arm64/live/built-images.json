@@ -1,0 +1,109 @@
+[
+    {
+        "Id": "sha256:15cc5402e93416e8ff71f24b79b0fc1e6b3837f0c4c216b0eb377b8d47b92d68",
+        "RepoTags": [
+            "ghcr.io/ephico2real2/cilium-dev@sha256:15cc5402e93416e8ff71f24b79b0fc1e6b3837f0c4c216b0eb377b8d47b92d68"
+        ],
+        "RepoDigests": [
+            "ghcr.io/ephico2real2/cilium-dev@sha256:15cc5402e93416e8ff71f24b79b0fc1e6b3837f0c4c216b0eb377b8d47b92d68"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-23T21:13:39.765010143-05:00",
+        "Config": {
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "HUBBLE_SERVER=unix:///var/run/cilium/hubble.sock",
+                "INITSYSTEM=SYSTEMD"
+            ],
+            "Cmd": [
+                "/usr/bin/cilium-dbg"
+            ],
+            "WorkingDir": "/home/cilium",
+            "Labels": {
+                "maintainer": "maintainer@cilium.io",
+                "org.opencontainers.image.revision": "42f89f83aa5a03ea80f7a2b8cece56b27f87385a",
+                "org.opencontainers.image.source": "https://github.com/ephico2real2/cilium"
+            },
+            "ArgsEscaped": true
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 251830072,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:095574fbdf905d5bcc798448b2384baf884d7ea25d3df815f5e20baf4da73f6e",
+                "sha256:79de6d4dc4811e8eae9fe94cafba275adc23f3e4f78f66583ac178c654336111",
+                "sha256:d2b73e0fd4e19ca7147793f9522d43577c2452407521f607c56528f718e4556a",
+                "sha256:a329e98e8bbca21f968e348e80deb66680fb076f87d8a69ff84c1d983f6becf9",
+                "sha256:82ecf1c474aa5af5b7886eca7f8be67d793dbeaf577252aa125bef46cf523ddc"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-10-24T02:40:16.985948762Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:15cc5402e93416e8ff71f24b79b0fc1e6b3837f0c4c216b0eb377b8d47b92d68",
+            "size": 1609
+        },
+        "Identity": {
+            "Pull": [
+                {
+                    "Repository": "ghcr.io/ephico2real2/cilium-dev"
+                }
+            ]
+        }
+    },
+    {
+        "Id": "sha256:5cfa1b276298f4a97bf4e73eb068e87fc730874975da137754062b838ac63aa7",
+        "RepoTags": [
+            "ghcr.io/ephico2real2/cilium-dev@sha256:5cfa1b276298f4a97bf4e73eb068e87fc730874975da137754062b838ac63aa7"
+        ],
+        "RepoDigests": [
+            "ghcr.io/ephico2real2/cilium-dev@sha256:5cfa1b276298f4a97bf4e73eb068e87fc730874975da137754062b838ac63aa7"
+        ],
+        "Comment": "buildkit.dockerfile.v0",
+        "Created": "2026-10-23T21:14:11.015599533-05:00",
+        "Config": {
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                "GOPS_CONFIG_DIR=/home/gops"
+            ],
+            "WorkingDir": "/",
+            "Labels": {
+                "maintainer": "maintainer@cilium.io",
+                "org.opencontainers.image.revision": "42f89f83aa5a03ea80f7a2b8cece56b27f87385a",
+                "org.opencontainers.image.source": "https://github.com/ephico2real2/cilium"
+            }
+        },
+        "Architecture": "arm64",
+        "Os": "linux",
+        "Size": 36101733,
+        "RootFS": {
+            "Type": "layers",
+            "Layers": [
+                "sha256:763fb49ac9be802eb1c3c318f5e1fba118a21bda3e5c3b8ac0e5f85ddc0b5040",
+                "sha256:031540604843046a224d5195a4f23c9e3e01385ff69b1bcb960aeecddbd02c08",
+                "sha256:f4967e8e7a0380ccc1791c0c460dcebc5c2eb5de8c7ea8b8288da4b94eb0d710",
+                "sha256:f96a252e82bef45460ad21d9943e9f41b10a3bc87378482f83076ab3573718cf",
+                "sha256:bf82f04fd7488430d1f7e80acb15be06387cbfea86e911b00799386f023a2394"
+            ]
+        },
+        "Metadata": {
+            "LastTagTime": "2026-10-24T02:40:17.858069692Z"
+        },
+        "Descriptor": {
+            "mediaType": "application/vnd.oci.image.index.v1+json",
+            "digest": "sha256:5cfa1b276298f4a97bf4e73eb068e87fc730874975da137754062b838ac63aa7",
+            "size": 1609
+        },
+        "Identity": {
+            "Pull": [
+                {
+                    "Repository": "ghcr.io/ephico2real2/cilium-dev"
+                }
+            ]
+        }
+    }
+]

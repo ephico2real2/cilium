@@ -1,0 +1,263 @@
+[
+    {
+        "Id": "2829affaf8094f64ddae610b45470be4663920d253922680685ff262137bdc96",
+        "Created": "2026-10-24T02:43:11.434046192Z",
+        "Path": "/usr/bin/fortio",
+        "Args": [
+            "load",
+            "-qps",
+            "200",
+            "-c",
+            "8",
+            "-t",
+            "6m",
+            "-nocatchup",
+            "-uniform",
+            "-H",
+            "Host: shop.poc.local",
+            "-json",
+            "/results/gateway-load.json",
+            "http://172.18.0.6:8080/"
+        ],
+        "State": {
+            "Status": "exited",
+            "Running": false,
+            "Paused": false,
+            "Restarting": false,
+            "OOMKilled": false,
+            "Dead": false,
+            "Pid": 0,
+            "ExitCode": 0,
+            "Error": "",
+            "StartedAt": "2026-10-24T02:43:11.477791937Z",
+            "FinishedAt": "2026-10-24T02:49:09.583626287Z"
+        },
+        "Image": "sha256:942c86131c24ee9bd4a7754610be417ac1b9fe2f11d1860620a9f6932ceb712f",
+        "ResolvConfPath": "/var/lib/docker/containers/2829affaf8094f64ddae610b45470be4663920d253922680685ff262137bdc96/resolv.conf",
+        "HostnamePath": "/var/lib/docker/containers/2829affaf8094f64ddae610b45470be4663920d253922680685ff262137bdc96/hostname",
+        "HostsPath": "/var/lib/docker/containers/2829affaf8094f64ddae610b45470be4663920d253922680685ff262137bdc96/hosts",
+        "LogPath": "/var/lib/docker/containers/2829affaf8094f64ddae610b45470be4663920d253922680685ff262137bdc96/2829affaf8094f64ddae610b45470be4663920d253922680685ff262137bdc96-json.log",
+        "Name": "/gateway-load",
+        "RestartCount": 0,
+        "Driver": "overlayfs",
+        "Platform": "linux",
+        "MountLabel": "",
+        "ProcessLabel": "",
+        "AppArmorProfile": "docker-default",
+        "ExecIDs": null,
+        "HostConfig": {
+            "Binds": [
+                "/private/tmp/cilium-hubble-local-qualification/artifacts/live:/results"
+            ],
+            "ContainerIDFile": "",
+            "LogConfig": {
+                "Type": "json-file",
+                "Config": {}
+            },
+            "NetworkMode": "kind",
+            "PortBindings": {},
+            "RestartPolicy": {
+                "Name": "no",
+                "MaximumRetryCount": 0
+            },
+            "AutoRemove": false,
+            "VolumeDriver": "",
+            "VolumesFrom": null,
+            "ConsoleSize": [
+                0,
+                0
+            ],
+            "CapAdd": null,
+            "CapDrop": null,
+            "CgroupnsMode": "private",
+            "Dns": null,
+            "DnsOptions": [],
+            "DnsSearch": [],
+            "ExtraHosts": null,
+            "GroupAdd": null,
+            "IpcMode": "private",
+            "Cgroup": "",
+            "Links": null,
+            "OomScoreAdj": 0,
+            "PidMode": "",
+            "Privileged": false,
+            "PublishAllPorts": false,
+            "ReadonlyRootfs": false,
+            "SecurityOpt": null,
+            "UTSMode": "",
+            "UsernsMode": "",
+            "ShmSize": 67108864,
+            "Runtime": "runc",
+            "Isolation": "",
+            "CpuShares": 0,
+            "Memory": 0,
+            "NanoCpus": 0,
+            "CgroupParent": "",
+            "BlkioWeight": 0,
+            "BlkioWeightDevice": [],
+            "BlkioDeviceReadBps": [],
+            "BlkioDeviceWriteBps": [],
+            "BlkioDeviceReadIOps": [],
+            "BlkioDeviceWriteIOps": [],
+            "CpuPeriod": 0,
+            "CpuQuota": 0,
+            "CpuRealtimePeriod": 0,
+            "CpuRealtimeRuntime": 0,
+            "CpusetCpus": "",
+            "CpusetMems": "",
+            "Devices": [],
+            "DeviceCgroupRules": null,
+            "DeviceRequests": null,
+            "MemoryReservation": 0,
+            "MemorySwap": 0,
+            "MemorySwappiness": null,
+            "OomKillDisable": null,
+            "PidsLimit": null,
+            "Ulimits": [],
+            "CpuCount": 0,
+            "CpuPercent": 0,
+            "IOMaximumIOps": 0,
+            "IOMaximumBandwidth": 0,
+            "MaskedPaths": [
+                "/proc/acpi",
+                "/proc/asound",
+                "/proc/interrupts",
+                "/proc/kcore",
+                "/proc/keys",
+                "/proc/latency_stats",
+                "/proc/sched_debug",
+                "/proc/scsi",
+                "/proc/timer_list",
+                "/proc/timer_stats",
+                "/sys/devices/virtual/powercap",
+                "/sys/firmware"
+            ],
+            "ReadonlyPaths": [
+                "/proc/bus",
+                "/proc/fs",
+                "/proc/irq",
+                "/proc/sys",
+                "/proc/sysrq-trigger"
+            ]
+        },
+        "Storage": {
+            "RootFS": {
+                "Snapshot": {
+                    "Name": "overlayfs"
+                }
+            }
+        },
+        "Mounts": [
+            {
+                "Type": "bind",
+                "Source": "/private/tmp/cilium-hubble-local-qualification/artifacts/live",
+                "Destination": "/results",
+                "Mode": "",
+                "RW": true,
+                "Propagation": "rprivate"
+            },
+            {
+                "Type": "volume",
+                "Name": "fe34fa7eb7b914edc7ed7088ce6754889eb79e1af08db4d4755888ee219a07fa",
+                "Source": "/var/lib/docker/volumes/fe34fa7eb7b914edc7ed7088ce6754889eb79e1af08db4d4755888ee219a07fa/_data",
+                "Destination": "/etc/fortio",
+                "Driver": "local",
+                "Mode": "",
+                "RW": true,
+                "Propagation": ""
+            },
+            {
+                "Type": "volume",
+                "Name": "a2b0814a628e239a94180816b0f23436cb165ca51009328d18093ecd06db26e9",
+                "Source": "/var/lib/docker/volumes/a2b0814a628e239a94180816b0f23436cb165ca51009328d18093ecd06db26e9/_data",
+                "Destination": "/var/lib/fortio",
+                "Driver": "local",
+                "Mode": "",
+                "RW": true,
+                "Propagation": ""
+            }
+        ],
+        "Config": {
+            "Hostname": "2829affaf809",
+            "Domainname": "",
+            "User": "",
+            "AttachStdin": false,
+            "AttachStdout": false,
+            "AttachStderr": false,
+            "ExposedPorts": {
+                "8078/tcp": {},
+                "8079/tcp": {},
+                "8080/tcp": {},
+                "8081/tcp": {}
+            },
+            "Tty": false,
+            "OpenStdin": false,
+            "StdinOnce": false,
+            "Env": [
+                "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+            ],
+            "Cmd": [
+                "load",
+                "-qps",
+                "200",
+                "-c",
+                "8",
+                "-t",
+                "6m",
+                "-nocatchup",
+                "-uniform",
+                "-H",
+                "Host: shop.poc.local",
+                "-json",
+                "/results/gateway-load.json",
+                "http://172.18.0.6:8080/"
+            ],
+            "Image": "fortio/fortio:1.75.3",
+            "Volumes": {
+                "/etc/fortio": {},
+                "/var/lib/fortio": {}
+            },
+            "WorkingDir": "/var/lib/fortio",
+            "Entrypoint": [
+                "/usr/bin/fortio"
+            ],
+            "Labels": {}
+        },
+        "NetworkSettings": {
+            "SandboxID": "",
+            "SandboxKey": "",
+            "Ports": {},
+            "Networks": {
+                "kind": {
+                    "IPAMConfig": null,
+                    "Links": null,
+                    "Aliases": null,
+                    "DriverOpts": null,
+                    "GwPriority": 0,
+                    "NetworkID": "147d13477d9c8b298febcf22d6c5f66b8136e55631b6ade6cd447e566a9365ad",
+                    "EndpointID": "",
+                    "Gateway": "",
+                    "IPAddress": "",
+                    "MacAddress": "",
+                    "IPPrefixLen": 0,
+                    "IPv6Gateway": "",
+                    "GlobalIPv6Address": "",
+                    "GlobalIPv6PrefixLen": 0,
+                    "DNSNames": [
+                        "gateway-load",
+                        "2829affaf809"
+                    ]
+                }
+            }
+        },
+        "ImageManifestDescriptor": {
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "digest": "sha256:02c583bfc681a7a9e26046de49d052f58e3212a87733fb08f13cebab6693bb1d",
+            "size": 669,
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            }
+        }
+    }
+]

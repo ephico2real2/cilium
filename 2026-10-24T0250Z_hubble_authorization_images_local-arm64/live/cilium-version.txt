@@ -1,0 +1,2 @@
+Client: 1.21.0-dev 42f89f83aa 2026-10-23T21:09:29-05:00 go version go1.27.3 linux/arm64
+Daemon: 1.21.0-dev 42f89f83aa 2026-10-23T21:09:29-05:00 go version go1.27.3 linux/arm64

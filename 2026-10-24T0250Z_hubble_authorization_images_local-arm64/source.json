@@ -1,0 +1,26 @@
+{
+  "source": "42f89f83aa5a03ea80f7a2b8cece56b27f87385a",
+  "upstream_base": "fe561573e0a8adc43bacbcc70bda0c9e01d6676d",
+  "kind": "real two-node Cilium Gateway load",
+  "grafana": "13.2.1",
+  "prometheus": "kube-prometheus-stack 90.1.1",
+  "application_load": true,
+  "images": {
+    "agent": "ghcr.io/ephico2real2/cilium-dev@sha256:15cc5402e93416e8ff71f24b79b0fc1e6b3837f0c4c216b0eb377b8d47b92d68",
+    "operator": "ghcr.io/ephico2real2/cilium-dev@sha256:5cfa1b276298f4a97bf4e73eb068e87fc730874975da137754062b838ac63aa7"
+  },
+  "traffic": "Fortio 1.75.3: external Gateway 200, pod Gateway 200, direct pod 20 req/s; six minutes each",
+  "evidence_tools_source": "8c4ff1b52e283b83e8d285decd5e73624e326a0c",
+  "app_dashboard": {
+    "uid": "hubble-l7-http-by-app",
+    "generator_commit": "22fb6e14c0cca8c78af1f072d1e89ebaea6a916b",
+    "destination_app": "storefront",
+    "destination_workload": "shop",
+    "source_app": "checkout-client",
+    "source_workload": "load",
+    "all_qps": 401.731723486751,
+    "direct_qps": 20.08919603037486,
+    "pod_gateway_qps": 200.85581694356833,
+    "generator_sha256": "edce1cced1f4f29b391044c03e555c4c43134d0f1ffe16d895814d20c500079d"
+  }
+}

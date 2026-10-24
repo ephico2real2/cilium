@@ -1,0 +1,13 @@
+01-before-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=200.729, series=1 — expectations met
+02-after-all-destination: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=403.084, series=1 — expectations met
+03-before-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=201.545, series=1 — expectations met
+04-after-all-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Source and Response Code; browser Prometheus total=401.486, series=2 — expectations met
+05-after-selected-direct-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=20.076, series=1 — expectations met
+06-after-selected-pod-gateway-source: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=201.525, series=1 — expectations met
+07-after-live-dashboard-overview: scrolled 3 screens for the lazy panels
+07-after-live-dashboard-overview: settled 6s; panels=11; "No data"=0; first: Incoming Request Volume | Incoming Request Success Rate (non-5xx responses) | Request Duration | Incoming Requests by Source and Response Code | Incoming Request Success Rate (non-5xx responses) By Source; browser Prometheus total=1, series=1 — expectations met
+08-by-app-all: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=401.432, series=1 — expectations met
+09-by-app-selected-direct: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=20.076, series=1 — expectations met
+10-by-app-namespace-gateway: settled 6s; panels=1; "No data"=0; first: Incoming Requests by Destination and Response Code; browser Prometheus total=201.485, series=1 — expectations met
+11-by-app-dashboard-overview: scrolled 3 screens for the lazy panels
+11-by-app-dashboard-overview: settled 6s; panels=9; "No data"=0; first: Incoming Request Volume | Incoming Request Success Rate (non-5xx responses) | Request Duration | Incoming Requests by Source and Response Code | Incoming Request Success Rate (non-5xx responses) By Source; browser Prometheus total=402.996, series=1 — expectations met

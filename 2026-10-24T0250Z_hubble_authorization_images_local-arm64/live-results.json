@@ -1,0 +1,30 @@
+{
+  "application_load": true,
+  "requested_qps": {
+    "external_gateway": 200,
+    "pod_gateway": 200,
+    "direct_pod": 20
+  },
+  "gateway_measured_http_200_qps": 200.87590654318262,
+  "gateway_reporter": "client",
+  "gateway_client": "external Docker container on kind bridge",
+  "direct_measured_http_200_qps": 20.08919603037486,
+  "fixed_all_qps": 401.731723486751,
+  "baseline_enumerated_source_qps": 200.85581694356833,
+  "baseline_query": "sum(rate(hubble_http_requests_total{cluster=\"poc1\",destination_namespace=\"team-a\",destination_workload=\"shop\",reporter=\"client\",source_namespace=~\"(loadtest)\",source_workload=~\"(load)\"}[1m]))",
+  "fixed_query": "sum(rate(hubble_http_requests_total{cluster=\"poc1\",destination_namespace=\"team-a\",destination_workload=\"shop\",reporter=\"client\",source_namespace=~\".*\",source_workload=~\".*\"}[1m]))",
+  "remote_backend_node": "poc1-control-plane",
+  "gateway_reporter_node": "poc1-worker",
+  "source_commit": "42f89f83aa5a03ea80f7a2b8cece56b27f87385a",
+  "app_dashboard": {
+    "uid": "hubble-l7-http-by-app",
+    "generator_commit": "22fb6e14c0cca8c78af1f072d1e89ebaea6a916b",
+    "destination_app": "storefront",
+    "destination_workload": "shop",
+    "source_app": "checkout-client",
+    "source_workload": "load",
+    "all_qps": 401.731723486751,
+    "direct_qps": 20.08919603037486,
+    "pod_gateway_qps": 200.85581694356833
+  }
+}

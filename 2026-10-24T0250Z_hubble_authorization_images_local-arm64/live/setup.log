@@ -1,0 +1,278 @@
+
+== the host: Ubuntu 24.04.4 LTS on aarch64 (arm64), kernel 6.8.0-117-generic, 8 CPUs, 15 GiB
+
+== kind v0.33.0 (kubernetes-sigs/kind releases)
+  at the pin: kind v0.33.0 go1.26.7 linux/arm64
+
+== kubectl v1.36.4 (dl.k8s.io)
+  at the pin: kubectl v1.36.4
+
+== cilium-cli v0.20.0 (cilium/cilium-cli releases)
+  at the pin: cilium-cli: v0.20.0 compiled with go1.27.0 on linux/arm64
+
+== hubble 1.19.4 (cilium/hubble releases) — the demo scripts' hubble observe
+  at the pin: hubble v1.19.4@HEAD-39037bd compiled with go1.26.4 on linux/arm64
+
+== helm v3.21.4 (get.helm.sh — the runner's preinstalled version, the one the lab was measured with)
+  at the pin: v3.21.4+g813176c
+
+== docker — Ubuntu's docker.io when absent (kind's provider)
+  present: Docker version 29.5.2, build 79eb04c, engine 29.5.2 (kept)
+
+== tcp_bbr
+  congestion=reno cubic bbr
+
+== the toolchain
+  kind v0.33.0 | kubectl v1.36.4 | helm v3.21.4+g813176c | cilium-cli v0.20.0 | hubble 1.19.4 | docker 29.5.2 | kernel 6.8.0-117-generic
+grep: clusters/ci/poc1.yaml: No such file or directory
+
+== lab preflight on Linux aarch64 — measured, every row (rules: docs/SETUP.md Steps 0–2, Cilium 1.20.2 system requirements)
+  STATUS        WHAT                       MEASURED                                     RULE
+  ok            host                       Ubuntu 24.04.4 LTS on aarch64, 8 CPUs, 15 GiB the nodes share THIS kernel
+  ok            bash (env bash)            5.2.21(1)-release at /usr/bin/bash           ≥ 4.4 for the lab's scripts (the runner: 5.2)
+  ok            docker                     engine 29.5.2                                
+  warn          memory for the nodes       15 GiB                                       enough for clusters/ci (the runner: 5 GB used, meshed); the full-size poc1 wants 16 (SETUP 2.3)
+  ok            CPUs for the nodes         8                                            ≥ 8 for the full-size clusters (SETUP 0.4); the runner's 4 carried clusters/ci
+  ok            netkit (kernel 6.8.0-117-generic) ≥ 6.8 and CONFIG_NETKIT in /boot/config    Cilium 1.20.2 system requirements: netkit ≥ 6.8 + CONFIG_NETKIT
+  ok            Tetragon base sensor       security_bprm_committing_creds exported      demo 17 blocker 1 (CONFIG_SECURITY); blocker 2, /procHost, is in clusters/ci/*.yaml
+  no            bandwidth manager + BBR    off inside kind nodes (host default_qdisc=fq_codel) net.core.default_qdisc is host-netns only; a kind node is a container — any kernel (gotcha #103)
+  no            BIG TCP                    not with the lab's VXLAN tunnel              needs native routing (the agent: 'BIG TCP in tunneling mode requires pending kernel support', gotcha #103)
+  ok            net.ipv4.ip_forward        1 (the kernel the nodes egress through)      Docker sets it at start (--ip-forward, default true); nothing for the lab to set
+  REQUIRED-FAIL node image for arm64       index platforms: unreadable                  the pinned image has no arm64 manifest
+  ok            route to the LB blocks     the docker bridge is on this host: on-link   scripts/lab-route.sh verifies Docker's connected route
+  ok            IPv6 on a docker network   a container got fd00:1ab:9:9::/64            LAB_IPFAMILY=dual is possible (cilium/values-ci-features.yaml)
+  warn          existing kind network      fc00:f853:ccd:e793::/64 172.18.0.0/16        not the lab's 172.18.0.0/16: lab-up.sh will stop — remove it when no cluster is on it (gotcha #95)
+
+Creating cluster "poc1" ...
+ • Ensuring node image (kindest/node:v1.36.4) 🖼️  ...
+ ✓ Ensuring node image (kindest/node:v1.36.4) 🖼️
+ • Preparing nodes 📦 📦   ...
+ ✓ Preparing nodes 📦 📦 
+ • Writing configuration 📜  ...
+ ✓ Writing configuration 📜
+ • Starting control-plane 🕹️  ...
+ ✓ Starting control-plane 🕹️
+ • Installing StorageClass 💾  ...
+ ✓ Installing StorageClass 💾
+ • Joining worker nodes 🚜  ...
+ ✓ Joining worker nodes 🚜
+ • Waiting ≤ 1m0s for control-plane = Ready ⏳  ...
+ ✗ Waiting ≤ 1m0s for control-plane = Ready ⏳
+ • WARNING: Timed out waiting for Ready ⚠️
+ERROR: failed to create cluster: failed to lock config file: open /private/tmp/cilium-hubble-authorization-kubeconfig.lock: permission denied
+
+== the host: Ubuntu 24.04.4 LTS on aarch64 (arm64), kernel 6.8.0-117-generic, 8 CPUs, 15 GiB
+
+== kind v0.33.0 (kubernetes-sigs/kind releases)
+  at the pin: kind v0.33.0 go1.26.7 linux/arm64
+
+== kubectl v1.36.4 (dl.k8s.io)
+  at the pin: kubectl v1.36.4
+
+== cilium-cli v0.20.0 (cilium/cilium-cli releases)
+  at the pin: cilium-cli: v0.20.0 compiled with go1.27.0 on linux/arm64
+
+== hubble 1.19.4 (cilium/hubble releases) — the demo scripts' hubble observe
+  at the pin: hubble v1.19.4@HEAD-39037bd compiled with go1.26.4 on linux/arm64
+
+== helm v3.21.4 (get.helm.sh — the runner's preinstalled version, the one the lab was measured with)
+  at the pin: v3.21.4+g813176c
+
+== docker — Ubuntu's docker.io when absent (kind's provider)
+  present: Docker version 29.5.2, build 79eb04c, engine 29.5.2 (kept)
+
+== tcp_bbr
+  congestion=reno cubic bbr
+
+== the toolchain
+  kind v0.33.0 | kubectl v1.36.4 | helm v3.21.4+g813176c | cilium-cli v0.20.0 | hubble 1.19.4 | docker 29.5.2 | kernel 6.8.0-117-generic
+grep: clusters/ci/poc1.yaml: No such file or directory
+
+== lab preflight on Linux aarch64 — measured, every row (rules: docs/SETUP.md Steps 0–2, Cilium 1.20.2 system requirements)
+  STATUS        WHAT                       MEASURED                                     RULE
+  ok            host                       Ubuntu 24.04.4 LTS on aarch64, 8 CPUs, 15 GiB the nodes share THIS kernel
+  ok            bash (env bash)            5.2.21(1)-release at /usr/bin/bash           ≥ 4.4 for the lab's scripts (the runner: 5.2)
+  ok            docker                     engine 29.5.2                                
+  warn          memory for the nodes       15 GiB                                       enough for clusters/ci (the runner: 5 GB used, meshed); the full-size poc1 wants 16 (SETUP 2.3)
+  ok            CPUs for the nodes         8                                            ≥ 8 for the full-size clusters (SETUP 0.4); the runner's 4 carried clusters/ci
+  ok            netkit (kernel 6.8.0-117-generic) ≥ 6.8 and CONFIG_NETKIT in /boot/config    Cilium 1.20.2 system requirements: netkit ≥ 6.8 + CONFIG_NETKIT
+  ok            Tetragon base sensor       security_bprm_committing_creds exported      demo 17 blocker 1 (CONFIG_SECURITY); blocker 2, /procHost, is in clusters/ci/*.yaml
+  no            bandwidth manager + BBR    off inside kind nodes (host default_qdisc=fq_codel) net.core.default_qdisc is host-netns only; a kind node is a container — any kernel (gotcha #103)
+  no            BIG TCP                    not with the lab's VXLAN tunnel              needs native routing (the agent: 'BIG TCP in tunneling mode requires pending kernel support', gotcha #103)
+  ok            net.ipv4.ip_forward        1 (the kernel the nodes egress through)      Docker sets it at start (--ip-forward, default true); nothing for the lab to set
+  REQUIRED-FAIL node image for arm64       index platforms: unreadable                  the pinned image has no arm64 manifest
+  ok            route to the LB blocks     the docker bridge is on this host: on-link   scripts/lab-route.sh verifies Docker's connected route
+  ok            IPv6 on a docker network   a container got fd00:1ab:9:9::/64            LAB_IPFAMILY=dual is possible (cilium/values-ci-features.yaml)
+  warn          existing kind network      fc00:f853:ccd:e793::/64 172.18.0.0/16        not the lab's 172.18.0.0/16: lab-up.sh will stop — remove it when no cluster is on it (gotcha #95)
+
+ERROR: failed to lock config file: mkdir /home/olasumbo: permission denied
+
+== the host: Ubuntu 24.04.4 LTS on aarch64 (arm64), kernel 6.8.0-117-generic, 8 CPUs, 15 GiB
+
+== kind v0.33.0 (kubernetes-sigs/kind releases)
+  at the pin: kind v0.33.0 go1.26.7 linux/arm64
+
+== kubectl v1.36.4 (dl.k8s.io)
+  at the pin: kubectl v1.36.4
+
+== cilium-cli v0.20.0 (cilium/cilium-cli releases)
+  at the pin: cilium-cli: v0.20.0 compiled with go1.27.0 on linux/arm64
+
+== hubble 1.19.4 (cilium/hubble releases) — the demo scripts' hubble observe
+  at the pin: hubble v1.19.4@HEAD-39037bd compiled with go1.26.4 on linux/arm64
+
+== helm v3.21.4 (get.helm.sh — the runner's preinstalled version, the one the lab was measured with)
+  at the pin: v3.21.4+g813176c
+
+== docker — Ubuntu's docker.io when absent (kind's provider)
+  present: Docker version 29.5.2, build 79eb04c, engine 29.5.2 (kept)
+
+== tcp_bbr
+  congestion=reno cubic bbr
+
+== the toolchain
+  kind v0.33.0 | kubectl v1.36.4 | helm v3.21.4+g813176c | cilium-cli v0.20.0 | hubble 1.19.4 | docker 29.5.2 | kernel 6.8.0-117-generic
+grep: clusters/ci/poc1.yaml: No such file or directory
+
+== lab preflight on Linux aarch64 — measured, every row (rules: docs/SETUP.md Steps 0–2, Cilium 1.20.2 system requirements)
+  STATUS        WHAT                       MEASURED                                     RULE
+  ok            host                       Ubuntu 24.04.4 LTS on aarch64, 8 CPUs, 15 GiB the nodes share THIS kernel
+  ok            bash (env bash)            5.2.21(1)-release at /usr/bin/bash           ≥ 4.4 for the lab's scripts (the runner: 5.2)
+  ok            docker                     engine 29.5.2                                
+  warn          memory for the nodes       15 GiB                                       enough for clusters/ci (the runner: 5 GB used, meshed); the full-size poc1 wants 16 (SETUP 2.3)
+  ok            CPUs for the nodes         8                                            ≥ 8 for the full-size clusters (SETUP 0.4); the runner's 4 carried clusters/ci
+  ok            netkit (kernel 6.8.0-117-generic) ≥ 6.8 and CONFIG_NETKIT in /boot/config    Cilium 1.20.2 system requirements: netkit ≥ 6.8 + CONFIG_NETKIT
+  ok            Tetragon base sensor       security_bprm_committing_creds exported      demo 17 blocker 1 (CONFIG_SECURITY); blocker 2, /procHost, is in clusters/ci/*.yaml
+  no            bandwidth manager + BBR    off inside kind nodes (host default_qdisc=fq_codel) net.core.default_qdisc is host-netns only; a kind node is a container — any kernel (gotcha #103)
+  no            BIG TCP                    not with the lab's VXLAN tunnel              needs native routing (the agent: 'BIG TCP in tunneling mode requires pending kernel support', gotcha #103)
+  ok            net.ipv4.ip_forward        1 (the kernel the nodes egress through)      Docker sets it at start (--ip-forward, default true); nothing for the lab to set
+  REQUIRED-FAIL node image for arm64       index platforms: unreadable                  the pinned image has no arm64 manifest
+  ok            route to the LB blocks     the docker bridge is on this host: on-link   scripts/lab-route.sh verifies Docker's connected route
+  ok            IPv6 on a docker network   a container got fd00:1ab:9:9::/64            LAB_IPFAMILY=dual is possible (cilium/values-ci-features.yaml)
+  warn          existing kind network      fc00:f853:ccd:e793::/64 172.18.0.0/16        not the lab's 172.18.0.0/16: lab-up.sh will stop — remove it when no cluster is on it (gotcha #95)
+
+Set kubectl context to "kind-poc1"
+Image: "routedemo:local" with ID "sha256:17699d0f059db5e9045b7aa72ec47fe09b54e071ad8caedaadd97b861e557e85" not yet present on node "poc1-control-plane", loading...
+Image: "routedemo:local" with ID "sha256:17699d0f059db5e9045b7aa72ec47fe09b54e071ad8caedaadd97b861e557e85" not yet present on node "poc1-worker", loading...
+customresourcedefinition.apiextensions.k8s.io/backendtlspolicies.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gatewayclasses.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/gateways.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/grpcroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/httproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/listenersets.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/referencegrants.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tcproutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/tlsroutes.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/udproutes.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicy.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+validatingadmissionpolicybinding.admissionregistration.k8s.io/safe-upgrades.gateway.networking.k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/xbackends.gateway.networking.x-k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/xbackendtrafficpolicies.gateway.networking.x-k8s.io serverside-applied
+customresourcedefinition.apiextensions.k8s.io/xmeshes.gateway.networking.x-k8s.io serverside-applied
+NAME: cilium
+LAST DEPLOYED: Fri Oct 23 21:40:21 2026
+NAMESPACE: kube-system
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+You have successfully installed Cilium with Hubble.
+
+Your release version is 1.21.0-dev.
+
+For any further help, visit https://docs.cilium.io/en/v1.21/gettinghelp
+Waiting for daemon set "cilium" rollout to finish: 0 of 2 updated pods are available...
+Waiting for daemon set "cilium" rollout to finish: 1 of 2 updated pods are available...
+daemon set "cilium" successfully rolled out
+daemon set "cilium-envoy" successfully rolled out
+node/poc1-control-plane condition met
+node/poc1-worker condition met
+"prometheus-community" already exists with the same configuration, skipping
+Release "monitoring" does not exist. Installing it now.
+NAME: monitoring
+LAST DEPLOYED: Fri Oct 23 21:40:50 2026
+NAMESPACE: monitoring
+STATUS: deployed
+REVISION: 1
+TEST SUITE: None
+NOTES:
+kube-prometheus-stack has been installed. Check its status by running:
+  kubectl --namespace monitoring get pods -l "release=monitoring"
+
+Get Grafana 'admin' user password by running:
+
+  kubectl --namespace monitoring get secrets monitoring-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+Access Grafana local instance:
+
+  export POD_NAME=$(kubectl --namespace monitoring get pod -l "app.kubernetes.io/name=grafana,app.kubernetes.io/instance=monitoring" -oname)
+  kubectl --namespace monitoring port-forward $POD_NAME 3000
+
+Get your grafana admin user password by running:
+
+  kubectl get secret --namespace monitoring -l app.kubernetes.io/component=admin-secret -o jsonpath="{.items[0].data.admin-password}" | base64 --decode ; echo
+
+
+Visit https://github.com/prometheus-operator/kube-prometheus for instructions on how to create & configure Alertmanager and Prometheus instances using the Operator.
+Release "cilium" has been upgraded. Happy Helming!
+NAME: cilium
+LAST DEPLOYED: Fri Oct 23 21:42:48 2026
+NAMESPACE: kube-system
+STATUS: deployed
+REVISION: 2
+TEST SUITE: None
+NOTES:
+You have successfully installed Cilium with Hubble.
+
+Your release version is 1.21.0-dev.
+
+For any further help, visit https://docs.cilium.io/en/v1.21/gettinghelp
+Waiting for daemon set "cilium" rollout to finish: 0 of 2 updated pods are available...
+Waiting for daemon set "cilium" rollout to finish: 1 of 2 updated pods are available...
+daemon set "cilium" successfully rolled out
+configmap/dashboard-regression created
+configmap/dashboard-regression labeled
+namespace/team-a created
+namespace/loadtest created
+deployment.apps/shop created
+service/shop created
+deployment.apps/load created
+gateway.gateway.networking.k8s.io/shop created
+httproute.gateway.networking.k8s.io/shop created
+ciliumnetworkpolicy.cilium.io/http-observe created
+Waiting for deployment "shop" rollout to finish: 0 of 1 updated replicas are available...
+deployment "shop" successfully rolled out
+Waiting for deployment "load" rollout to finish: 0 of 1 updated replicas are available...
+deployment "load" successfully rolled out
+gateway.gateway.networking.k8s.io/shop condition met
+{"ts":1792809790.729494,"level":"info","r":1,"file":"scli.go","line":124,"msg":"Starting","command":"Φορτίο","version":"1.75.3 h1:2et+WGrx6FHBEyQb2kYz07q+/AXzHIio7amwuDDn6vM= go1.25.14 arm64 linux","go-max-procs":8}
+HTTP/1.1 200 OK
+content-type: application/json
+date: Sat, 24 Oct 2026 02:43:10 GMT
+content-length: 110
+x-envoy-upstream-service-time: 0
+server: envoy
+
+{"ts":1792809790.817409,"level":"info","r":1,"file":"scli.go","line":124,"msg":"Starting","command":"Φορτίο","version":"1.75.3 h1:2et+WGrx6FHBEyQb2kYz07q+/AXzHIio7amwuDDn6vM= go1.25.14 arm64 linux","go-max-procs":8}
+HTTP/1.1 200 OK
+content-type: application/json
+date: Sat, 24 Oct 2026 02:43:10 GMT
+content-length: 130
+x-envoy-upstream-service-time: 0
+server: envoy
+
+2829affaf8094f64ddae610b45470be4663920d253922680685ff262137bdc96
+Waiting for measured gateway load results (1/48)
+Waiting for measured gateway load results (2/48)
+Waiting for measured gateway load results (3/48)
+Waiting for measured gateway load results (4/48)
+Waiting for measured gateway load results (5/48)
+Waiting for measured gateway load results (6/48)
+Waiting for measured gateway load results (7/48)
+Waiting for measured gateway load results (8/48)
+Waiting for measured gateway load results (9/48)
+Waiting for measured gateway load results (10/48)
+Waiting for measured gateway load results (11/48)
+Waiting for measured gateway load results (12/48)
+Waiting for measured gateway load results (13/48)
+Waiting for measured gateway load results (14/48)

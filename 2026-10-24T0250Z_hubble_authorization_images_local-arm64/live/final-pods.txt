@@ -1,0 +1,22 @@
+NAMESPACE            NAME                                                     READY   STATUS    RESTARTS   AGE     IP             NODE                 NOMINATED NODE   READINESS GATES
+kube-system          cilium-d7dnt                                             1/1     Running   0          5m11s   172.18.0.7     poc1-control-plane   <none>           <none>
+kube-system          cilium-envoy-nblp6                                       1/1     Running   0          7m39s   172.18.0.6     poc1-worker          <none>           <none>
+kube-system          cilium-envoy-pgj6p                                       1/1     Running   0          7m39s   172.18.0.7     poc1-control-plane   <none>           <none>
+kube-system          cilium-jkvdg                                             1/1     Running   0          5m11s   172.18.0.6     poc1-worker          <none>           <none>
+kube-system          cilium-operator-648c9b68d5-qwgnv                         1/1     Running   0          5m11s   172.18.0.7     poc1-control-plane   <none>           <none>
+kube-system          coredns-589f44dc88-9mxxb                                 1/1     Running   0          10m     10.244.0.212   poc1-control-plane   <none>           <none>
+kube-system          coredns-589f44dc88-hrm6k                                 1/1     Running   0          10m     10.244.0.49    poc1-control-plane   <none>           <none>
+kube-system          etcd-poc1-control-plane                                  1/1     Running   0          10m     172.18.0.7     poc1-control-plane   <none>           <none>
+kube-system          kube-apiserver-poc1-control-plane                        1/1     Running   0          10m     172.18.0.7     poc1-control-plane   <none>           <none>
+kube-system          kube-controller-manager-poc1-control-plane               1/1     Running   0          10m     172.18.0.7     poc1-control-plane   <none>           <none>
+kube-system          kube-scheduler-poc1-control-plane                        1/1     Running   0          10m     172.18.0.7     poc1-control-plane   <none>           <none>
+loadtest             load-b59d4b587-fnnt8                                     1/1     Running   0          4m58s   10.244.1.174   poc1-worker          <none>           <none>
+local-path-storage   local-path-provisioner-56c4685b7c-rcjfm                  1/1     Running   0          10m     10.244.0.110   poc1-control-plane   <none>           <none>
+monitoring           alertmanager-monitoring-kube-prometheus-alertmanager-0   2/2     Running   0          5m47s   10.244.1.149   poc1-worker          <none>           <none>
+monitoring           monitoring-grafana-7c494445b5-h2x56                      3/3     Running   0          7m5s    10.244.1.205   poc1-worker          <none>           <none>
+monitoring           monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp     1/1     Running   0          7m5s    10.244.1.128   poc1-worker          <none>           <none>
+monitoring           monitoring-kube-state-metrics-7f584dc46d-jcdm2           1/1     Running   0          7m5s    10.244.1.116   poc1-worker          <none>           <none>
+monitoring           monitoring-prometheus-node-exporter-4ss6x                1/1     Running   0          7m5s    172.18.0.7     poc1-control-plane   <none>           <none>
+monitoring           monitoring-prometheus-node-exporter-nnnvx                1/1     Running   0          7m5s    172.18.0.6     poc1-worker          <none>           <none>
+monitoring           prometheus-monitoring-kube-prometheus-prometheus-0       2/2     Running   0          5m47s   10.244.1.137   poc1-worker          <none>           <none>
+team-a               shop-6c6559744b-xxvdv                                    1/1     Running   0          4m59s   10.244.0.245   poc1-control-plane   <none>           <none>

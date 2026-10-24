@@ -1,0 +1,157 @@
+[
+  {
+    "metric": {
+      "__name__": "hubble_http_requests_total",
+      "cluster": "poc1",
+      "container": "cilium-agent",
+      "destination": "storefront",
+      "destination_app": "storefront",
+      "destination_ip": "10.244.0.245",
+      "destination_namespace": "team-a",
+      "destination_workload": "shop",
+      "endpoint": "hubble-metrics",
+      "instance": "172.18.0.6:9965",
+      "job": "hubble-metrics",
+      "method": "GET",
+      "namespace": "kube-system",
+      "node": "poc1-worker",
+      "pod": "cilium-jkvdg",
+      "protocol": "HTTP/1.1",
+      "reporter": "client",
+      "service": "hubble-metrics",
+      "source": "load",
+      "source_ip": "10.244.1.174",
+      "source_namespace": "loadtest",
+      "source_workload": "load",
+      "status": "200",
+      "traffic_direction": "egress"
+    },
+    "value": [
+      1792809912.093,
+      "22575"
+    ]
+  },
+  {
+    "metric": {
+      "__name__": "hubble_http_requests_total",
+      "cluster": "poc1",
+      "container": "cilium-agent",
+      "destination": "storefront",
+      "destination_app": "storefront",
+      "destination_ip": "10.244.0.245",
+      "destination_namespace": "team-a",
+      "destination_workload": "shop",
+      "endpoint": "hubble-metrics",
+      "instance": "172.18.0.6:9965",
+      "job": "hubble-metrics",
+      "method": "GET",
+      "namespace": "kube-system",
+      "node": "poc1-worker",
+      "pod": "cilium-jkvdg",
+      "protocol": "HTTP/1.1",
+      "reporter": "client",
+      "service": "hubble-metrics",
+      "source": "reserved:ingress",
+      "source_ip": "172.18.0.8",
+      "status": "200",
+      "traffic_direction": "egress"
+    },
+    "value": [
+      1792809912.093,
+      "22589"
+    ]
+  },
+  {
+    "metric": {
+      "__name__": "hubble_http_requests_total",
+      "cluster": "poc1",
+      "container": "cilium-agent",
+      "destination": "storefront",
+      "destination_app": "storefront",
+      "destination_ip": "10.244.0.245",
+      "destination_namespace": "team-a",
+      "destination_workload": "shop",
+      "endpoint": "hubble-metrics",
+      "instance": "172.18.0.7:9965",
+      "job": "hubble-metrics",
+      "method": "GET",
+      "namespace": "kube-system",
+      "node": "poc1-control-plane",
+      "pod": "cilium-d7dnt",
+      "protocol": "HTTP/1.1",
+      "reporter": "server",
+      "service": "hubble-metrics",
+      "source": "checkout-client",
+      "source_app": "checkout-client",
+      "source_ip": "10.244.1.174",
+      "source_namespace": "loadtest",
+      "source_workload": "load",
+      "status": "200",
+      "traffic_direction": "ingress"
+    },
+    "value": [
+      1792809912.093,
+      "2337"
+    ]
+  },
+  {
+    "metric": {
+      "__name__": "hubble_http_requests_total",
+      "cluster": "poc1",
+      "container": "cilium-agent",
+      "destination": "storefront",
+      "destination_app": "storefront",
+      "destination_ip": "10.244.0.245",
+      "destination_namespace": "team-a",
+      "destination_workload": "shop",
+      "endpoint": "hubble-metrics",
+      "instance": "172.18.0.7:9965",
+      "job": "hubble-metrics",
+      "method": "GET",
+      "namespace": "kube-system",
+      "node": "poc1-control-plane",
+      "pod": "cilium-d7dnt",
+      "protocol": "HTTP/1.1",
+      "reporter": "server",
+      "service": "hubble-metrics",
+      "source": "reserved:ingress",
+      "source_ip": "10.244.1.60",
+      "status": "200",
+      "traffic_direction": "ingress"
+    },
+    "value": [
+      1792809912.093,
+      "46712"
+    ]
+  },
+  {
+    "metric": {
+      "__name__": "hubble_http_requests_total",
+      "cluster": "poc1",
+      "container": "cilium-agent",
+      "destination": "storefront",
+      "destination_app": "storefront",
+      "destination_ip": "10.244.0.245",
+      "destination_namespace": "team-a",
+      "destination_workload": "shop",
+      "endpoint": "hubble-metrics",
+      "instance": "172.18.0.7:9965",
+      "job": "hubble-metrics",
+      "method": "GET",
+      "namespace": "kube-system",
+      "node": "poc1-control-plane",
+      "pod": "cilium-d7dnt",
+      "protocol": "HTTP/1.1",
+      "reporter": "server",
+      "service": "hubble-metrics",
+      "source": "reserved:kube-apiserver",
+      "source_ip": "10.244.0.30",
+      "status": "200",
+      "traffic_direction": "ingress"
+    },
+    "value": [
+      1792809912.093,
+      "13"
+    ]
+  }
+]

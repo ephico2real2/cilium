@@ -1,0 +1,834 @@
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687697609Z level=info msg="  --log-system-load='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687700546Z level=info msg="  --lrp-address-matcher-cidrs=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687701804Z level=info msg="  --max-connected-clusters='255'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687703104Z level=info msg="  --max-controller-interval='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687704405Z level=info msg="  --max-internal-timer-delay='0s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68770688Z level=info msg="  --metrics=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687708557Z level=info msg="  --metrics-sampling-interval='5m'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687710571Z level=info msg="  --mke-cgroup-mount=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687712207Z level=info msg="  --monitor-aggregation='medium'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687713926Z level=info msg="  --monitor-aggregation-flags='all'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687715688Z level=info msg="  --monitor-aggregation-interval='5s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687717492Z level=info msg="  --monitor-queue-size='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687719337Z level=info msg="  --mtu='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687721099Z level=info msg="  --multicast-enabled='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687725629Z level=info msg="  --nat-map-stats-entries='32'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687727013Z level=info msg="  --nat-map-stats-interval='30s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687728649Z level=info msg="  --node-encryption-opt-out-labels='node-role.kubernetes.io/control-plane'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68773125Z level=info msg="  --node-labels=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687732424Z level=info msg="  --node-port-acceleration='disabled'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687733599Z level=info msg="  --node-port-bind-protection='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687736284Z level=info msg="  --node-port-nat-range-ext=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687743456Z level=info msg="  --node-port-range='30000,32767'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68774526Z level=info msg="  --nodeport-addresses=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687746476Z level=info msg="  --nodes-gc-interval='5m0s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687747777Z level=info msg="  --only-masquerade-default-pool='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687748951Z level=info msg="  --operator-api-serve-addr='127.0.0.1:9234'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687750084Z level=info msg="  --operator-prometheus-serve-addr=':9963'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687751426Z level=info msg="  --packetization-layer-pmtud-mode='blackhole'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687752852Z level=info msg="  --policy-accounting='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687754236Z level=info msg="  --policy-audit-mode='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687756208Z level=info msg="  --policy-cidr-match-mode=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687757928Z level=info msg="  --policy-default-local-cluster='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687759186Z level=info msg="  --policy-deny-response='none'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687760948Z level=info msg="  --policy-queue-size='100'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687762584Z level=info msg="  --policy-secrets-namespace='cilium-secrets'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687764052Z level=info msg="  --policy-secrets-only-from-secrets-namespace='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687765604Z level=info msg="  --policy-trigger-interval='1s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687766904Z level=info msg="  --pprof='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68776812Z level=info msg="  --pprof-address='localhost'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687769672Z level=info msg="  --pprof-block-profile-rate='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687771308Z level=info msg="  --pprof-mutex-profile-fraction='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68777286Z level=info msg="  --pprof-port='6060'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687778397Z level=info msg="  --preallocate-bpf-maps='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687779655Z level=info msg="  --prefer-ipv6='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687780914Z level=info msg="  --prepend-iptables-chains='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687782172Z level=info msg="  --procfs='/host/proc'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687783598Z level=info msg="  --prometheus-serve-addr=':9962'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687784899Z level=info msg="  --proxy-admin-port='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687786073Z level=info msg="  --proxy-cluster-max-connections='1024'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687788045Z level=info msg="  --proxy-cluster-max-pending-requests='1024'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687793078Z level=info msg="  --proxy-cluster-max-requests='1024'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687794337Z level=info msg="  --proxy-connect-timeout='2'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687795511Z level=info msg="  --proxy-gid='1337'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687796644Z level=info msg="  --proxy-idle-timeout-seconds='60'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68779786Z level=info msg="  --proxy-initial-fetch-timeout='30'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687799118Z level=info msg="  --proxy-max-active-downstream-connections='50000'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687800293Z level=info msg="  --proxy-max-concurrent-retries='128'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687801509Z level=info msg="  --proxy-max-connection-duration-seconds='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687802768Z level=info msg="  --proxy-max-requests-per-connection='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687804194Z level=info msg="  --proxy-portrange-max='20000'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687805326Z level=info msg="  --proxy-portrange-min='10000'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687806627Z level=info msg="  --proxy-prometheus-port='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687807759Z level=info msg="  --proxy-use-original-source-address='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687809437Z level=info msg="  --proxy-xff-num-trusted-hops-egress='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687810653Z level=info msg="  --proxy-xff-num-trusted-hops-ingress='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687812289Z level=info msg="  --read-cni-conf=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687813422Z level=info msg="  --remove-cilium-node-taints='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687814848Z level=info msg="  --restore='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687816316Z level=info msg="  --restored-proxy-ports-age-limit='15'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687817994Z level=info msg="  --route-metric='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687819714Z level=info msg="  --routing-mode='tunnel'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687821182Z level=info msg="  --service-no-backend-response='reject'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687822566Z level=info msg="  --set-cilium-is-up-condition='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68782416Z level=info msg="  --set-cilium-node-taints='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687825796Z level=info msg="  --shell-sock-path='/var/run/cilium/shell.sock'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687827348Z level=info msg="  --socket-path='/var/run/cilium/cilium.sock'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687852767Z level=info msg="  --srv6-encap-mode='reduced'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687863883Z level=info msg="  --standalone-dns-proxy-server-port='10095'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687866106Z level=info msg="  --state-dir='/var/run/cilium'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687870258Z level=info msg="  --static-cnp-path=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687872146Z level=info msg="  --status-collector-failure-threshold='1m0s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687873614Z level=info msg="  --status-collector-interval='5s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68787504Z level=info msg="  --status-collector-probe-check-timeout='5m0s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687876928Z level=info msg="  --status-collector-stackdump-path='/run/cilium/state/agent.stack.gz'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687878606Z level=info msg="  --status-collector-warning-threshold='15s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687882045Z level=info msg="  --subnet-topology=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687887079Z level=info msg="  --synchronize-k8s-nodes='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687888757Z level=info msg="  --tofqdns-dns-reject-response-code='refused'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687890141Z level=info msg="  --tofqdns-enable-dns-compression='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687891777Z level=info msg="  --tofqdns-endpoint-max-ip-per-hostname='1000'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687895803Z level=info msg="  --tofqdns-idle-connection-grace-period='0s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687897355Z level=info msg="  --tofqdns-max-deferred-connection-deletes='10000'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687898824Z level=info msg="  --tofqdns-min-ttl='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687900334Z level=info msg="  --tofqdns-preallocate-identities='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687902053Z level=info msg="  --tofqdns-proxy-port='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687903563Z level=info msg="  --tofqdns-proxy-response-max-delay='100ms'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687905367Z level=info msg="  --trace-payloadlen='128'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687907003Z level=info msg="  --trace-payloadlen-overlay='192'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68790889Z level=info msg="  --trace-sock='true'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687913169Z level=info msg="  --tunnel-port='0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687914763Z level=info msg="  --tunnel-protocol='vxlan'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687916609Z level=info msg="  --tunnel-source-port-range='0-0'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687917909Z level=info msg="  --underlay-protocol='auto'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687919335Z level=info msg="  --unmanaged-pod-watcher-interval='15s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687920635Z level=info msg="  --use-cilium-internal-ip-for-ipsec='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687922145Z level=info msg="  --use-full-tls-context='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687923697Z level=info msg="  --version='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687928395Z level=info msg="  --vlan-bpf-bypass=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687935442Z level=info msg="  --vtep-cidr=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68793733Z level=info msg="  --vtep-endpoint=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687938966Z level=info msg="  --vtep-mac=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687940602Z level=info msg="  --vtep-mask=''"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687942321Z level=info msg="  --vtep-sync-interval='1m0s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687944167Z level=info msg="  --wireguard-persistent-keepalive='0s'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687945593Z level=info msg="  --wireguard-track-all-ips-fallback='false'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687947187Z level=info msg="  --write-cni-conf-when-ready='/host/etc/cni/net.d/05-cilium.conflist'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687948865Z level=info msg="  --ztunnel-endpoint-event-channel-buffer-size='1'"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68795134Z level=info msg="     _ _ _"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687954779Z level=info msg=" ___|_| |_|_ _ _____"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.68795608Z level=info msg="|  _| | | | | |     |"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687957128Z level=info msg=|___|_|_|_|___|_|_|_|
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.687958638Z level=info msg="Cilium 1.21.0-dev 42f89f83aa 2026-10-23T21:09:29-05:00 go version go1.27.3 linux/arm64"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691248909Z level=info msg="Detected mounted BPF filesystem" bpffsRoot=/sys/fs/bpf
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691386407Z level=info msg="Mounted cgroupv2 filesystem" location=/run/cilium/cgroupv2
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691399075Z level=info msg="Parsing base label prefixes from default label list"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691443831Z level=info msg="Parsing node label prefixes from user inputs" prefix=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691449578Z level=info msg="Parsing additional label prefixes from user inputs" prefix=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691452095Z level=info msg="Final label prefixes to be used for identity evaluation:"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691456499Z level=info msg=" - reserved:.*"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691458261Z level=info msg=" - :io\\.kubernetes\\.pod\\.namespace"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691459813Z level=info msg=" - :io\\.cilium\\.k8s\\.namespace\\.labels"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691461365Z level=info msg=" - :app\\.kubernetes\\.io"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691462833Z level=info msg=" - :io\\.cilium\\.k8s\\.policy\\.cluster"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691464259Z level=info msg=" - :io\\.cilium\\.k8s\\.policy\\.serviceaccount"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691465475Z level=info msg=" - !:io\\.kubernetes"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691466734Z level=info msg=" - !:kubernetes\\.io"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691468705Z level=info msg=" - !:statefulset\\.kubernetes\\.io/pod-name"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691470383Z level=info msg=" - !:apps\\.kubernetes\\.io/pod-index"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691472103Z level=info msg=" - !:batch\\.kubernetes\\.io/job-completion-index"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691474032Z level=info msg=" - !:batch\\.kubernetes\\.io/controller-uid"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691475836Z level=info msg=" - !:.*beta\\.kubernetes\\.io"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691477556Z level=info msg=" - !:k8s\\.io"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691478982Z level=info msg=" - !:pod-template-generation"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691480618Z level=info msg=" - !:pod-template-hash"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691482212Z level=info msg=" - !:controller-revision-hash"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691483973Z level=info msg=" - !:controller-uid"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691485358Z level=info msg=" - !:annotation.*"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691487287Z level=info msg=" - !:etcd_node"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691490811Z level=info msg=" - !:topology\\.kubernetes\\.io"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.691492069Z level=info msg="Final node label prefixes to be used for identity evaluation:"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.794416505Z level=info msg="Memory available for map entries (0.250% of 16732540928B): 41831352B" module=agent.controlplane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.794432109Z level=info msg="Option set by dynamic sizing" module=agent.controlplane option=bpf-sock-rev-map-max value=73388
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.795372869Z level=info msg="Underlay protocol ipv4 automatically selected" module=agent.datapath.datapath-tunnel-config
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.846962854Z level=info msg="Probed kernel support for BIG TCP for UDP tunnels" module=agent.datapath.bigtcp state=false
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.847326818Z level=info msg="Datapath connector ready" module=agent.datapath.connector datapathMode=veth
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.847364779Z level=info msg="Datapath plugins are disabled." module=agent.datapath.datapath-plugins
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.847849798Z level=info msg="Cgroup metadata manager is enabled" module=agent.controlplane.cgroup-manager
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.850486427Z level=info msg="The Hubble static exporter is disabled" module=agent.controlplane.hubble.hubble-exporters
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.850502451Z level=info msg="The Hubble dynamic exporter is disabled" module=agent.controlplane.hubble.hubble-exporters
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.850537811Z level=info msg="The Hubble packet drop events emitter is disabled" module=agent.controlplane.hubble.hubble-dropeventemitter
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.850649722Z level=info msg="Certloader TLS watcher disabled" module=agent.controlplane.hubble.hubble-metrics config=certloader-server-tls
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.850677574Z level=info msg="Starting Hubble Metrics dynamic flow processor" module=agent.controlplane.hubble.hubble-metrics metricConfig=/dynamic-metrics-config/dynamic-metrics.yaml
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.851581045Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=dns status="query,ignoreAAAA,destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.851606338Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=drop status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.85161456Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=policy status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.85162383Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=tcp status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.851630247Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=icmp status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.851643209Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=flow status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.851647739Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=port-distribution status=""
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.851662084Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=httpV2 status="destination=app|workload-name|reserved-identity,labels=source_ip,source_namespace,source_workload,source_app,destination_ip,destination_namespace,destination_workload,destination_app,traffic_direction,source=app|workload-name|reserved-identity,exemplars=true"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.891512109Z level=info msg="Determined final XDP mode" module=agent.datapath.datapath-xdp-config accelarationMode=disabled mode=disabled
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.895101789Z level=info msg="Starting hive"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.89512918Z level=info msg="Started gops server" module=agent.infra.gops address=127.0.0.1:9890
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.896293344Z level=info msg="Establishing connection to apiserver" module=agent.infra.k8s-client ipAddr=https://172.18.0.7:6443
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.899542676Z level=info msg="Connected to apiserver" module=agent.infra.k8s-client
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.900094934Z level=info msg="Waiting until all Cilium CRDs are available" module=agent.infra.k8s-synced-crdsync
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.951023937Z level=info msg="All Cilium CRDs have been found and are available" module=agent.infra.k8s-synced-crdsync
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.952887799Z level=info msg="Local boot ID" module=agent.controlplane.local-node-sync bootID=b8fa0c30-7afa-448d-8518-9c6697688db8
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.952965021Z level=info msg="Job started" module=jobs job="sync-local-node (node.NewNodeTableAndLocalNodeStore.func1.1 (pkg/node/local_node_store.go:131))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953373657Z level=info msg="Devices changed" module=agent.datapath.devices-controller devices=[eth0]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953416987Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953432759Z level=info msg="Node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary, nodeport), fc00:f853:ccd:e793::7 (primary, nodeport), fe80::3c13:32ff:fec4:bf4e" device=eth0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953437582Z level=info msg="Node addresses updated" module=agent.datapath.node-address addresses="10.244.0.30 (primary), fe80::8491:bfff:feb9:9cf6" device=cilium_host
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953518622Z level=info msg="Node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953566482Z level=info msg="Job started" module=jobs job="node-address-update (tables.(*nodeAddressController).register.func1.1 (.../datapath/tables/node_address.go:253))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953739634Z level=info msg="Serving cilium node monitor v1.2 API at unix:///var/run/cilium/monitor1_2.sock" module=agent.datapath.monitor-agent
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.95380033Z level=info msg="Serving prometheus metrics" module=agent.infra.metrics server=agent-prometheus-server address=:9962 tls=false
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953825288Z level=info msg="Removed map pin, recreating and re-pinning map" bpfMapPath=cilium_ipcache_v2 bpfMapName=cilium_ipcache_v2
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953866311Z level=info msg="No identity checkpoint file found, skipping restoration" module=agent.controlplane.identity.identity file-path=/var/run/cilium/state/local_allocator_state.json
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.95388397Z level=info msg="Restored ingress IP" module=agent.controlplane.ipcache.identity-restoration ingress=10.244.0.214/32
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.953904439Z level=info msg="restored prefixes in the ipcache" module=agent.controlplane.ipcache.identity-restoration count=0 total=1
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.954147431Z level=info msg="Generating CNI configuration file with mode" module=agent.infra.cni-config mode=none
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.962159919Z level=info msg="Envoy: Starting access log server listening" module=agent.controlplane.envoy-proxy address=/var/run/cilium/envoy/sockets/access_log.sock
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.962193602Z level=info msg="Envoy: Waiting for endpoint restorer before serving xDS resources..." module=agent.controlplane.envoy-proxy
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.962198006Z level=info msg="Envoy: Waiting for endpoint restoration before serving xDS resources..." module=agent.controlplane.envoy-proxy
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.962296704Z level=info msg="Job started" module=jobs job="proxy-ports-checkpoint (proxyports.(*ProxyPorts).StoreProxyPorts)"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.963291239Z level=info msg="Job started" module=jobs job="mtu-updater (mtu.(*MTUManager).Updater)"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.970217205Z level=info msg="Datapath signal listener running" module=agent.controlplane.signal
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.970249419Z level=info msg="kube-proxy replacement starting with the following config" module=agent.controlplane.kube-proxy-replacement-init kprConfiguration="{KubeProxyReplacement:true EnableSocketLB:true}"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.970283773Z level=info msg="Starting connection tracking garbage collector" module=agent.datapath.maps.ct-nat-map-gc
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.970676931Z level=info msg="k8s mode: Allowing localhost to reach local endpoints" module=agent.controlplane.daemonconfig
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971086699Z level=info msg="Removing stale endpoint interfaces" module=agent.controlplane.endpoint-restore
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.97118502Z level=info msg="Reading old endpoints..." module=agent.controlplane.endpoint-restore
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971505361Z level=info msg="Initializing daemon" module=agent.controlplane.daemon
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.97158036Z level=info msg="Retrieved node information from kubernetes node" module=agent.controlplane.local-node-sync nodeName=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971590133Z level=info msg="Received own node information from API server" module=agent.controlplane.local-node-sync nodeName=poc1-control-plane labels="map[beta.kubernetes.io/arch:arm64 beta.kubernetes.io/os:linux kubernetes.io/arch:arm64 kubernetes.io/hostname:poc1-control-plane kubernetes.io/os:linux node-role.kubernetes.io/control-plane: node.kubernetes.io/exclude-from-external-load-balancers:]" ipv4=172.18.0.7 ipv6="" v4Prefix=10.244.0.0/24 v6Prefix="" k8sNodeIP=172.18.0.7
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971623438Z level=info msg="Direct routing device detected" module=agent.controlplane.daemon direct-routing-device=eth0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971639713Z level=info msg="Enabling k8s event listener" module=agent.controlplane.k8s-watcher
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.97172847Z level=info msg="Initializing node addressing" module=agent.controlplane.ipam
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971741977Z level=info msg="Initializing IPAM" module=agent.controlplane.ipam mode=kubernetes v4Prefix=10.244.0.0/24 v6Prefix=""
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971746297Z level=info msg="Restoring endpoints..." module=agent.controlplane.endpoint-restore
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971872219Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.971909592Z level=info msg="Waiting until all pre-existing resources have been received" module=agent.controlplane.k8s-watcher
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.973659907Z level=info msg="Reusing previous / configured DNS proxy port" module=agent.controlplane.fqdn.dns-proxy port=42839
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:55.97367421Z level=info msg="Adding new proxy port rules" module=agent.controlplane.l7-proxy id=cilium-dns-egress name=cilium-dns-egress proxyPort=42839
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.071808215Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.072137488Z level=info msg="Endpoints restored" module=agent.controlplane.endpoint-restore restored=4 failed=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.072331673Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.072341271Z level=info msg="Adding local node to cluster" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.072357282Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.07695595Z level=info msg="Initializing identity allocator" module=agent.controlplane.identity.identity
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.076973344Z level=info msg="Allocating identities between range" module=agent.controlplane.identity.identity min=65536 max=131071 clusterID=1
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.07707314Z level=info msg="Validating configured node address ranges" module=agent.controlplane.daemon
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077091624Z level=info msg="Daemon initialization completed" module=agent.controlplane.daemon
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077097701Z level=info msg="Start hook executed" function="cmd.daemonLegacyInitialization.func1 (cmd/daemon_main.go:1221) (agent.controlplane.daemon)" duration=105.591671ms
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077186432Z level=info msg="Restored node IDs from the BPF map" module=agent.datapath count=4
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077202359Z level=info msg="Configuring Hubble server" module=agent.controlplane.hubble maxFlows=4095 eventQueueSize=8192
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077340799Z level=info msg="Serving cilium API at unix:///var/run/cilium/cilium.sock" module=agent.infra.cilium-api-server
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077433554Z level=info msg="Starting local Hubble server" module=agent.controlplane.hubble address=unix:///var/run/cilium/hubble.sock
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077454427Z level=info msg="Beginning to read perf buffer" module=agent.datapath.monitor-agent startTime=2026-10-24T02:42:56.077Z
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077474587Z level=info msg="Starting Hubble server" module=agent.controlplane.hubble address=:4244 tls=true
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077547475Z level=info msg="Job started" module=jobs job="linux-node-restored-pruning (linux.(*linuxNodeCheckpoint).prune)"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.07752547Z level=info msg="Job started" module=jobs job="linux-node-checkpoint-writer (linux.(*linuxNodeCheckpoint).watch)"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077641906Z level=info msg="Starting Hubble metrics server" module=agent.controlplane.hubble.hubble-metrics address=:9965 tls=false
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.077928678Z level=info msg="Job started" module=jobs job="linux-node-refresh (linux.NewNodeHandler.func2.1 (.../datapath/linux/node.go:194))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.078202919Z level=info msg="Job started" module=jobs job="nat-stats (stats.(*Stats).countNat)"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.078218301Z level=info msg="Job stopped" module=jobs job="linux-node-restored-pruning (linux.(*linuxNodeCheckpoint).prune)" duration=919.708µs
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.078336874Z level=info msg="Shell listening" module=agent.infra.shell socket=/var/run/cilium/shell.sock
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.07837598Z level=info msg="Starting healthz status API server" module=agent.infra.agent-healthz address=127.0.0.1:9879
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.078646531Z level=info msg="Creating BPF socket destroyer" module=agent.controlplane.loadbalancer-reconciler.socket-termination
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.092498068Z level=info msg="Started hive" duration=197.379503ms
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.172952196Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.174403452Z level=info msg="Setting IPv6" module=agent.datapath.loader device=cilium_vxlan gso_max_size=65536 gro_max_size=65536
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.174449012Z level=info msg="Setting IPv4" module=agent.datapath.loader device=cilium_vxlan gso_max_size=65536 gro_max_size=65536
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.178591576Z level=info msg="All policy resources synchronized!" module=agent.controlplane.policy-k8s-watcher
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277170366Z level=info msg="Regenerating restored endpoints" module=agent.controlplane.endpoint-restore restored=4
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277210519Z level=info msg="New endpoint" containerInterface=eth0 identity=70563 k8sPodName=kube-system/coredns-589f44dc88-hrm6k ipv4=10.244.0.49 ciliumEndpointName=kube-system/coredns-589f44dc88-hrm6k containerID=b4a745ae90 endpointID=952 ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277237595Z level=info msg="New endpoint" ipv6="" ciliumEndpointName=kube-system/coredns-589f44dc88-9mxxb endpointID=903 ipv4=10.244.0.212 identity=70563 k8sPodName=kube-system/coredns-589f44dc88-9mxxb containerInterface=eth0 containerID=9802722707 subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277254025Z level=info msg="New endpoint" k8sPodName=local-path-storage/local-path-provisioner-56c4685b7c-rcjfm identity=78024 containerInterface=eth0 ciliumEndpointName=local-path-storage/local-path-provisioner-56c4685b7c-rcjfm ipv4=10.244.0.110 containerID=6924c86890 endpointID=3127 ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277270078Z level=info msg="New endpoint" ipv4="" k8sPodName=/ containerInterface="" endpointID=2771 ciliumEndpointName=/ identity=1 ipv6="" containerID="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277492639Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-api name=cni-deletion-queue remaining=1
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277628481Z level=info msg="Initializing labels on existing host endpoint" module=agent.controlplane.agent-infra-endpoints
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277667041Z level=info msg="Creating ingress endpoint" module=agent.controlplane.agent-infra-endpoints
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.2777082Z level=info msg="New endpoint" ipv4=10.244.0.214 endpointID=332 ipv6="" k8sPodName=/ containerID="" ciliumEndpointName=/ containerInterface="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277745671Z level=info msg="Resolving identity labels (blocking)" ipv4=10.244.0.214 endpointID=332 ipv6="" k8sPodName=/ containerID="" ciliumEndpointName=/ containerInterface="" subsys=endpoint identityLabels=reserved:ingress
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277762185Z level=info msg="Identity of endpoint changed" ipv4=10.244.0.214 endpointID=332 ipv6="" k8sPodName=/ containerID="" ciliumEndpointName=/ containerInterface="" subsys=endpoint new-identity=8 old-identity="no identity" identityLabels="map[ingress:{Key:ingress Value: Source:reserved cidr:<nil>}]"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.277821283Z level=info msg="Launching Cilium health daemon" module=agent.controlplane.cilium-health
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.278131862Z level=info msg="Launching Cilium health endpoint" module=agent.controlplane.cilium-health
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.278184296Z level=info msg="Cleaning up Cilium health endpoint" module=agent.controlplane.cilium-health
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.278249178Z level=info msg="Processing queued deletion requests" module=agent.controlplane.endpoint-api lenEndpoints=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.278321521Z level=info msg="Fence done" module=agent.controlplane.endpoint-api name=cni-deletion-queue remaining=1 duration=837.641µs
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.278345034Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=2771
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.278357231Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=3127
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.27836268Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=903
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.278364482Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=952
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.278449357Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=ciliumenvoyconfig remaining=5
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.354146259Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437852917Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_post_bind pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_post_bind
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437877688Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_sendmsg pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_sendmsg
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437889969Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_recvmsg pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_recvmsg
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437898226Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_post_bind pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_post_bind
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437907782Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock_release pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock_release
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.43791562Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_connect pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_connect
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437923919Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_recvmsg pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_recvmsg
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437951917Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_connect pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_connect
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437974592Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_getpeername pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_getpeername
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.437994417Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_sendmsg pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_sendmsg
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.43800829Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_getpeername pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_getpeername
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.454016404Z level=info msg="Job started" module=jobs job="refresh (reconciler.Register[...].func4 (.../statedb/reconciler/builder.go:96))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.454047755Z level=info msg="Job started" module=jobs job="reconcile (reconciler.Register[...].func3 (.../statedb/reconciler/builder.go:94))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.45426646Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457689411Z level=info msg="Job started" module=jobs job="reconcile (reconciler.Register[...].func3 (.../statedb/reconciler/builder.go:94))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457715398Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=ciliumenvoyconfig remaining=5 duration=179.265747ms
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457930079Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=kvstore-ipcache remaining=4
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457938252Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=kvstore-ipcache remaining=4 duration=10.772µs
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457968513Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=kvstore-nodes remaining=3
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457974591Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=kvstore-nodes remaining=3 duration=11.694µs
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457980459Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=clustermesh remaining=2
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457988674Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=clustermesh remaining=2 duration=9.263µs
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.458003511Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=loadbalancer remaining=1
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.458012648Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=loadbalancer remaining=1 duration=19.281µs
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.457708398Z level=info msg="Job started" module=jobs job="refresh (reconciler.Register[...].func4 (.../statedb/reconciler/builder.go:96))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:56.458381739Z level=info msg="Envoy: Starting xDS gRPC server listening" module=agent.controlplane.envoy-proxy address=/var/run/cilium/envoy/sockets/xds.sock
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.289923237Z level=info msg="New endpoint" ciliumEndpointName=/ ipv6="" ipv4=10.244.0.109 containerID="" endpointID=1495 k8sPodName=/ containerInterface="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.289989249Z level=info msg="Resolving identity labels (blocking)" ciliumEndpointName=/ ipv6="" ipv4=10.244.0.109 containerID="" endpointID=1495 k8sPodName=/ containerInterface="" subsys=endpoint identityLabels=reserved:health
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.29001572Z level=info msg="Identity of endpoint changed" ciliumEndpointName=/ ipv6="" ipv4=10.244.0.109 containerID="" endpointID=1495 k8sPodName=/ containerInterface="" subsys=endpoint new-identity=4 old-identity="no identity" identityLabels="map[health:{Key:health Value: Source:reserved cidr:<nil>}]"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.800528659Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_vxlan/links/cil_from_overlay progName=cil_from_overlay
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.800598482Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_vxlan/links/cil_to_overlay progName=cil_to_overlay
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.800848328Z level=info msg="Job started" module=jobs job="reconcile-linux (reconciler.Register[...].func3 (.../statedb/reconciler/builder.go:94))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.800848202Z level=info msg="Job started" module=jobs job="refresh-linux (reconciler.Register[...].func4 (.../statedb/reconciler/builder.go:96))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.801124184Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.801155472Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.803348878Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.803411538Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.87303465Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.873107069Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:57.901856194Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:58.453817059Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.725963867Z level=info msg=OnStreamOpen module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsTypeURL=""
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.726313933Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e1:g0 xdsTypeURL=type.googleapis.com/envoy.config.cluster.v3.Cluster xdsNonce="" xdsResourceNames=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.726362466Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e1:g0 xdsTypeURL=type.googleapis.com/envoy.config.listener.v3.Listener xdsNonce="" xdsResourceNames=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.726371964Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g0 xdsTypeURL=type.googleapis.com/envoy.config.cluster.v3.Cluster numResources=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.726396481Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g0 xdsTypeURL=type.googleapis.com/envoy.config.listener.v3.Listener numResources=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.726627139Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g0 xdsTypeURL=type.googleapis.com/envoy.config.cluster.v3.Cluster xdsNonce=1 xdsResourceNames=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.726640862Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g0 xdsTypeURL=type.googleapis.com/envoy.config.listener.v3.Listener xdsNonce=2 xdsResourceNames=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.910176755Z level=info msg="Compiled new BPF template" module=agent.datapath.loader file-path=/var/run/cilium/state/templates/ffc11888f94779acafde7bede9f8add822b2d93b779623112bc5a4052aea1df6/bpf_lxc.o BPFCompilationTime=2.108955696s
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.976183457Z level=info msg="Program attached to device using tcx" module=agent.datapath.loader progName=cil_from_container device=lxc_health
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.976257721Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/3127/links/cil_from_container progName=cil_from_container
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.976365624Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/952/links/cil_from_container progName=cil_from_container
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.97647064Z level=info msg="Reloaded endpoint BPF program" identity=4 ciliumEndpointName=/ ipv6="" ipv4=10.244.0.109 containerID="" endpointID=1495 k8sPodName=/ containerInterface="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.97651093Z level=info msg="Reloaded endpoint BPF program" containerInterface=eth0 identity=70563 k8sPodName=kube-system/coredns-589f44dc88-hrm6k ipv4=10.244.0.49 ciliumEndpointName=kube-system/coredns-589f44dc88-hrm6k containerID=b4a745ae90 endpointID=952 ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.97654733Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/903/links/cil_from_container progName=cil_from_container
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.976639878Z level=info msg="Reloaded endpoint BPF program" k8sPodName=local-path-storage/local-path-provisioner-56c4685b7c-rcjfm identity=78024 containerInterface=eth0 ciliumEndpointName=local-path-storage/local-path-provisioner-56c4685b7c-rcjfm ipv4=10.244.0.110 containerID=6924c86890 endpointID=3127 ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.976766901Z level=info msg="Reloaded endpoint BPF program" ipv6="" ciliumEndpointName=kube-system/coredns-589f44dc88-9mxxb endpointID=903 ipv4=10.244.0.212 identity=70563 k8sPodName=kube-system/coredns-589f44dc88-9mxxb containerInterface=eth0 containerID=9802722707 subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.976815392Z level=info msg="Restored endpoint" containerInterface=eth0 identity=70563 k8sPodName=kube-system/coredns-589f44dc88-hrm6k ipv4=10.244.0.49 ciliumEndpointName=kube-system/coredns-589f44dc88-hrm6k containerID=b4a745ae90 endpointID=952 ipv6="" subsys=endpoint ipAddrs="[ipv4 10.244.0.49 ipv6 ]"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.976899237Z level=info msg="Restored endpoint" k8sPodName=local-path-storage/local-path-provisioner-56c4685b7c-rcjfm identity=78024 containerInterface=eth0 ciliumEndpointName=local-path-storage/local-path-provisioner-56c4685b7c-rcjfm ipv4=10.244.0.110 containerID=6924c86890 endpointID=3127 ipv6="" subsys=endpoint ipAddrs="[ipv4 10.244.0.110 ipv6 ]"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:42:59.977236752Z level=info msg="Restored endpoint" ipv6="" ciliumEndpointName=kube-system/coredns-589f44dc88-9mxxb endpointID=903 ipv4=10.244.0.212 identity=70563 k8sPodName=kube-system/coredns-589f44dc88-9mxxb containerInterface=eth0 containerID=9802722707 subsys=endpoint ipAddrs="[ipv4 10.244.0.212 ipv6 ]"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:00.031275777Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/903/links/cil_from_container progName=cil_from_container
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:00.031489436Z level=info msg="Reloaded endpoint BPF program" ipv6="" ciliumEndpointName=kube-system/coredns-589f44dc88-9mxxb endpointID=903 ipv4=10.244.0.212 identity=70563 k8sPodName=kube-system/coredns-589f44dc88-9mxxb containerInterface=eth0 containerID=9802722707 subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:00.032265364Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/3127/links/cil_from_container progName=cil_from_container
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:00.032367906Z level=info msg="Reloaded endpoint BPF program" k8sPodName=local-path-storage/local-path-provisioner-56c4685b7c-rcjfm identity=78024 containerInterface=eth0 ciliumEndpointName=local-path-storage/local-path-provisioner-56c4685b7c-rcjfm ipv4=10.244.0.110 containerID=6924c86890 endpointID=3127 ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:00.041056887Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/952/links/cil_from_container progName=cil_from_container
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:00.041282506Z level=info msg="Reloaded endpoint BPF program" containerInterface=eth0 identity=70563 k8sPodName=kube-system/coredns-589f44dc88-hrm6k ipv4=10.244.0.49 ciliumEndpointName=kube-system/coredns-589f44dc88-hrm6k containerID=b4a745ae90 endpointID=952 ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:00.051714251Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/1495/links/cil_from_container progName=cil_from_container
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:00.051856606Z level=info msg="Reloaded endpoint BPF program" identity=4 ciliumEndpointName=/ ipv6="" ipv4=10.244.0.109 containerID="" endpointID=1495 k8sPodName=/ containerInterface="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.458021021Z level=info msg="Compiled new BPF template" module=agent.datapath.loader file-path=/var/run/cilium/state/templates/31817eba474efb7c80a36b0679455357df3345c6edc6acffa46cfe4944dda1f7/bpf_host.o BPFCompilationTime=1.53995935s
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.529759462Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_host/links/cil_to_host progName=cil_to_host
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.529847375Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_host/links/cil_from_host progName=cil_from_host
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.600594323Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_net/links/cil_to_host progName=cil_to_host
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.668466031Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/eth0/links/cil_from_netdev progName=cil_from_netdev
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.668560424Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/eth0/links/cil_to_netdev progName=cil_to_netdev
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.668778596Z level=info msg="Reloaded endpoint BPF program" ipv4="" k8sPodName=/ containerInterface="" endpointID=2771 ciliumEndpointName=/ identity=1 ipv6="" containerID="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.669231201Z level=info msg="Restored endpoint" ipv4="" k8sPodName=/ containerInterface="" endpointID=2771 ciliumEndpointName=/ identity=1 ipv6="" containerID="" subsys=endpoint ipAddrs="[ipv4  ipv6 ]"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.669252521Z level=info msg="Finished regenerating restored endpoints" module=agent.controlplane.endpoint-restore regenerated=4 failed=0 total=4
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.669454432Z level=info msg="Removed stale bpf map" module=agent.datapath.map-sweeper file-path=/sys/fs/bpf/tc/globals/cilium_l2_responder_v6
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.669493601Z level=info msg="Job started" module=jobs job="ep-bpf-prog-watchdog (watchdog.registerEndpointBPFProgWatchdog.func1.1 (.../endpoint/watchdog/ep-bpfprog-watchdog.go:81))"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.669655297Z level=info msg="Serving cilium health API at unix:///var/run/cilium/health.sock" module=agent.controlplane.cilium-health subsys=cilium-health-api-server
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.669683431Z level=info msg="Job started" module=jobs job="dns-garbage-collector-job (namemanager.(*manager).doGC)"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.669823639Z level=info msg="Endpoint garbage collection is ineffective, ignoring endpoint" ipv4=10.244.0.214 identity=8 endpointID=332 ipv6="" k8sPodName=/ containerID="" ciliumEndpointName=/ containerInterface="" subsys=endpoint url=https://github.com/cilium/cilium/pull/14541 helpMessage="For more information, see the linked URL. Pass endpoint-gc-interval=\"0\" to disable"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.669838898Z level=info msg="Starting GC of connection tracking" module=agent.datapath.maps.ct-nat-map-gc first=true
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.671119044Z level=info msg="Conntrack garbage collector interval recalculated" module=agent.datapath.maps.ct-nat-map-gc expectedPrevInterval=5m0s actualPrevInterval=0s newInterval=7m30s deleteRatio=0.0007426282225976999 adjustedDeleteRatio=0.0007426282225976999
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.671133006Z level=info msg="initial gc of ct and nat maps completed" module=agent.datapath.maps.ct-nat-map-gc duration=1.29716ms
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.671141367Z level=info msg="Initial scan of connection tracking completed, starting ctmap pressure metrics controller" module=agent.datapath.maps.ct-nat-map-gc
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.73762863Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_host/links/cil_to_host progName=cil_to_host
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.737737862Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_host/links/cil_from_host progName=cil_from_host
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.80704719Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_net/links/cil_to_host progName=cil_to_host
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.874790896Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/eth0/links/cil_from_netdev progName=cil_from_netdev
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.874887462Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/eth0/links/cil_to_netdev progName=cil_to_netdev
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.875125449Z level=info msg="Reloaded endpoint BPF program" ipv4="" k8sPodName=/ containerInterface="" endpointID=2771 ciliumEndpointName=/ identity=1 ipv6="" containerID="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:01.985548196Z level=info msg="Imported CiliumNetworkPolicy" module=agent.controlplane.policy-k8s-watcher ciliumNetworkPolicyName=http-observe k8sApiVersion="" k8sNamespace=team-a
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.278675753Z level=info msg="Auto-detected local ports to reserve in the container namespace for transparent DNS proxy" module=agent.controlplane.cilium-restapi.config-modification ports=[8472]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.279316252Z level=info msg="Auto-detected local ports to reserve in the container namespace for transparent DNS proxy" module=agent.controlplane.cilium-restapi.config-modification ports=[8472]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.310392803Z level=info msg="Create endpoint request" module=agent.controlplane.endpoint-api addressing="&{IPv4:10.244.0.245 IPv4ExpirationUUID:bebd935a-17ba-4c1d-97ba-bc0d273b0a81 IPv4PoolName:default IPv6: IPv6ExpirationUUID: IPv6PoolName:}" containerID=b48a67a3e80cf4ee118a2808fcb1f27bac28802625f82d07bf572f542d70dad2 containerInterface=eth0 datapathConfiguration="&{RequireBPFRouting:<nil> DisableSipVerification:false ExternalIpam:false InstallEndpointRoute:false RequireArpPassthrough:false RequireEgressProg:false}" interface=lxc66b3984cbedf k8sPodName=team-a/shop-6c6559744b-xxvdv k8sUID=26b8434a-b8d5-414b-9c85-2a1687a4e044 labels=[] sync-build=true
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.310525734Z level=info msg="New endpoint" containerInterface="" k8sPodName=team-a/shop-6c6559744b-xxvdv endpointID=554 ipv4=10.244.0.245 containerID=b48a67a3e8 ciliumEndpointName=team-a/shop-6c6559744b-xxvdv ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.310596817Z level=info msg="Resolving identity labels (blocking)" containerInterface="" k8sPodName=team-a/shop-6c6559744b-xxvdv endpointID=554 ipv4=10.244.0.245 containerID=b48a67a3e8 ciliumEndpointName=team-a/shop-6c6559744b-xxvdv ipv6="" subsys=endpoint identityLabels="k8s:app.kubernetes.io/name=storefront,k8s:app=shop,k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=team-a,k8s:io.cilium.k8s.policy.cluster=poc1,k8s:io.cilium.k8s.policy.serviceaccount=default,k8s:io.kubernetes.pod.namespace=team-a"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.313133071Z level=info msg="Identity of endpoint changed" containerInterface="" k8sPodName=team-a/shop-6c6559744b-xxvdv endpointID=554 ipv4=10.244.0.245 containerID=b48a67a3e8 ciliumEndpointName=team-a/shop-6c6559744b-xxvdv ipv6="" subsys=endpoint new-identity=65580 old-identity="no identity" identityLabels="map[app:{Key:app Value:shop Source:k8s cidr:<nil>} app.kubernetes.io/name:{Key:app.kubernetes.io/name Value:storefront Source:k8s cidr:<nil>} io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name:{Key:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name Value:team-a Source:k8s cidr:<nil>} io.cilium.k8s.policy.cluster:{Key:io.cilium.k8s.policy.cluster Value:poc1 Source:k8s cidr:<nil>} io.cilium.k8s.policy.serviceaccount:{Key:io.cilium.k8s.policy.serviceaccount Value:default Source:k8s cidr:<nil>} io.kubernetes.pod.namespace:{Key:io.kubernetes.pod.namespace Value:team-a Source:k8s cidr:<nil>}]"
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.31318982Z level=info msg="Waiting for endpoint to be generated" containerInterface="" identity=65580 k8sPodName=team-a/shop-6c6559744b-xxvdv endpointID=554 ipv4=10.244.0.245 containerID=b48a67a3e8 ciliumEndpointName=team-a/shop-6c6559744b-xxvdv ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.3152165Z level=info msg="Envoy: Upserting new listener" module=agent.controlplane.envoy-proxy listener=cilium-http-ingress:17553
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.315259125Z level=info msg="Adding new proxy port rules" module=agent.controlplane.l7-proxy id=cilium-http-ingress name=cilium-http-ingress proxyPort=17553
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.315335682Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g6 xdsTypeURL=type.googleapis.com/envoy.config.listener.v3.Listener numResources=1
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.317556388Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion="" xdsTypeURL=type.googleapis.com/cilium.NetworkPolicy xdsNonce="" xdsResourceNames=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.317591532Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g6 xdsTypeURL=type.googleapis.com/envoy.config.listener.v3.Listener xdsNonce=3 xdsResourceNames=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.317679958Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g5 xdsTypeURL=type.googleapis.com/cilium.NetworkPolicy numResources=5
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.318053634Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g5 xdsTypeURL=type.googleapis.com/cilium.NetworkPolicy xdsNonce=4 xdsResourceNames=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.318257397Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g7 xdsTypeURL=type.googleapis.com/cilium.NetworkPolicy numResources=6
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.318465882Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g7 xdsTypeURL=type.googleapis.com/cilium.NetworkPolicy xdsNonce=5 xdsResourceNames=[]
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.363171476Z level=info msg="Program attached to device using tcx" module=agent.datapath.loader progName=cil_from_container device=lxc66b3984cbedf
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.363291244Z level=info msg="Reloaded endpoint BPF program" containerInterface="" identity=65580 k8sPodName=team-a/shop-6c6559744b-xxvdv endpointID=554 ipv4=10.244.0.245 containerID=b48a67a3e8 ciliumEndpointName=team-a/shop-6c6559744b-xxvdv ipv6="" subsys=endpoint
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.363483055Z level=info msg="Successful endpoint creation" containerInterface="" identity=65580 k8sPodName=team-a/shop-6c6559744b-xxvdv endpointID=554 ipv4=10.244.0.245 containerID=b48a67a3e8 ciliumEndpointName=team-a/shop-6c6559744b-xxvdv ipv6="" subsys=endpoint-api
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.454005703Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:02.46266809Z level=info msg="Envoy: Accepted access log connection" module=agent.controlplane.envoy-proxy
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:43:03.654467843Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:44:01.654612391Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:44:01.654675933Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:44:01.656400892Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:44:01.656431743Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:44:01.755393787Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:45:07.236636646Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:45:07.23669066Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:45:07.23880023Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:45:07.238832664Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:45:07.337658652Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:46:12.691267269Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:46:12.69133421Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:46:12.693523599Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:46:12.693559573Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:46:12.791394881Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:47:18.270281651Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:47:18.270351694Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-control-plane
+[pod/cilium-d7dnt/cilium-agent] time=2026-10-24T02:47:18.370420221Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.7 (primary), fc00:f853:ccd:e793::7 (primary)" device=*
+[pod/cilium-jkvdg/apply-sysctl-overwrites] unable to create cilium sysctl overwrites config: open /etc/sysctl.d/99-zzz-override_cilium.conf: permission denied
+[pod/cilium-jkvdg/apply-sysctl-overwrites] 
+[pod/cilium-jkvdg/mount-bpf-fs] bpf on /sys/fs/bpf type bpf (rw,relatime)
+[pod/cilium-jkvdg/install-cni-binaries] Installing cilium-cni to /host/opt/cni/bin/cilium-cni ...
+[pod/cilium-jkvdg/install-cni-binaries] Wrote /host/opt/cni/bin/cilium-cni
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.845697412Z level=info msg=Running subsys=cilium-dbg
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.854459726Z level=info msg="Starting hive" subsys=cilium-dbg
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.8546994Z level=info msg="Establishing connection to apiserver" subsys=cilium-dbg module=k8s-client ipAddr=https://172.18.0.7:6443
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.859966644Z level=info msg="Connected to apiserver" subsys=cilium-dbg module=k8s-client
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.860296042Z level=info msg="Reading configuration from source" subsys=cilium-dbg module=build-config configSource="{Kind:config-map Namespace:kube-system Name:cilium-config}"
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.861495806Z level=info msg="Got configuration source" subsys=cilium-dbg module=build-config lenConfigPairs=185 configSource="{Kind:config-map Namespace:kube-system Name:cilium-config}"
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.861522812Z level=info msg="Reading configuration from source" subsys=cilium-dbg module=build-config configSource="{Kind:cilium-node-config Namespace:kube-system Name:}"
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.863676706Z level=info msg="Got configuration source" subsys=cilium-dbg module=build-config lenConfigPairs=0 configSource="{Kind:cilium-node-config Namespace:kube-system Name:}"
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.866007091Z level=info msg="Started hive" subsys=cilium-dbg duration=11.532868ms
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.866113636Z level=info msg="Stopping hive" subsys=cilium-dbg
+[pod/cilium-d7dnt/config] time=2026-10-24T02:42:49.866452628Z level=info msg="Stopped hive" subsys=cilium-dbg duration=330.285µs
+[pod/cilium-d7dnt/apply-sysctl-overwrites] unable to create cilium sysctl overwrites config: open /etc/sysctl.d/99-zzz-override_cilium.conf: permission denied
+[pod/cilium-d7dnt/apply-sysctl-overwrites] 
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990619603Z level=info msg="  --node-labels=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990620819Z level=info msg="  --node-port-acceleration='disabled'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990622035Z level=info msg="  --node-port-bind-protection='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990624846Z level=info msg="  --node-port-nat-range-ext=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990627782Z level=info msg="  --node-port-range='30000,32767'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990634871Z level=info msg="  --nodeport-addresses=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990636003Z level=info msg="  --nodes-gc-interval='5m0s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99063743Z level=info msg="  --only-masquerade-default-pool='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990638772Z level=info msg="  --operator-api-serve-addr='127.0.0.1:9234'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990640366Z level=info msg="  --operator-prometheus-serve-addr=':9963'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990641834Z level=info msg="  --packetization-layer-pmtud-mode='blackhole'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990643554Z level=info msg="  --policy-accounting='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990645022Z level=info msg="  --policy-audit-mode='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990646909Z level=info msg="  --policy-cidr-match-mode=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990648545Z level=info msg="  --policy-default-local-cluster='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990650139Z level=info msg="  --policy-deny-response='none'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990651859Z level=info msg="  --policy-queue-size='100'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990656557Z level=info msg="  --policy-secrets-namespace='cilium-secrets'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990657941Z level=info msg="  --policy-secrets-only-from-secrets-namespace='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990659199Z level=info msg="  --policy-trigger-interval='1s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990660793Z level=info msg="  --pprof='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990662807Z level=info msg="  --pprof-address='localhost'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990664023Z level=info msg="  --pprof-block-profile-rate='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990665324Z level=info msg="  --pprof-mutex-profile-fraction='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990666624Z level=info msg="  --pprof-port='6060'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990667756Z level=info msg="  --preallocate-bpf-maps='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990668973Z level=info msg="  --prefer-ipv6='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990670651Z level=info msg="  --prepend-iptables-chains='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990672203Z level=info msg="  --procfs='/host/proc'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990673629Z level=info msg="  --prometheus-serve-addr=':9962'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990675474Z level=info msg="  --proxy-admin-port='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990676942Z level=info msg="  --proxy-cluster-max-connections='1024'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990678536Z level=info msg="  --proxy-cluster-max-pending-requests='1024'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990680088Z level=info msg="  --proxy-cluster-max-requests='1024'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990681515Z level=info msg="  --proxy-connect-timeout='2'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99068315Z level=info msg="  --proxy-gid='1337'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990684661Z level=info msg="  --proxy-idle-timeout-seconds='60'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990686296Z level=info msg="  --proxy-initial-fetch-timeout='30'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990701565Z level=info msg="  --proxy-max-active-downstream-connections='50000'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990703326Z level=info msg="  --proxy-max-concurrent-retries='128'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990704627Z level=info msg="  --proxy-max-connection-duration-seconds='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990706053Z level=info msg="  --proxy-max-requests-per-connection='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990707647Z level=info msg="  --proxy-portrange-max='20000'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990708863Z level=info msg="  --proxy-portrange-min='10000'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990710038Z level=info msg="  --proxy-prometheus-port='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99071117Z level=info msg="  --proxy-use-original-source-address='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990712429Z level=info msg="  --proxy-xff-num-trusted-hops-egress='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990713645Z level=info msg="  --proxy-xff-num-trusted-hops-ingress='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990715533Z level=info msg="  --read-cni-conf=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990716623Z level=info msg="  --remove-cilium-node-taints='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990718091Z level=info msg="  --restore='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990719769Z level=info msg="  --restored-proxy-ports-age-limit='15'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990721069Z level=info msg="  --route-metric='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99072216Z level=info msg="  --routing-mode='tunnel'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990723335Z level=info msg="  --service-no-backend-response='reject'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990724509Z level=info msg="  --set-cilium-is-up-condition='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990725684Z level=info msg="  --set-cilium-node-taints='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990727403Z level=info msg="  --shell-sock-path='/var/run/cilium/shell.sock'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990728746Z level=info msg="  --socket-path='/var/run/cilium/cilium.sock'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990729962Z level=info msg="  --srv6-encap-mode='reduced'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990731472Z level=info msg="  --standalone-dns-proxy-server-port='10095'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990732605Z level=info msg="  --state-dir='/var/run/cilium'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99073445Z level=info msg="  --static-cnp-path=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990735918Z level=info msg="  --status-collector-failure-threshold='1m0s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990737135Z level=info msg="  --status-collector-interval='5s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990739064Z level=info msg="  --status-collector-probe-check-timeout='5m0s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990740616Z level=info msg="  --status-collector-stackdump-path='/run/cilium/state/agent.stack.gz'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990742042Z level=info msg="  --status-collector-warning-threshold='15s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99074414Z level=info msg="  --subnet-topology=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990745272Z level=info msg="  --synchronize-k8s-nodes='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990746531Z level=info msg="  --tofqdns-dns-reject-response-code='refused'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990747663Z level=info msg="  --tofqdns-enable-dns-compression='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99074888Z level=info msg="  --tofqdns-endpoint-max-ip-per-hostname='1000'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990750138Z level=info msg="  --tofqdns-idle-connection-grace-period='0s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99075148Z level=info msg="  --tofqdns-max-deferred-connection-deletes='10000'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990752739Z level=info msg="  --tofqdns-min-ttl='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990753871Z level=info msg="  --tofqdns-preallocate-identities='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990755004Z level=info msg="  --tofqdns-proxy-port='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99075622Z level=info msg="  --tofqdns-proxy-response-max-delay='100ms'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990757478Z level=info msg="  --trace-payloadlen='128'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990758779Z level=info msg="  --trace-payloadlen-overlay='192'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990759995Z level=info msg="  --trace-sock='true'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990761337Z level=info msg="  --tunnel-port='0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990762428Z level=info msg="  --tunnel-protocol='vxlan'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990765029Z level=info msg="  --tunnel-source-port-range='0-0'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990766245Z level=info msg="  --underlay-protocol='auto'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990767294Z level=info msg="  --unmanaged-pod-watcher-interval='15s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990768678Z level=info msg="  --use-cilium-internal-ip-for-ipsec='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990769811Z level=info msg="  --use-full-tls-context='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990770859Z level=info msg="  --version='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990773292Z level=info msg="  --vlan-bpf-bypass=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99077497Z level=info msg="  --vtep-cidr=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990777151Z level=info msg="  --vtep-endpoint=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990778955Z level=info msg="  --vtep-mac=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990780381Z level=info msg="  --vtep-mask=''"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990781555Z level=info msg="  --vtep-sync-interval='1m0s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99078273Z level=info msg="  --wireguard-persistent-keepalive='0s'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990783988Z level=info msg="  --wireguard-track-all-ips-fallback='false'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990785372Z level=info msg="  --write-cni-conf-when-ready='/host/etc/cni/net.d/05-cilium.conflist'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990787092Z level=info msg="  --ztunnel-endpoint-event-channel-buffer-size='1'"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990789777Z level=info msg="     _ _ _"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990791035Z level=info msg=" ___|_| |_|_ _ _____"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990792126Z level=info msg="|  _| | | | | |     |"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990793132Z level=info msg=|___|_|_|_|___|_|_|_|
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.990794475Z level=info msg="Cilium 1.21.0-dev 42f89f83aa 2026-10-23T21:09:29-05:00 go version go1.27.3 linux/arm64"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.993936215Z level=info msg="Detected mounted BPF filesystem" bpffsRoot=/sys/fs/bpf
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994104041Z level=info msg="Mounted cgroupv2 filesystem" location=/run/cilium/cgroupv2
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99412904Z level=info msg="Parsing base label prefixes from default label list"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994173293Z level=info msg="Parsing node label prefixes from user inputs" prefix=[]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99418315Z level=info msg="Parsing additional label prefixes from user inputs" prefix=[]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994188519Z level=info msg="Final label prefixes to be used for identity evaluation:"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994196321Z level=info msg=" - reserved:.*"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994200893Z level=info msg=" - :io\\.kubernetes\\.pod\\.namespace"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99420534Z level=info msg=" - :io\\.cilium\\.k8s\\.namespace\\.labels"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994209492Z level=info msg=" - :app\\.kubernetes\\.io"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99421461Z level=info msg=" - :io\\.cilium\\.k8s\\.policy\\.cluster"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994219056Z level=info msg=" - :io\\.cilium\\.k8s\\.policy\\.serviceaccount"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994243888Z level=info msg=" - !:io\\.kubernetes"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994254626Z level=info msg=" - !:kubernetes\\.io"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99425903Z level=info msg=" - !:statefulset\\.kubernetes\\.io/pod-name"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994263393Z level=info msg=" - !:apps\\.kubernetes\\.io/pod-index"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99426742Z level=info msg=" - !:batch\\.kubernetes\\.io/job-completion-index"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994271404Z level=info msg=" - !:batch\\.kubernetes\\.io/controller-uid"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994276438Z level=info msg=" - !:.*beta\\.kubernetes\\.io"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994281262Z level=info msg=" - !:k8s\\.io"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994285079Z level=info msg=" - !:pod-template-generation"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994289147Z level=info msg=" - !:pod-template-hash"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.99429372Z level=info msg=" - !:controller-revision-hash"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994297914Z level=info msg=" - !:controller-uid"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994302109Z level=info msg=" - !:annotation.*"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994310582Z level=info msg=" - !:etcd_node"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994314818Z level=info msg=" - !:topology\\.kubernetes\\.io"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:55.994318845Z level=info msg="Final node label prefixes to be used for identity evaluation:"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.097688974Z level=info msg="Memory available for map entries (0.250% of 16732540928B): 41831352B" module=agent.controlplane
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.097708464Z level=info msg="Option set by dynamic sizing" module=agent.controlplane option=bpf-sock-rev-map-max value=73388
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.098734926Z level=info msg="Underlay protocol ipv4 automatically selected" module=agent.datapath.datapath-tunnel-config
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.151182022Z level=info msg="Probed kernel support for BIG TCP for UDP tunnels" module=agent.datapath.bigtcp state=false
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.151535353Z level=info msg="Datapath connector ready" module=agent.datapath.connector datapathMode=veth
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.151570351Z level=info msg="Datapath plugins are disabled." module=agent.datapath.datapath-plugins
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.152058517Z level=info msg="Cgroup metadata manager is enabled" module=agent.controlplane.cgroup-manager
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.154653844Z level=info msg="The Hubble static exporter is disabled" module=agent.controlplane.hubble.hubble-exporters
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.15467128Z level=info msg="The Hubble dynamic exporter is disabled" module=agent.controlplane.hubble.hubble-exporters
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.154708919Z level=info msg="The Hubble packet drop events emitter is disabled" module=agent.controlplane.hubble.hubble-dropeventemitter
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.154831306Z level=info msg="Certloader TLS watcher disabled" module=agent.controlplane.hubble.hubble-metrics config=certloader-server-tls
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.154854862Z level=info msg="Starting Hubble Metrics dynamic flow processor" module=agent.controlplane.hubble.hubble-metrics metricConfig=/dynamic-metrics-config/dynamic-metrics.yaml
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.157378852Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=dns status="query,ignoreAAAA,destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.157418502Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=drop status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.157432375Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=policy status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.157448051Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=tcp status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.157457523Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=icmp status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.157465194Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=flow status="destination=app|workload-name|reserved-identity,labels=source_namespace,destination_namespace,source=app|workload-name|reserved-identity"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.157468798Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=port-distribution status=""
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.157482504Z level=info msg="Configured metrics plugin" module=agent.controlplane.hubble.hubble-metrics name=httpV2 status="destination=app|workload-name|reserved-identity,labels=source_ip,source_namespace,source_workload,source_app,destination_ip,destination_namespace,destination_workload,destination_app,traffic_direction,source=app|workload-name|reserved-identity,exemplars=true"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.190275262Z level=info msg="Determined final XDP mode" module=agent.datapath.datapath-xdp-config accelarationMode=disabled mode=disabled
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.193457337Z level=info msg="Starting hive"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.193479257Z level=info msg="Started gops server" module=agent.infra.gops address=127.0.0.1:9890
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.194409109Z level=info msg="Establishing connection to apiserver" module=agent.infra.k8s-client ipAddr=https://172.18.0.7:6443
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.197106621Z level=info msg="Connected to apiserver" module=agent.infra.k8s-client
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.197521732Z level=info msg="Waiting until all Cilium CRDs are available" module=agent.infra.k8s-synced-crdsync
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.247943065Z level=info msg="All Cilium CRDs have been found and are available" module=agent.infra.k8s-synced-crdsync
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.249940663Z level=info msg="Local boot ID" module=agent.controlplane.local-node-sync bootID=b8fa0c30-7afa-448d-8518-9c6697688db8
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250016401Z level=info msg="Job started" module=jobs job="sync-local-node (node.NewNodeTableAndLocalNodeStore.func1.1 (pkg/node/local_node_store.go:131))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250418393Z level=info msg="Devices changed" module=agent.datapath.devices-controller devices=[eth0]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250464959Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.25047724Z level=info msg="Node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary, nodeport), fc00:f853:ccd:e793::6 (primary, nodeport), fe80::34fa:89ff:feb5:31c1" device=eth0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250486586Z level=info msg="Node addresses updated" module=agent.datapath.node-address addresses="10.244.1.232 (primary), fe80::249d:c3ff:febd:ba87" device=cilium_host
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250490568Z level=info msg="Node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.25069825Z level=info msg="Job started" module=jobs job="node-address-update (tables.(*nodeAddressController).register.func1.1 (.../datapath/tables/node_address.go:253))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250708099Z level=info msg="Serving cilium node monitor v1.2 API at unix:///var/run/cilium/monitor1_2.sock" module=agent.datapath.monitor-agent
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250729727Z level=info msg="Serving prometheus metrics" module=agent.infra.metrics server=agent-prometheus-server address=:9962 tls=false
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250812464Z level=info msg="Removed map pin, recreating and re-pinning map" bpfMapPath=cilium_ipcache_v2 bpfMapName=cilium_ipcache_v2
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250853246Z level=info msg="No identity checkpoint file found, skipping restoration" module=agent.controlplane.identity.identity file-path=/var/run/cilium/state/local_allocator_state.json
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.250865191Z level=info msg="Restored ingress IP" module=agent.controlplane.ipcache.identity-restoration ingress=10.244.1.60/32
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.25088313Z level=info msg="restored prefixes in the ipcache" module=agent.controlplane.ipcache.identity-restoration count=0 total=1
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.25105573Z level=info msg="Generating CNI configuration file with mode" module=agent.infra.cni-config mode=none
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.259540828Z level=info msg="Envoy: Starting access log server listening" module=agent.controlplane.envoy-proxy address=/var/run/cilium/envoy/sockets/access_log.sock
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.259591502Z level=info msg="Envoy: Waiting for endpoint restorer before serving xDS resources..." module=agent.controlplane.envoy-proxy
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.259597453Z level=info msg="Envoy: Waiting for endpoint restoration before serving xDS resources..." module=agent.controlplane.envoy-proxy
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.259818589Z level=info msg="Job started" module=jobs job="proxy-ports-checkpoint (proxyports.(*ProxyPorts).StoreProxyPorts)"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.260453537Z level=info msg="Job started" module=jobs job="mtu-updater (mtu.(*MTUManager).Updater)"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.269250346Z level=info msg="kube-proxy replacement starting with the following config" module=agent.controlplane.kube-proxy-replacement-init kprConfiguration="{KubeProxyReplacement:true EnableSocketLB:true}"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.269309528Z level=info msg="Starting connection tracking garbage collector" module=agent.datapath.maps.ct-nat-map-gc
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.269383966Z level=info msg="Datapath signal listener running" module=agent.controlplane.signal
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.269856415Z level=info msg="k8s mode: Allowing localhost to reach local endpoints" module=agent.controlplane.daemonconfig
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.270283891Z level=info msg="Removing stale endpoint interfaces" module=agent.controlplane.endpoint-restore
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.270397938Z level=info msg="Reading old endpoints..." module=agent.controlplane.endpoint-restore
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.270977895Z level=info msg="Initializing daemon" module=agent.controlplane.daemon
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271151669Z level=info msg="Retrieved node information from kubernetes node" module=agent.controlplane.local-node-sync nodeName=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271168895Z level=info msg="Received own node information from API server" module=agent.controlplane.local-node-sync nodeName=poc1-worker labels="map[beta.kubernetes.io/arch:arm64 beta.kubernetes.io/os:linux kubernetes.io/arch:arm64 kubernetes.io/hostname:poc1-worker kubernetes.io/os:linux]" ipv4=172.18.0.6 ipv6="" v4Prefix=10.244.1.0/24 v6Prefix="" k8sNodeIP=172.18.0.6
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271197774Z level=info msg="Direct routing device detected" module=agent.controlplane.daemon direct-routing-device=eth0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271212611Z level=info msg="Enabling k8s event listener" module=agent.controlplane.k8s-watcher
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271288265Z level=info msg="Initializing node addressing" module=agent.controlplane.ipam
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271299875Z level=info msg="Initializing IPAM" module=agent.controlplane.ipam mode=kubernetes v4Prefix=10.244.1.0/24 v6Prefix=""
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271303941Z level=info msg="Restoring endpoints..." module=agent.controlplane.endpoint-restore
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271406Z level=info msg="Waiting until all pre-existing resources have been received" module=agent.controlplane.k8s-watcher
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.271497162Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-control-plane spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.273505951Z level=info msg="Reusing previous / configured DNS proxy port" module=agent.controlplane.fqdn.dns-proxy port=46037
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.273524435Z level=info msg="Adding new proxy port rules" module=agent.controlplane.l7-proxy id=cilium-dns-egress name=cilium-dns-egress proxyPort=46037
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.371434662Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.371707435Z level=info msg="Endpoints restored" module=agent.controlplane.endpoint-restore restored=6 failed=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.371873455Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.371890011Z level=info msg="Adding local node to cluster" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.371903297Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377110172Z level=info msg="Initializing identity allocator" module=agent.controlplane.identity.identity
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377124422Z level=info msg="Allocating identities between range" module=agent.controlplane.identity.identity min=65536 max=131071 clusterID=1
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377225601Z level=info msg="Validating configured node address ranges" module=agent.controlplane.daemon
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377251001Z level=info msg="Daemon initialization completed" module=agent.controlplane.daemon
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.37725842Z level=info msg="Start hook executed" function="cmd.daemonLegacyInitialization.func1 (cmd/daemon_main.go:1221) (agent.controlplane.daemon)" duration=106.279602ms
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377346941Z level=info msg="Restored node IDs from the BPF map" module=agent.datapath count=4
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377437851Z level=info msg="Configuring Hubble server" module=agent.controlplane.hubble maxFlows=4095 eventQueueSize=8192
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377551395Z level=info msg="Serving cilium API at unix:///var/run/cilium/cilium.sock" module=agent.infra.cilium-api-server
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377626462Z level=info msg="Job started" module=jobs job="linux-node-checkpoint-writer (linux.(*linuxNodeCheckpoint).watch)"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377685267Z level=info msg="Starting Hubble metrics server" module=agent.controlplane.hubble.hubble-metrics address=:9965 tls=false
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377691638Z level=info msg="Job started" module=jobs job="linux-node-restored-pruning (linux.(*linuxNodeCheckpoint).prune)"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.377772196Z level=info msg="Job started" module=jobs job="linux-node-refresh (linux.NewNodeHandler.func2.1 (.../datapath/linux/node.go:194))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.378046394Z level=info msg="Beginning to read perf buffer" module=agent.datapath.monitor-agent startTime=2026-10-24T02:42:56.378Z
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.378227125Z level=info msg="Starting local Hubble server" module=agent.controlplane.hubble address=unix:///var/run/cilium/hubble.sock
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.378349219Z level=info msg="Shell listening" module=agent.infra.shell socket=/var/run/cilium/shell.sock
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.378415442Z level=info msg="Starting healthz status API server" module=agent.infra.agent-healthz address=127.0.0.1:9879
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.378676102Z level=info msg="Creating BPF socket destroyer" module=agent.controlplane.loadbalancer-reconciler.socket-termination
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.378788012Z level=info msg="Job stopped" module=jobs job="linux-node-restored-pruning (linux.(*linuxNodeCheckpoint).prune)" duration=1.295169ms
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.378897154Z level=info msg="Job started" module=jobs job="nat-stats (stats.(*Stats).countNat)"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.380354362Z level=info msg="Starting Hubble server" module=agent.controlplane.hubble address=:4244 tls=true
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.397134815Z level=info msg="Started hive" duration=203.666121ms
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.471974376Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.476983922Z level=info msg="Setting IPv6" module=agent.datapath.loader device=cilium_vxlan gso_max_size=65536 gro_max_size=65536
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.477095579Z level=info msg="Setting IPv4" module=agent.datapath.loader device=cilium_vxlan gso_max_size=65536 gro_max_size=65536
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.481085243Z level=info msg="All policy resources synchronized!" module=agent.controlplane.policy-k8s-watcher
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578142069Z level=info msg="Regenerating restored endpoints" module=agent.controlplane.endpoint-restore restored=6
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.57818042Z level=info msg="New endpoint" endpointID=1307 identity=90454 containerInterface=eth0 k8sPodName=monitoring/monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp ciliumEndpointName=monitoring/monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp ipv6="" ipv4=10.244.1.128 containerID=de05964c5b subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578206155Z level=info msg="New endpoint" ipv4=10.244.1.116 ciliumEndpointName=monitoring/monitoring-kube-state-metrics-7f584dc46d-jcdm2 containerInterface=eth0 endpointID=749 containerID=17e4bf41c4 ipv6="" identity=119243 k8sPodName=monitoring/monitoring-kube-state-metrics-7f584dc46d-jcdm2 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578238387Z level=info msg="New endpoint" containerID="" ipv6="" identity=1 ipv4="" containerInterface="" ciliumEndpointName=/ k8sPodName=/ endpointID=660 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578254984Z level=info msg="New endpoint" endpointID=389 identity=71469 containerID=d496e96d31 ipv4=10.244.1.149 k8sPodName=monitoring/alertmanager-monitoring-kube-prometheus-alertmanager-0 ciliumEndpointName=monitoring/alertmanager-monitoring-kube-prometheus-alertmanager-0 ipv6="" containerInterface=eth0 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.57826978Z level=info msg="New endpoint" endpointID=275 containerInterface=eth0 ipv6="" identity=72108 ipv4=10.244.1.205 containerID=45aeff5729 ciliumEndpointName=monitoring/monitoring-grafana-7c494445b5-h2x56 k8sPodName=monitoring/monitoring-grafana-7c494445b5-h2x56 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.57828424Z level=info msg="New endpoint" k8sPodName=monitoring/prometheus-monitoring-kube-prometheus-prometheus-0 containerID=d53bcd1a09 ipv6="" endpointID=1472 ciliumEndpointName=monitoring/prometheus-monitoring-kube-prometheus-prometheus-0 ipv4=10.244.1.137 identity=70559 containerInterface=eth0 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578409226Z level=info msg="Initializing labels on existing host endpoint" module=agent.controlplane.agent-infra-endpoints
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578466145Z level=info msg="Creating ingress endpoint" module=agent.controlplane.agent-infra-endpoints
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.5784897Z level=info msg="Launching Cilium health daemon" module=agent.controlplane.cilium-health
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578502945Z level=info msg="New endpoint" ciliumEndpointName=/ containerID="" ipv4=10.244.1.60 endpointID=4081 k8sPodName=/ ipv6="" containerInterface="" subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578507136Z level=info msg="Processing queued deletion requests" module=agent.controlplane.endpoint-api lenEndpoints=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578536517Z level=info msg="Resolving identity labels (blocking)" ciliumEndpointName=/ containerID="" ipv4=10.244.1.60 endpointID=4081 k8sPodName=/ ipv6="" containerInterface="" subsys=endpoint identityLabels=reserved:ingress
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578564264Z level=info msg="Identity of endpoint changed" ciliumEndpointName=/ containerID="" ipv4=10.244.1.60 endpointID=4081 k8sPodName=/ ipv6="" containerInterface="" subsys=endpoint new-identity=8 old-identity="no identity" identityLabels="map[ingress:{Key:ingress Value: Source:reserved cidr:<nil>}]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578751492Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-api name=cni-deletion-queue remaining=1
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578762054Z level=info msg="Fence done" module=agent.controlplane.endpoint-api name=cni-deletion-queue remaining=1 duration=15.383µs
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578765994Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=1472
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578769054Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=275
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578771275Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=389
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578774041Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=660
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578775424Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=749
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578776808Z level=info msg="Scheduling restored endpoint regeneration" module=agent.controlplane.endpoint-restore endpointID=1307
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.578987884Z level=info msg="Launching Cilium health endpoint" module=agent.controlplane.cilium-health
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.579000793Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=loadbalancer remaining=5
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.579139401Z level=info msg="Cleaning up Cilium health endpoint" module=agent.controlplane.cilium-health
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.651099629Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751154823Z level=info msg="Job started" module=jobs job="reconcile (reconciler.Register[...].func3 (.../statedb/reconciler/builder.go:94))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751201933Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751204574Z level=info msg="Job started" module=jobs job="refresh (reconciler.Register[...].func4 (.../statedb/reconciler/builder.go:96))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751211322Z level=info msg="Job started" module=jobs job="refresh (reconciler.Register[...].func4 (.../statedb/reconciler/builder.go:96))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751216771Z level=info msg="Job started" module=jobs job="reconcile (reconciler.Register[...].func3 (.../statedb/reconciler/builder.go:94))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751482922Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=loadbalancer remaining=5 duration=172.481248ms
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751491598Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=ciliumenvoyconfig remaining=4
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751494699Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=ciliumenvoyconfig remaining=4 duration=4.652µs
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751496502Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=kvstore-ipcache remaining=3
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.75149843Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=kvstore-ipcache remaining=3 duration=2.473µs
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751499813Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=kvstore-nodes remaining=2
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751501573Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=kvstore-nodes remaining=2 duration=2.096µs
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751503334Z level=info msg="Fence waiting" module=agent.controlplane.endpoint-regeneration name=clustermesh remaining=1
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751507231Z level=info msg="Fence done" module=agent.controlplane.endpoint-regeneration name=clustermesh remaining=1 duration=4.317µs
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.751784573Z level=info msg="Envoy: Starting xDS gRPC server listening" module=agent.controlplane.envoy-proxy address=/var/run/cilium/envoy/sockets/xds.sock
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755804666Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_connect pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_connect
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755828054Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_post_bind pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_post_bind
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755837359Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_post_bind pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_post_bind
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755863303Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_sendmsg pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_sendmsg
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.75587747Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_recvmsg pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_recvmsg
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755885769Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock6_getpeername pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock6_getpeername
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755898678Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock_release pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock_release
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755910498Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_connect pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_connect
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755918252Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_sendmsg pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_sendmsg
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755926174Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_recvmsg pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_recvmsg
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:56.755938454Z level=info msg="Updated link for program" module=agent.datapath.loader name=cil_sock4_getpeername pin=/sys/fs/bpf/cilium/socketlb/links/cgroup/cil_sock4_getpeername
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:57.587283529Z level=info msg="New endpoint" ipv4=10.244.1.22 ciliumEndpointName=/ k8sPodName=/ ipv6="" endpointID=119 containerInterface="" containerID="" subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:57.587348033Z level=info msg="Resolving identity labels (blocking)" ipv4=10.244.1.22 ciliumEndpointName=/ k8sPodName=/ ipv6="" endpointID=119 containerInterface="" containerID="" subsys=endpoint identityLabels=reserved:health
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:57.587373457Z level=info msg="Identity of endpoint changed" ipv4=10.244.1.22 ciliumEndpointName=/ k8sPodName=/ ipv6="" endpointID=119 containerInterface="" containerID="" subsys=endpoint new-identity=4 old-identity="no identity" identityLabels="map[health:{Key:health Value: Source:reserved cidr:<nil>}]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:58.12532933Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_vxlan/links/cil_from_overlay progName=cil_from_overlay
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:58.125408572Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_vxlan/links/cil_to_overlay progName=cil_to_overlay
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:58.12566635Z level=info msg="Job started" module=jobs job="refresh-linux (reconciler.Register[...].func4 (.../statedb/reconciler/builder.go:96))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:58.125703647Z level=info msg="Job started" module=jobs job="reconcile-linux (reconciler.Register[...].func3 (.../statedb/reconciler/builder.go:94))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:58.126192704Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:58.126238332Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:58.227805743Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:58.551712086Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:42:59.938785158Z level=info msg="Compiled new BPF template" module=agent.datapath.loader file-path=/var/run/cilium/state/templates/f27d99863a8e51e9a5e7fe77e0a8bef4965f5887b210d4d86d76c10eb0d4ea12/bpf_host.o BPFCompilationTime=1.812577764s
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.020920103Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_host/links/cil_to_host progName=cil_to_host
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.021021726Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_host/links/cil_from_host progName=cil_from_host
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.089645439Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_net/links/cil_to_host progName=cil_to_host
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.168361444Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/eth0/links/cil_from_netdev progName=cil_from_netdev
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.168461143Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/eth0/links/cil_to_netdev progName=cil_to_netdev
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.168679778Z level=info msg="Reloaded endpoint BPF program" containerID="" ipv6="" identity=1 ipv4="" containerInterface="" ciliumEndpointName=/ k8sPodName=/ endpointID=660 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.168898706Z level=info msg="Restored endpoint" containerID="" ipv6="" identity=1 ipv4="" containerInterface="" ciliumEndpointName=/ k8sPodName=/ endpointID=660 subsys=endpoint ipAddrs="[ipv4  ipv6 ]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.169896363Z level=info msg="Serving cilium health API at unix:///var/run/cilium/health.sock" module=agent.controlplane.cilium-health subsys=cilium-health-api-server
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.203498346Z level=info msg="Compiled new BPF template" module=agent.datapath.loader file-path=/var/run/cilium/state/templates/89b050fa376f9a3530222ecf2249ac6f8729f54363007dbc9e534b73de7f4e32/bpf_lxc.o BPFCompilationTime=2.077293297s
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.255825731Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/389/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.256010282Z level=info msg="Reloaded endpoint BPF program" endpointID=389 identity=71469 containerID=d496e96d31 ipv4=10.244.1.149 k8sPodName=monitoring/alertmanager-monitoring-kube-prometheus-alertmanager-0 ciliumEndpointName=monitoring/alertmanager-monitoring-kube-prometheus-alertmanager-0 ipv6="" containerInterface=eth0 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.256339698Z level=info msg="Restored endpoint" endpointID=389 identity=71469 containerID=d496e96d31 ipv4=10.244.1.149 k8sPodName=monitoring/alertmanager-monitoring-kube-prometheus-alertmanager-0 ciliumEndpointName=monitoring/alertmanager-monitoring-kube-prometheus-alertmanager-0 ipv6="" containerInterface=eth0 subsys=endpoint ipAddrs="[ipv4 10.244.1.149 ipv6 ]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.262790222Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/1472/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.262983263Z level=info msg="Reloaded endpoint BPF program" k8sPodName=monitoring/prometheus-monitoring-kube-prometheus-prometheus-0 containerID=d53bcd1a09 ipv6="" endpointID=1472 ciliumEndpointName=monitoring/prometheus-monitoring-kube-prometheus-prometheus-0 ipv4=10.244.1.137 identity=70559 containerInterface=eth0 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.263353119Z level=info msg="Restored endpoint" k8sPodName=monitoring/prometheus-monitoring-kube-prometheus-prometheus-0 containerID=d53bcd1a09 ipv6="" endpointID=1472 ciliumEndpointName=monitoring/prometheus-monitoring-kube-prometheus-prometheus-0 ipv4=10.244.1.137 identity=70559 containerInterface=eth0 subsys=endpoint ipAddrs="[ipv4 10.244.1.137 ipv6 ]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.271060836Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/275/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.271618923Z level=info msg="Reloaded endpoint BPF program" endpointID=275 containerInterface=eth0 ipv6="" identity=72108 ipv4=10.244.1.205 containerID=45aeff5729 ciliumEndpointName=monitoring/monitoring-grafana-7c494445b5-h2x56 k8sPodName=monitoring/monitoring-grafana-7c494445b5-h2x56 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.272155976Z level=info msg="Restored endpoint" endpointID=275 containerInterface=eth0 ipv6="" identity=72108 ipv4=10.244.1.205 containerID=45aeff5729 ciliumEndpointName=monitoring/monitoring-grafana-7c494445b5-h2x56 k8sPodName=monitoring/monitoring-grafana-7c494445b5-h2x56 subsys=endpoint ipAddrs="[ipv4 10.244.1.205 ipv6 ]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.288242243Z level=info msg="Program attached to device using tcx" module=agent.datapath.loader progName=cil_from_container device=lxc_health
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.288432398Z level=info msg="Reloaded endpoint BPF program" ipv4=10.244.1.22 ciliumEndpointName=/ identity=4 k8sPodName=/ ipv6="" endpointID=119 containerInterface="" containerID="" subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.303392035Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/1307/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.303675282Z level=info msg="Reloaded endpoint BPF program" endpointID=1307 identity=90454 containerInterface=eth0 k8sPodName=monitoring/monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp ciliumEndpointName=monitoring/monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp ipv6="" ipv4=10.244.1.128 containerID=de05964c5b subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.304206563Z level=info msg="Restored endpoint" endpointID=1307 identity=90454 containerInterface=eth0 k8sPodName=monitoring/monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp ciliumEndpointName=monitoring/monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp ipv6="" ipv4=10.244.1.128 containerID=de05964c5b subsys=endpoint ipAddrs="[ipv4 10.244.1.128 ipv6 ]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.306565879Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/749/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.30677155Z level=info msg="Reloaded endpoint BPF program" ipv4=10.244.1.116 ciliumEndpointName=monitoring/monitoring-kube-state-metrics-7f584dc46d-jcdm2 containerInterface=eth0 endpointID=749 containerID=17e4bf41c4 ipv6="" identity=119243 k8sPodName=monitoring/monitoring-kube-state-metrics-7f584dc46d-jcdm2 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.308206686Z level=info msg="Restored endpoint" ipv4=10.244.1.116 ciliumEndpointName=monitoring/monitoring-kube-state-metrics-7f584dc46d-jcdm2 containerInterface=eth0 endpointID=749 containerID=17e4bf41c4 ipv6="" identity=119243 k8sPodName=monitoring/monitoring-kube-state-metrics-7f584dc46d-jcdm2 subsys=endpoint ipAddrs="[ipv4 10.244.1.116 ipv6 ]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.308234748Z level=info msg="Finished regenerating restored endpoints" module=agent.controlplane.endpoint-restore regenerated=6 failed=0 total=6
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.308367986Z level=info msg="Job started" module=jobs job="dns-garbage-collector-job (namemanager.(*manager).doGC)"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.308432891Z level=info msg="Job started" module=jobs job="ep-bpf-prog-watchdog (watchdog.registerEndpointBPFProgWatchdog.func1.1 (.../endpoint/watchdog/ep-bpfprog-watchdog.go:81))"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.30853627Z level=info msg="Endpoint garbage collection is ineffective, ignoring endpoint" ciliumEndpointName=/ identity=8 containerID="" ipv4=10.244.1.60 endpointID=4081 k8sPodName=/ ipv6="" containerInterface="" subsys=endpoint url=https://github.com/cilium/cilium/pull/14541 helpMessage="For more information, see the linked URL. Pass endpoint-gc-interval=\"0\" to disable"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.308594734Z level=info msg="Starting GC of connection tracking" module=agent.datapath.maps.ct-nat-map-gc first=true
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.309125262Z level=info msg="Removed stale bpf map" module=agent.datapath.map-sweeper file-path=/sys/fs/bpf/tc/globals/cilium_l2_responder_v6
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.312124215Z level=info msg="Conntrack garbage collector interval recalculated" module=agent.datapath.maps.ct-nat-map-gc expectedPrevInterval=5m0s actualPrevInterval=0s newInterval=7m30s deleteRatio=0.0008925164877091622 adjustedDeleteRatio=0.0008925164877091622
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.312165241Z level=info msg="initial gc of ct and nat maps completed" module=agent.datapath.maps.ct-nat-map-gc duration=3.678402ms
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.312205346Z level=info msg="Initial scan of connection tracking completed, starting ctmap pressure metrics controller" module=agent.datapath.maps.ct-nat-map-gc
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.314448821Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_host/links/cil_to_host progName=cil_to_host
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.31457838Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_host/links/cil_from_host progName=cil_from_host
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.321056421Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/1472/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.321238756Z level=info msg="Reloaded endpoint BPF program" k8sPodName=monitoring/prometheus-monitoring-kube-prometheus-prometheus-0 containerID=d53bcd1a09 ipv6="" endpointID=1472 ciliumEndpointName=monitoring/prometheus-monitoring-kube-prometheus-prometheus-0 ipv4=10.244.1.137 identity=70559 containerInterface=eth0 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.330589831Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/119/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.330730304Z level=info msg="Reloaded endpoint BPF program" ipv4=10.244.1.22 ciliumEndpointName=/ identity=4 k8sPodName=/ ipv6="" endpointID=119 containerInterface="" containerID="" subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.347110064Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/389/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.347269398Z level=info msg="Reloaded endpoint BPF program" endpointID=389 identity=71469 containerID=d496e96d31 ipv4=10.244.1.149 k8sPodName=monitoring/alertmanager-monitoring-kube-prometheus-alertmanager-0 ciliumEndpointName=monitoring/alertmanager-monitoring-kube-prometheus-alertmanager-0 ipv6="" containerInterface=eth0 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.356282483Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/1307/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.356510695Z level=info msg="Reloaded endpoint BPF program" endpointID=1307 identity=90454 containerInterface=eth0 k8sPodName=monitoring/monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp ciliumEndpointName=monitoring/monitoring-kube-prometheus-operator-57b74d8f5b-7bzqp ipv6="" ipv4=10.244.1.128 containerID=de05964c5b subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.357571292Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/275/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.357690228Z level=info msg="Reloaded endpoint BPF program" endpointID=275 containerInterface=eth0 ipv6="" identity=72108 ipv4=10.244.1.205 containerID=45aeff5729 ciliumEndpointName=monitoring/monitoring-grafana-7c494445b5-h2x56 k8sPodName=monitoring/monitoring-grafana-7c494445b5-h2x56 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.366646229Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/endpoints/749/links/cil_from_container progName=cil_from_container
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.366760523Z level=info msg="Reloaded endpoint BPF program" ipv4=10.244.1.116 ciliumEndpointName=monitoring/monitoring-kube-state-metrics-7f584dc46d-jcdm2 containerInterface=eth0 endpointID=749 containerID=17e4bf41c4 ipv6="" identity=119243 k8sPodName=monitoring/monitoring-kube-state-metrics-7f584dc46d-jcdm2 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.394551995Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/cilium_net/links/cil_to_host progName=cil_to_host
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.457328564Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/eth0/links/cil_from_netdev progName=cil_from_netdev
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.457402878Z level=info msg="Updated link for program" module=agent.datapath.loader link=/sys/fs/bpf/cilium/devices/eth0/links/cil_to_netdev progName=cil_to_netdev
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:00.45766994Z level=info msg="Reloaded endpoint BPF program" containerID="" ipv6="" identity=1 ipv4="" containerInterface="" ciliumEndpointName=/ k8sPodName=/ endpointID=660 subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:01.985384996Z level=info msg="Imported CiliumNetworkPolicy" module=agent.controlplane.policy-k8s-watcher ciliumNetworkPolicyName=http-observe k8sApiVersion="" k8sNamespace=team-a
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.131895168Z level=info msg="Recomputing policy for all identities" module=agent.controlplane.identity-policy-computer
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.131927513Z level=info msg="Triggering full policy recalculation and regeneration of all endpoints" module=agent.controlplane.policy reason="Envoy Listeners changed"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.383304132Z level=info msg="Auto-detected local ports to reserve in the container namespace for transparent DNS proxy" module=agent.controlplane.cilium-restapi.config-modification ports=[8472]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.384031594Z level=info msg="Auto-detected local ports to reserve in the container namespace for transparent DNS proxy" module=agent.controlplane.cilium-restapi.config-modification ports=[8472]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.412823794Z level=info msg="Create endpoint request" module=agent.controlplane.endpoint-api addressing="&{IPv4:10.244.1.174 IPv4ExpirationUUID:aa735979-a33c-4bfd-bba0-ffc207d4a7a5 IPv4PoolName:default IPv6: IPv6ExpirationUUID: IPv6PoolName:}" containerID=864e9372526ee1bdd08a3ebbbc45c6cd141be9a63e8663b8d60879f2d4933308 containerInterface=eth0 datapathConfiguration="&{RequireBPFRouting:<nil> DisableSipVerification:false ExternalIpam:false InstallEndpointRoute:false RequireArpPassthrough:false RequireEgressProg:false}" interface=lxc024b202d4fbe k8sPodName=loadtest/load-b59d4b587-fnnt8 k8sUID=12f8c281-8cd9-4da3-bd30-03ac5fcb15a9 labels=[] sync-build=true
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.412947865Z level=info msg="New endpoint" k8sPodName=loadtest/load-b59d4b587-fnnt8 containerID=864e937252 endpointID=638 containerInterface="" ipv4=10.244.1.174 ciliumEndpointName=loadtest/load-b59d4b587-fnnt8 ipv6="" subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.413006286Z level=info msg="Resolving identity labels (blocking)" k8sPodName=loadtest/load-b59d4b587-fnnt8 containerID=864e937252 endpointID=638 containerInterface="" ipv4=10.244.1.174 ciliumEndpointName=loadtest/load-b59d4b587-fnnt8 ipv6="" subsys=endpoint identityLabels="k8s:app.kubernetes.io/name=checkout-client,k8s:app=load,k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=loadtest,k8s:io.cilium.k8s.policy.cluster=poc1,k8s:io.cilium.k8s.policy.serviceaccount=default,k8s:io.kubernetes.pod.namespace=loadtest"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.416208865Z level=info msg="Identity of endpoint changed" k8sPodName=loadtest/load-b59d4b587-fnnt8 containerID=864e937252 endpointID=638 containerInterface="" ipv4=10.244.1.174 ciliumEndpointName=loadtest/load-b59d4b587-fnnt8 ipv6="" subsys=endpoint new-identity=70486 old-identity="no identity" identityLabels="map[app:{Key:app Value:load Source:k8s cidr:<nil>} app.kubernetes.io/name:{Key:app.kubernetes.io/name Value:checkout-client Source:k8s cidr:<nil>} io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name:{Key:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name Value:loadtest Source:k8s cidr:<nil>} io.cilium.k8s.policy.cluster:{Key:io.cilium.k8s.policy.cluster Value:poc1 Source:k8s cidr:<nil>} io.cilium.k8s.policy.serviceaccount:{Key:io.cilium.k8s.policy.serviceaccount Value:default Source:k8s cidr:<nil>} io.kubernetes.pod.namespace:{Key:io.kubernetes.pod.namespace Value:loadtest Source:k8s cidr:<nil>}]"
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.41627159Z level=info msg="Waiting for endpoint to be generated" identity=70486 k8sPodName=loadtest/load-b59d4b587-fnnt8 containerID=864e937252 endpointID=638 containerInterface="" ipv4=10.244.1.174 ciliumEndpointName=loadtest/load-b59d4b587-fnnt8 ipv6="" subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.462155758Z level=info msg="Program attached to device using tcx" module=agent.datapath.loader progName=cil_from_container device=lxc024b202d4fbe
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.462291781Z level=info msg="Reloaded endpoint BPF program" identity=70486 k8sPodName=loadtest/load-b59d4b587-fnnt8 containerID=864e937252 endpointID=638 containerInterface="" ipv4=10.244.1.174 ciliumEndpointName=loadtest/load-b59d4b587-fnnt8 ipv6="" subsys=endpoint
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:02.551161343Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:03.85177334Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.843270102Z level=info msg=OnStreamOpen module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsTypeURL=""
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.843552326Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e1:g0 xdsTypeURL=type.googleapis.com/envoy.config.cluster.v3.Cluster xdsNonce="" xdsResourceNames=[]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.843604185Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e1:g0 xdsTypeURL=type.googleapis.com/envoy.config.listener.v3.Listener xdsNonce="" xdsResourceNames=[]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.843645998Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g8 xdsTypeURL=type.googleapis.com/envoy.config.cluster.v3.Cluster numResources=1
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.843679848Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g8 xdsTypeURL=type.googleapis.com/envoy.config.listener.v3.Listener numResources=1
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.847393538Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion="" xdsTypeURL=type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment xdsNonce="" xdsResourceNames=[team-a/shop:8080]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.847495422Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion="" xdsTypeURL=type.googleapis.com/cilium.NetworkPolicy xdsNonce="" xdsResourceNames=[]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.847516933Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g10 xdsTypeURL=type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment numResources=1
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.847596764Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g9 xdsTypeURL=type.googleapis.com/cilium.NetworkPolicy numResources=8
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.847610521Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion="" xdsTypeURL=type.googleapis.com/envoy.config.route.v3.RouteConfiguration xdsNonce="" xdsResourceNames=[team-a/cilium-gateway-shop/listener-insecure]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.847624153Z level=info msg=OnStreamResponse module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g8 xdsTypeURL=type.googleapis.com/envoy.config.route.v3.RouteConfiguration numResources=1
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.847630906Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g8 xdsTypeURL=type.googleapis.com/envoy.config.listener.v3.Listener xdsNonce=2 xdsResourceNames=[]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.84763816Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g8 xdsTypeURL=type.googleapis.com/envoy.config.cluster.v3.Cluster xdsNonce=1 xdsResourceNames=[]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.848203776Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g10 xdsTypeURL=type.googleapis.com/envoy.config.endpoint.v3.ClusterLoadAssignment xdsNonce=3 xdsResourceNames=[team-a/shop:8080]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.848228413Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g9 xdsTypeURL=type.googleapis.com/cilium.NetworkPolicy xdsNonce=4 xdsResourceNames=[]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.848248548Z level=info msg=OnStreamRequest module=agent.controlplane.envoy-proxy xdsStreamID=1 xdsVersion=e2:g8 xdsTypeURL=type.googleapis.com/envoy.config.route.v3.RouteConfiguration xdsNonce=5 xdsResourceNames=[team-a/cilium-gateway-shop/listener-insecure]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:08.848528438Z level=info msg="Successful endpoint creation" identity=70486 k8sPodName=loadtest/load-b59d4b587-fnnt8 containerID=864e937252 endpointID=638 containerInterface="" ipv4=10.244.1.174 ciliumEndpointName=loadtest/load-b59d4b587-fnnt8 ipv6="" subsys=endpoint-api
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:10.733685641Z level=info msg="Envoy: Accepted access log connection" module=agent.controlplane.envoy-proxy
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:29.111537846Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:29.111598859Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:29.113796158Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:29.113832436Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:29.212714469Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:32.191962809Z level=info msg="Auto-detected local ports to reserve in the container namespace for transparent DNS proxy" module=agent.controlplane.cilium-restapi.config-modification ports=[8472]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:43:32.197667894Z level=info msg="Auto-detected local ports to reserve in the container namespace for transparent DNS proxy" module=agent.controlplane.cilium-restapi.config-modification ports=[8472]
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:44:34.692446197Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:44:34.692517747Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:44:34.69451441Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:44:34.694545565Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:44:34.79326587Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:45:40.261018423Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:45:40.261084922Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:45:40.361070578Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:46:45.838799632Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:46:45.83886235Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:46:45.840958551Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:46:45.840988406Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:46:45.938940461Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:47:51.3033721Z level=info msg="Node updated" module=agent.controlplane.node-manager clusterName=poc1 nodeName=poc1-worker spi=0
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:47:51.303433409Z level=info msg="Creating or updating CiliumNode resource" module=agent.controlplane.nodediscovery node=poc1-worker
+[pod/cilium-jkvdg/cilium-agent] time=2026-10-24T02:47:51.403423845Z level=info msg="Fallback node addresses updated" module=agent.datapath.node-address addresses="172.18.0.6 (primary), fc00:f853:ccd:e793::6 (primary)" device=*
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.839805139Z level=info msg=Running subsys=cilium-dbg
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.848371141Z level=info msg="Starting hive" subsys=cilium-dbg
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.848727208Z level=info msg="Establishing connection to apiserver" subsys=cilium-dbg module=k8s-client ipAddr=https://172.18.0.7:6443
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.85413561Z level=info msg="Connected to apiserver" subsys=cilium-dbg module=k8s-client
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.854490662Z level=info msg="Reading configuration from source" subsys=cilium-dbg module=build-config configSource="{Kind:config-map Namespace:kube-system Name:cilium-config}"
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.85582926Z level=info msg="Got configuration source" subsys=cilium-dbg module=build-config lenConfigPairs=185 configSource="{Kind:config-map Namespace:kube-system Name:cilium-config}"
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.855860112Z level=info msg="Reading configuration from source" subsys=cilium-dbg module=build-config configSource="{Kind:cilium-node-config Namespace:kube-system Name:}"
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.856925859Z level=info msg="Got configuration source" subsys=cilium-dbg module=build-config lenConfigPairs=0 configSource="{Kind:cilium-node-config Namespace:kube-system Name:}"
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.859281137Z level=info msg="Started hive" subsys=cilium-dbg duration=10.87944ms
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.859501962Z level=info msg="Stopping hive" subsys=cilium-dbg
+[pod/cilium-jkvdg/config] time=2026-10-24T02:42:49.859700978Z level=info msg="Stopped hive" subsys=cilium-dbg duration=191.283µs
+[pod/cilium-jkvdg/mount-cgroup] time=2026-10-24T02:42:50.862675408Z level=info msg="Mounted cgroupv2 filesystem" location=/run/cilium/cgroupv2
+[pod/cilium-d7dnt/mount-cgroup] time=2026-10-24T02:42:50.557051246Z level=info msg="Mounted cgroupv2 filesystem" location=/run/cilium/cgroupv2
+[pod/cilium-d7dnt/mount-bpf-fs] bpf on /sys/fs/bpf type bpf (rw,relatime)
+[pod/cilium-d7dnt/install-cni-binaries] Installing cilium-cni to /host/opt/cni/bin/cilium-cni ...
+[pod/cilium-d7dnt/install-cni-binaries] Wrote /host/opt/cni/bin/cilium-cni
