@@ -467,6 +467,7 @@ func TestEnrollmentReconciler_Update(t *testing.T) {
 
 			ns := &table.EnrolledNamespace{
 				Name:   tt.namespace,
+				UID:    "test-namespace-" + tt.namespace,
 				Status: reconciler.StatusPending(),
 			}
 
@@ -613,6 +614,7 @@ func TestEnrollmentReconciler_Delete(t *testing.T) {
 
 			ns := &table.EnrolledNamespace{
 				Name:   tt.namespace,
+				UID:    "test-namespace-" + tt.namespace,
 				Status: reconciler.StatusPending(),
 			}
 
@@ -695,6 +697,7 @@ func TestEnrollmentReconciler_EndpointCreated(t *testing.T) {
 			for _, ns := range tt.enrolledNs {
 				tbl.Insert(txn, &table.EnrolledNamespace{
 					Name:   ns,
+					UID:    "test-namespace-" + ns,
 					Status: reconciler.StatusPending(),
 				})
 			}
@@ -766,6 +769,7 @@ func TestEnrollmentReconciler_EndpointDeleted(t *testing.T) {
 			for _, ns := range tt.enrolledNs {
 				tbl.Insert(txn, &table.EnrolledNamespace{
 					Name:   ns,
+					UID:    "test-namespace-" + ns,
 					Status: reconciler.StatusPending(),
 				})
 			}

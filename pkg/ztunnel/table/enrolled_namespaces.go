@@ -13,6 +13,7 @@ import (
 
 type EnrolledNamespace struct {
 	Name   string
+	UID    string            // Kubernetes namespace incarnation; empty is unknown, not validated.
 	Status reconciler.Status // reconciliation status
 }
 
@@ -77,11 +78,13 @@ func K8sNamespaceToEnrolledNamespace(ns k8sTables.Namespace, deleted bool) (*Enr
 	if deleted || !enrolled {
 		return &EnrolledNamespace{
 			Name:   ns.Name,
+			UID:    ns.UID,
 			Status: reconciler.StatusPending(),
 		}, statedb.DeriveDelete
 	}
 	return &EnrolledNamespace{
 		Name:   ns.Name,
+		UID:    ns.UID,
 		Status: reconciler.StatusPending(),
 	}, statedb.DeriveInsert
 }

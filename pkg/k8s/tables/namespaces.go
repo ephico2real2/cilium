@@ -22,6 +22,7 @@ import (
 
 type Namespace struct {
 	Name        string            `json:"name" yaml:"name"`
+	UID         string            `json:"uid,omitempty" yaml:"uid,omitempty"`
 	Labels      map[string]string `json:"labels,omitempty" yaml:"labels,omitempty"`
 	Annotations map[string]string `json:"annotations,omitempty" yaml:"annotations,omitempty"`
 
@@ -110,6 +111,7 @@ func namespaceReflectorConfig(cs client.Clientset, namespaces statedb.RWTable[Na
 			}
 			return Namespace{
 				Name:        ns.Name,
+				UID:         string(ns.UID),
 				Labels:      ns.Labels,
 				Annotations: ns.Annotations,
 				UpdatedAt:   time.Now(),

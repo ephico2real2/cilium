@@ -77,6 +77,7 @@ func enrollNamespace(t *testing.T, db *statedb.DB, tbl statedb.RWTable[*table.En
 	txn := db.WriteTxn(tbl)
 	_, _, err := tbl.Insert(txn, &table.EnrolledNamespace{
 		Name:   namespace,
+		UID:    "test-namespace-" + namespace,
 		Status: reconciler.StatusDone(),
 	})
 	require.NoError(t, err, "Failed to enroll namespace %s", namespace)

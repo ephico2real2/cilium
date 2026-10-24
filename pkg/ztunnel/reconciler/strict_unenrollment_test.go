@@ -22,7 +22,7 @@ func TestStrictNamespaceDeleteDefersLiveEndpointsWithoutDELOrXDSRemoval(t *testi
 	manager.Endpoints = []*endpoint.Endpoint{
 		createTestEndpoint(91, "apps", "protected", "/owned/netns/protected"),
 	}
-	err := ops.Delete(context.Background(), db.ReadTxn(), 1, &table.EnrolledNamespace{Name: "apps"})
+	err := ops.Delete(context.Background(), db.ReadTxn(), 1, &table.EnrolledNamespace{Name: "apps", UID: "test-namespace-apps"})
 	require.ErrorIs(t, err, zds.ErrStrictLiveUnenrollment)
 	require.Empty(t, enroller.disenrolledIDs)
 	require.Empty(t, events, "no namespace-wide xDS REMOVED before active membership has drained")
@@ -32,7 +32,7 @@ func TestStrictNamespaceDeleteWithNoEndpointsCompletesWithoutNamespaceRemovalEve
 	db, _, manager, enroller, ops, events := setupTest(t)
 	ops.strictCreationAdmission = true
 	manager.Endpoints = nil
-	require.NoError(t, ops.Delete(context.Background(), db.ReadTxn(), 1, &table.EnrolledNamespace{Name: "apps"}))
+	require.NoError(t, ops.Delete(context.Background(), db.ReadTxn(), 1, &table.EnrolledNamespace{Name: "apps", UID: "test-namespace-apps"}))
 	require.Empty(t, enroller.disenrolledIDs)
 	require.Empty(t, events)
 }

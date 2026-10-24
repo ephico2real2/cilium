@@ -23,6 +23,7 @@ import (
 func newTestK8sNamespace(name string, labels map[string]string) k8sTables.Namespace {
 	return k8sTables.Namespace{
 		Name:   name,
+		UID:    "test-namespace-" + name,
 		Labels: labels,
 	}
 }
@@ -164,6 +165,7 @@ func TestEnrollmentReconciler_Update(t *testing.T) {
 
 			ns := &table.EnrolledNamespace{
 				Name:   tt.namespace,
+				UID:    "test-namespace-" + tt.namespace,
 				Status: reconciler.StatusPending(),
 			}
 			err := ops.Update(t.Context(), db.ReadTxn(), 0, ns)
@@ -223,6 +225,7 @@ func TestEnrollmentReconciler_Delete(t *testing.T) {
 
 			ns := &table.EnrolledNamespace{
 				Name:   tt.namespace,
+				UID:    "test-namespace-" + tt.namespace,
 				Status: reconciler.StatusPending(),
 			}
 			err := ops.Delete(t.Context(), db.ReadTxn(), 0, ns)
@@ -257,6 +260,7 @@ func TestEnrollmentReconciler_Update_OnlyIncludesMatchingNamespace(t *testing.T)
 	// Update should only include SAs from "enrolled-ns".
 	ns := &table.EnrolledNamespace{
 		Name:   "enrolled-ns",
+		UID:    "test-namespace-enrolled-ns",
 		Status: reconciler.StatusPending(),
 	}
 	err := ops.Update(t.Context(), db.ReadTxn(), 0, ns)
@@ -279,6 +283,7 @@ func enrollNamespace(db *statedb.DB, enrolledTbl statedb.RWTable[*table.Enrolled
 	txn := db.WriteTxn(enrolledTbl)
 	enrolledTbl.Insert(txn, &table.EnrolledNamespace{
 		Name:   name,
+		UID:    "test-namespace-" + name,
 		Status: reconciler.StatusPending(),
 	})
 	txn.Commit()

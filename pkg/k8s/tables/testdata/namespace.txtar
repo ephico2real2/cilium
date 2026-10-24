@@ -26,11 +26,16 @@ cmp expected.yaml actual.yaml
 db/get --index=name --out=actual.table k8s-namespaces default
 cmp namespaces.table actual.table
 
-# Remove the namespace
+# The real namespace recreation path is delete followed by add under the same name.
+# Same-name state-table replacement with a new UID is covered by the enrolled table unit test.
 k8s/delete ns-default.yaml
-
-# Table should be empty
 * db/empty k8s-namespaces
+k8s/add ns-default-recreated.yaml
+db/cmp k8s-namespaces namespaces.table
+db/show --format=json --out=actual-recreated.json k8s-namespaces
+cmp expected-recreated.json actual-recreated.json
+db/get --index=name --out=actual.table k8s-namespaces default
+cmp namespaces.table actual.table
 
 -- health.table --
 Module        Component                                    Level      Message
@@ -42,6 +47,7 @@ default     baz=quux, foo=bar   hello=world   60s
 -- expected.json --
 {
   "name": "default",
+  "uid": "386b7b58-7634-4d05-919c-c366f6aa7859",
   "labels": {
     "baz": "quux",
     "foo": "bar"
@@ -53,6 +59,7 @@ default     baz=quux, foo=bar   hello=world   60s
 }
 -- expected.yaml --
 name: default
+uid: 386b7b58-7634-4d05-919c-c366f6aa7859
 labels:
     baz: quux
     foo: bar
@@ -78,3 +85,34 @@ spec:
 status:
   phase: Active
 
+-- expected-recreated.json --
+{
+  "name": "default",
+  "uid": "e920c8d1-42cb-4ce9-a2c2-3e31cc539ec1",
+  "labels": {
+    "baz": "quux",
+    "foo": "bar"
+  },
+  "annotations": {
+    "hello": "world"
+  },
+  "updatedAt": "2000-01-01T10:30:00Z"
+}
+-- ns-default-recreated.yaml --
+apiVersion: v1
+kind: Namespace
+metadata:
+  creationTimestamp: "2025-03-01T08:04:18Z"
+  labels:
+    foo: bar
+    baz: quux
+  annotations:
+    hello: world
+  name: default
+  resourceVersion: "67"
+  uid: e920c8d1-42cb-4ce9-a2c2-3e31cc539ec1
+spec:
+  finalizers:
+  - kubernetes
+status:
+  phase: Active
