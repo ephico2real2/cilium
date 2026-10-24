@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
+	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	k8sclient "github.com/cilium/cilium/pkg/k8s/client"
@@ -37,6 +38,8 @@ var Cell = cell.Module("ztunnel-admission", "ztunnel new-pod startup admission",
 
 type params struct {
 	cell.In
+	Lifecycle   cell.Lifecycle
+	ClusterInfo cmtypes.ClusterInfo
 	Config      config.Config
 	Clientset   k8sclient.Clientset
 	Server      *zds.Server
@@ -50,6 +53,7 @@ type out struct {
 }
 
 type gate struct {
+	recorder       requiredRecorder
 	enabled        bool
 	core           slimcore.CoreV1Interface
 	enroll         func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error
@@ -85,6 +89,8 @@ func newGate(p params) (out, error) {
 		}
 		g.core = p.Clientset.Slim().CoreV1()
 		g.enroll = p.Server.EnrollEndpointForOwnerContext
+		g.recorder = newRequiredRecorder(p.AgentConfig.StateDir, p.ClusterInfo.ID, g.nodeName)
+		p.Lifecycle.Append(cell.Hook{OnStop: func(cell.HookContext) error { return g.recorder.Close() }})
 	}
 	return out{Gate: g}, nil
 }
@@ -123,9 +129,9 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 	if ep == nil {
 		return permanent("endpoint startup admission requires an endpoint")
 	}
-	if namespace == "" && name == "" && uid == "" {
-		return nil // Internal/non-Kubernetes endpoint; no protection claim.
-	}
+	// This gate belongs to API/CNI creation. Health, host and ingress
+	// endpoints use the trusted internal creator and EndpointManager directly;
+	// blank metadata on this path is not authenticated internal provenance.
 	if namespace == "" || name == "" || uid == "" {
 		return permanent("Kubernetes CNI endpoint has incomplete immutable identity")
 	}
@@ -182,6 +188,20 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 
 func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types.UID, required *bool) error {
 	namespace, name := ep.GetK8sNamespace(), ep.GetK8sPodName()
+	if g.recorder == nil {
+		return permanent("durable Required intent recorder is unavailable")
+	}
+	durableUID, durableRequired, err := g.recorder.Lookup(ctx, ep.K8sUID)
+	if err != nil {
+		return fmt.Errorf("reading durable Required intent: %w", err)
+	}
+	if durableRequired {
+		if *pinnedUID != "" && string(*pinnedUID) != durableUID {
+			return permanent("durable namespace identity changed during admission")
+		}
+		*pinnedUID = types.UID(durableUID)
+		*required = true
+	}
 	before, err := g.core.Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
 		return fmt.Errorf("reading live namespace intent: %w", err)
@@ -220,6 +240,7 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 			return fmt.Errorf("managed endpoint metadata is not synchronized to immutable CNI identity")
 		}
 	}
+	var finalSandboxCheck func() error
 	if enrolled && (pod.Spec.HostNetwork || namespace == g.agentNamespace) {
 		return permanent("enrolled host-network or agent-namespace Pods are outside initial admission qualification")
 	}
@@ -231,6 +252,27 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 		if err := g.validateNetns(path); err != nil {
 			return fmt.Errorf("validating CNI network namespace: %w", err)
 		}
+		recheck, release, err := g.recorder.Record(ctx, ep, string(*pinnedUID), pod)
+		if err != nil {
+			if isRequiredConflict(err) {
+				return permanent("durable Required sandbox conflict: %w", err)
+			}
+			return fmt.Errorf("persisting durable Required intent: %w", err)
+		}
+		if release == nil || recheck == nil {
+			if release != nil {
+				release()
+			}
+			return permanent("durable Required recorder returned no sandbox lease")
+		}
+		defer release()
+		finalSandboxCheck = recheck
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := recheck(); err != nil {
+			return permanent("sandbox changed before enrollment: %w", err)
+		}
 		// This view is private to this attempt: background metadata updates
 		// cannot alter the Pod UID/SA that the legacy converter sends.
 		view := &endpoint.Endpoint{ID: ep.GetID16(), K8sUID: ep.K8sUID,
@@ -239,6 +281,9 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 		view.SetPod(pod.DeepCopy())
 		if err := g.enroll(ctx, ep, view); err != nil {
 			return fmt.Errorf("capture/proxy enrollment: %w", err)
+		}
+		if err := recheck(); err != nil {
+			return permanent("sandbox changed after enrollment: %w", err)
 		}
 		if err := g.validateNetns(path); err != nil {
 			return permanent("CNI network namespace is invalid after enrollment: %w", err)
@@ -261,6 +306,11 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 	}
 	if after.ResourceVersion != before.ResourceVersion || (after.Labels["io.cilium/mtls-enabled"] == "true") != enrolled {
 		return fmt.Errorf("namespace intent changed during CNI admission")
+	}
+	if finalSandboxCheck != nil {
+		if err := finalSandboxCheck(); err != nil {
+			return permanent("sandbox changed during final admission checks: %w", err)
+		}
 	}
 	return nil
 }

@@ -6,6 +6,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"fmt"
 	goruntime "runtime"
 	"sync/atomic"
 	"testing"
@@ -54,7 +55,7 @@ func cniGateFixture(t *testing.T) (*gate, *slimfake.Clientset, *endpoint.Endpoin
 		UID: "pod-generation", Name: "server", Namespace: "apps",
 	}, Spec: slimv1.PodSpec{NodeName: "node-a", ServiceAccountName: "stale-cache-service-account"}})
 	g := &gate{
-		enabled: true, core: client.CoreV1(), logger: hivetest.Logger(t),
+		enabled: true, core: client.CoreV1(), logger: hivetest.Logger(t), recorder: &fakeRequiredRecorder{},
 		agentNamespace: "agent-system", nodeName: func() string { return "node-a" },
 		budget: 250 * time.Millisecond, attemptTimeout: 30 * time.Millisecond,
 		initialBackoff: time.Millisecond,
@@ -426,6 +427,7 @@ func TestAdmissionHiveUsesRealZdsProviderAndTypedGroup(t *testing.T) {
 					return cfg
 				}),
 				cell.Provide(func() k8sclient.Clientset { return cs }),
+				cell.Provide(func() cmtypes.ClusterInfo { return cmtypes.DefaultClusterInfo }),
 				cell.Provide(func() *option.DaemonConfig { return &option.DaemonConfig{K8sNamespace: "custom-agent-system"} }),
 				cell.Provide(func() endpointmanager.EndpointManager { return testendpointmanager.NewMockEndpointManager() }),
 				zds.Cell,
@@ -487,6 +489,36 @@ func TestAdmissionRejectsManagedDeletionBeforeAndAfterACK(t *testing.T) {
 			} else {
 				require.Equal(t, 1, calls)
 			}
+		})
+	}
+}
+
+func TestStrictAdmissionRejectsEveryIncompleteIdentityBeforeSideEffects(t *testing.T) {
+	for missing := 1; missing < 8; missing++ {
+		t.Run(fmt.Sprintf("missing-fields-%d", missing), func(t *testing.T) {
+			g, _, ep := cniGateFixture(t)
+			if missing&1 != 0 {
+				ep.K8sNamespace = ""
+			}
+			if missing&2 != 0 {
+				ep.K8sPodName = ""
+			}
+			if missing&4 != 0 {
+				ep.K8sUID = ""
+			}
+			g.recorder = &fakeRequiredRecorder{lookup: func(context.Context, string) (string, bool, error) {
+				t.Fatal("incomplete identity reached durable lookup")
+				return "", false, nil
+			}}
+			g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error {
+				t.Fatal("incomplete identity reached enrollment")
+				return nil
+			}
+			g.validateNetns = func(string) error { t.Fatal("incomplete identity reached sandbox validation"); return nil }
+			err := g.WaitForEndpoint(t.Context(), ep)
+			require.ErrorContains(t, err, "incomplete immutable identity")
+			var permanent *permanentError
+			require.ErrorAs(t, err, &permanent)
 		})
 	}
 }
