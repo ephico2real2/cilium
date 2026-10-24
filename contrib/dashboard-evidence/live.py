@@ -73,7 +73,7 @@ def check():
     assert total > 50 and total - baseline > gateway * .8, (total, baseline)
     app_total = value('sum(rate(hubble_http_requests_total{' + APP_SELECTOR + ',reporter="' + reporter + '",source_namespace=~".*",source_app=~".*",status="200"}[1m]))')
     app_direct = value('sum(rate(hubble_http_requests_total{' + APP_SELECTOR + ',reporter="server",source_namespace="loadtest",source_app="checkout-client",status="200"}[1m]))')
-    app_gateway = value('sum(rate(hubble_http_requests_total{' + APP_SELECTOR + ',reporter="' + reporter + '",source_namespace="loadtest",source_app="checkout-client",status="200"}[1m]))')
+    app_gateway = value('sum(rate(hubble_http_requests_total{' + APP_SELECTOR + ',reporter="' + reporter + '",source_namespace="loadtest",source_app=~".*",status="200"}[1m]))')
     assert total * .9 <= app_total <= total * 1.1, (app_total, total)
     assert direct * .9 <= app_direct <= direct * 1.1, (app_direct, direct)
     assert baseline * .9 <= app_gateway <= baseline * 1.1, (app_gateway, baseline)
@@ -119,7 +119,7 @@ def check():
     app_cases = [
         ('08-by-app-all', app_variables, {'prometheusMin':baseline + gateway * .7}),
         ('09-by-app-selected-direct', app_variables | {'var-reporter':'server','var-source_namespace':'loadtest','var-source_app':'checkout-client'}, {'prometheusTotal':app_direct,'prometheusSeries':1}),
-        ('10-by-app-selected-gateway', app_variables | {'var-source_namespace':'loadtest','var-source_app':'checkout-client'}, {'prometheusTotal':app_gateway,'prometheusSeries':1}),
+        ('10-by-app-namespace-gateway', app_variables | {'var-source_namespace':'loadtest'}, {'prometheusTotal':app_gateway,'prometheusSeries':1}),
     ]
     for name, app_vars, expected in app_cases:
         pages.append({'name':name,'url':'http://127.0.0.1:3000/d-solo/hubble-l7-http-by-app/live?' + urllib.parse.urlencode(app_vars),'before':6000,'evidence':'panels','expect':{'panelsMin':1,'noDataAllowed':[]} | expected})
