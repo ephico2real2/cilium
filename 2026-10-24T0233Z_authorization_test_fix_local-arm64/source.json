@@ -1,0 +1,13 @@
+{
+  "test_source": "cf34ab9ae795fa6f0e79fe86a30b0d21bb90185d",
+  "runtime_image_source": "42f89f83aa5a03ea80f7a2b8cece56b27f87385a",
+  "change": "test-only import formatting and t.Context modernization",
+  "platform": "linux/arm64",
+  "host": "MacBook with Ubuntu 24.04 Colima VM",
+  "go": "1.27.1",
+  "golangci_lint": "2.15.0",
+  "container": "golang@sha256:162be5298a40ed317005c8339c6de4d10d3eef336d66dc8e9259b03ab9d3a6d2",
+  "race_tests_subtests_passed": 150,
+  "lint": "passed: 0 issues",
+  "vet": "passed"
+}
