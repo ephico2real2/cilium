@@ -12,7 +12,6 @@ import (
 	"testing"
 	"time"
 
-	slimmetav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
 	v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"github.com/prometheus/client_golang/prometheus/testutil"
@@ -24,6 +23,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
+	slimmetav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/ztunnel/pb/security"
 )
 
@@ -403,8 +403,7 @@ func TestAuthorizationCannotACKAddress(t *testing.T) {
 }
 
 func TestAuthorizationSendFailureTerminatesStream(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 	requests := make(chan *v3.DeltaDiscoveryRequest, 1)
 	requests <- subscribeAuthorization()
 	stream := &MockStream{}
