@@ -38,7 +38,10 @@ concurrency:
   cancel-in-progress: true
 jobs:
   dashboard:
-    if: github.repository == 'ephico2real2/cilium' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+    if: >-
+      github.repository == 'ephico2real2/cilium' &&
+      (github.event_name != 'pull_request' ||
+       (github.event.pull_request.head.repo.full_name == github.repository && !github.event.pull_request.draft))
     name: Fork build, real Gateway load and Grafana browser evidence
     runs-on: ubuntu-24.04
     timeout-minutes: 90
