@@ -38,6 +38,26 @@ func TestLeaseTTLWriterForChecksSelectedBackendCapability(t *testing.T) {
 	}
 }
 
+func TestStandaloneClientReportsOnlyItsBackendCapability(t *testing.T) {
+	if StandaloneClient(nil).IsEnabled() {
+		t.Fatal("standalone client without a backend is enabled")
+	}
+	plain := StandaloneClient(&inMemoryClient{})
+	if !plain.IsEnabled() {
+		t.Fatal("standalone client with a backend is disabled")
+	}
+	if writer, ok := LeaseTTLWriterFor(plain); ok || writer != nil {
+		t.Fatal("standalone wrapper exposed a short-lease capability its backend lacks")
+	}
+	capable := StandaloneClient(struct {
+		BackendOperations
+		LeaseTTLWriter
+	}{BackendOperations: &inMemoryClient{}, LeaseTTLWriter: testLeaseTTLWriter{}})
+	if writer, ok := LeaseTTLWriterFor(capable); !ok || writer == nil {
+		t.Fatal("standalone wrapper hid the short-lease capability of its backend")
+	}
+}
+
 func TestLeaseTTLWriteHeadHasSeparateStableNamespace(t *testing.T) {
 	key := "cilium/state/ztunnel/membership/v1/agents/node-a"
 	head := leaseTTLWriteHead(key)

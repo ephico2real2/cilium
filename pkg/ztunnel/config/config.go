@@ -5,6 +5,7 @@ package config
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/spf13/pflag"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
@@ -33,6 +34,7 @@ type Config struct {
 	EnableRemoteWorkloadMembership bool   `mapstructure:"ztunnel-enable-remote-workload-membership"`
 	RemoteOriginConfigDirectory    string `mapstructure:"ztunnel-remote-origin-config-dir"`
 	RemoteOriginClientCommonName   string `mapstructure:"ztunnel-remote-origin-client-common-name"`
+	SourceMembershipEtcdConfig     string `mapstructure:"ztunnel-source-membership-etcd-config"`
 	CAType                         string `mapstructure:"ztunnel-ca-type"`
 	SpiffeTrustDomain              string `mapstructure:"mesh-auth-spiffe-trust-domain"`
 	EndpointEventChannelBufferSize int    `mapstructure:"ztunnel-endpoint-event-channel-buffer-size"`
@@ -45,6 +47,7 @@ func (c Config) Flags(flags *pflag.FlagSet) {
 	flags.Bool("ztunnel-enable-remote-workload-membership", false, "Experimental: publish and consume short-lived, directly authenticated remote workload membership; does not enable remote authorization or traffic")
 	flags.String("ztunnel-remote-origin-config-dir", "", "Read-only directory containing per-peer direct ClusterMesh origin etcd configs for remote workload membership")
 	flags.String("ztunnel-remote-origin-client-common-name", "ztunnel-origin-reader", "Expected common name of the dedicated read-only direct-origin etcd client certificate")
+	flags.String("ztunnel-source-membership-etcd-config", "", "etcd client config of the dedicated connection that publishes this node's source membership; the global kvstore stays disabled")
 	flags.String("mesh-auth-spiffe-trust-domain", "cluster.local", "SPIFFE trust domain for ztunnel workloads")
 	flags.String("ztunnel-ca-type", CATypeInternal, "Workload CA backend: internal or spire")
 	flags.Int("ztunnel-endpoint-event-channel-buffer-size", 1, "Buffer size for the ztunnel endpoint event channel")
@@ -63,6 +66,9 @@ func (c Config) Validate() error {
 	}
 	if c.EnableRemoteWorkloadMembership && c.RemoteOriginClientCommonName == "" {
 		return fmt.Errorf("remote workload membership requires ztunnel-remote-origin-client-common-name")
+	}
+	if c.SourceMembershipEtcdConfig != "" && (!c.EnableRemoteWorkloadMembership || !filepath.IsAbs(c.SourceMembershipEtcdConfig)) {
+		return fmt.Errorf("ztunnel-source-membership-etcd-config requires remote workload membership and an absolute path")
 	}
 	if c.RequireMTLS && !c.EnableZTunnel {
 		return fmt.Errorf("ztunnel-require-mtls requires enable-ztunnel")

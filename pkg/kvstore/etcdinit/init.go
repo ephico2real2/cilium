@@ -29,6 +29,10 @@ import (
 //
 // The createSharedRemoteUser parameter controls whether the shared "remote" etcd user is created.
 //
+// The createZtunnelMembershipUsers parameter creates the users of native ztunnel source membership: this cluster's
+// agents publish their short-leased records as "ztunnel-membership-writer-<cluster>", and remote agents read them
+// as the read-only "ztunnel-origin-reader" over their dedicated direct-origin connection.
+//
 // The context provided as ctx can be used to implement a timeout on operations, and is passed to all etcd client
 // functions.
 //
@@ -36,7 +40,7 @@ import (
 // roles, permissions, or keys.
 func ClusterMeshEtcdInit(
 	ctx context.Context, log *slog.Logger, client *clientv3.Client,
-	ciliumClusterName string, createSharedRemoteUser bool,
+	ciliumClusterName string, createSharedRemoteUser, createZtunnelMembershipUsers bool,
 ) error {
 	ic := initClient{
 		log:    log,
@@ -131,6 +135,12 @@ func ClusterMeshEtcdInit(
 		}
 	}
 
+	if createZtunnelMembershipUsers {
+		if err = ic.configureZtunnelMembership(ctx, ciliumClusterName, remoteRolename); err != nil {
+			return err
+		}
+	}
+
 	// Post setup
 	log.Info("Performing post-init tasks")
 	err = ic.enableAuth(ctx)
@@ -139,6 +149,69 @@ func ClusterMeshEtcdInit(
 	}
 
 	return nil
+}
+
+const (
+	// ZtunnelMembershipWriterUser is the base username, suffixed with the cluster name, of the client certificate
+	// that this cluster's agents use to publish ztunnel source membership. The cluster suffix keeps a writer
+	// certificate of one cluster from authenticating as a writer to the etcd of another cluster sharing the CA.
+	ZtunnelMembershipWriterUser = "ztunnel-membership-writer"
+	// ZtunnelOriginReaderUser is the username of the read-only client certificate that remote agents use for their
+	// direct-origin membership observation. It holds the remote role.
+	ZtunnelOriginReaderUser = "ztunnel-origin-reader"
+
+	ztunnelMembershipWriterRole = rolename("ztunnel-membership-writer")
+)
+
+func (ic initClient) configureZtunnelMembership(ctx context.Context, ciliumClusterName string, remoteRolename rolename) error {
+	writerUsername := usernameForClusterName(ZtunnelMembershipWriterUser, ciliumClusterName)
+	ic.log.Info(
+		"Configuring ztunnel membership writer user",
+		logfields.EtcdUsername, writerUsername,
+	)
+	if err := ic.addNoPasswordUser(ctx, writerUsername); err != nil {
+		return err
+	}
+	if err := ic.addRole(ctx, ztunnelMembershipWriterRole); err != nil {
+		return err
+	}
+	if err := ic.grantRoleToUser(ctx, ztunnelMembershipWriterRole, writerUsername); err != nil {
+		return err
+	}
+	readOnlyRanges, readWriteRanges := rangesForZtunnelMembershipWriterRole()
+	for _, keyRange := range readOnlyRanges {
+		if err := ic.grantPermissionToRole(ctx, readOnly, keyRange, ztunnelMembershipWriterRole); err != nil {
+			return err
+		}
+	}
+	for _, keyRange := range readWriteRanges {
+		if err := ic.grantPermissionToRole(ctx, readWrite, keyRange, ztunnelMembershipWriterRole); err != nil {
+			return err
+		}
+	}
+
+	readerUsername := username(ZtunnelOriginReaderUser)
+	ic.log.Info(
+		"Configuring ztunnel origin reader user",
+		logfields.EtcdUsername, readerUsername,
+	)
+	if err := ic.addNoPasswordUser(ctx, readerUsername); err != nil {
+		return err
+	}
+	return ic.grantRoleToUser(ctx, remoteRolename, readerUsername)
+}
+
+// rangesForZtunnelMembershipWriterRole returns the key ranges of the ztunnel membership writer. The writer reads
+// the heartbeat that signals an established connection and writes only the membership records, their writer
+// locks and the persistent heads that fence the short-lease writes. Its client runs without the init-lock quorum
+// check, so it needs no other key.
+func rangesForZtunnelMembershipWriterRole() (readOnlyRanges, readWriteRanges []keyRange) {
+	return []keyRange{
+		rangeForPrefix(kvstore.HeartbeatPath, withoutTrailingSlash),
+	}, []keyRange{
+		rangeForPrefix(kvstore.ZtunnelMembershipPrefix),
+		rangeForPrefix(kvstore.LeaseTTLWriteHeadsPrefix),
+	}
 }
 
 // usernameForClusterName generates the account username for a given clusterName. This handles the edge case
@@ -243,7 +316,10 @@ func rangeForPrefix(prefix string, opts ...krOpt) keyRange {
 // permission is a thin, internal wrapper around etcd's permission types
 type permission clientv3.PermissionType
 
-var readOnly = permission(clientv3.PermRead)
+var (
+	readOnly  = permission(clientv3.PermRead)
+	readWrite = permission(clientv3.PermReadWrite)
+)
 
 func (p permission) string() string {
 	return authpb.Permission_Type(p).String()

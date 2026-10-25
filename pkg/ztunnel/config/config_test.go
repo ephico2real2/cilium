@@ -74,6 +74,13 @@ func TestRemoteWorkloadMembershipIsOptInAndRequiresStrictMTLS(t *testing.T) {
 	require.ErrorContains(t, cfg.Validate(), "requires ztunnel-remote-origin-config-dir")
 	cfg.RemoteOriginConfigDirectory = t.TempDir()
 	require.NoError(t, cfg.Validate())
+	cfg.SourceMembershipEtcdConfig = "relative/etcd.yaml"
+	require.ErrorContains(t, cfg.Validate(), "requires remote workload membership and an absolute path")
+	cfg.SourceMembershipEtcdConfig = "/var/lib/cilium/ztunnel-membership/etcd.yaml"
+	require.NoError(t, cfg.Validate())
+	cfg.EnableRemoteWorkloadMembership = false
+	require.ErrorContains(t, cfg.Validate(), "requires remote workload membership and an absolute path")
+	cfg.EnableRemoteWorkloadMembership = true
 
 	flags := pflag.NewFlagSet("ztunnel", pflag.ContinueOnError)
 	DefaultConfig.Flags(flags)

@@ -20,7 +20,7 @@ var ErrLeaseTTLWriteConflict = errors.New("short lease write head or lock change
 // agents watch prefix and must never be garbage-collected while a writer RPC
 // from any prior ownership epoch can remain in flight.
 func leaseTTLWriteHead(key string) string {
-	return JoinKey(StatePrefix, "lease-ttl-write-heads", "v1", fmt.Sprintf("%x", sha256.Sum256([]byte(key))))
+	return JoinKey(LeaseTTLWriteHeadsPrefix, fmt.Sprintf("%x", sha256.Sum256([]byte(key))))
 }
 
 // LeaseTTLWriter writes one value with an explicitly bounded key lease while

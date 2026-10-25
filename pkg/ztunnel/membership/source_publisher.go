@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	SourceMembershipRoot         = "cilium/state/ztunnel/membership/v1"
+	SourceMembershipRoot         = kvstore.ZtunnelMembershipPrefix
 	SourceMembershipPrefix       = SourceMembershipRoot + "/agents"
 	SourceMembershipLockPrefix   = SourceMembershipRoot + "/locks"
 	DefaultSourceRefreshInterval = 5 * time.Second

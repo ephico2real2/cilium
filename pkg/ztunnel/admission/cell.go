@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
+	"github.com/cilium/cilium/pkg/dial"
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	k8sclient "github.com/cilium/cilium/pkg/k8s/client"
@@ -66,6 +67,7 @@ type params struct {
 	Registry    *membership.Registry
 	JobGroup    job.Group
 	KVStore     kvstore.Client                  `optional:"true"`
+	Resolver    dial.Resolver                   `optional:"true"`
 	Endpoints   endpointmanager.EndpointManager `optional:"true"`
 }
 
@@ -92,6 +94,8 @@ type gate struct {
 	budget                     time.Duration
 	attemptTimeout             time.Duration
 	initialBackoff             time.Duration
+	membershipRetryMin         time.Duration
+	membershipRetryMax         time.Duration
 }
 
 type permanentError struct{ err error }
@@ -124,17 +128,26 @@ func newGate(p params) (out, error) {
 		g.recorder = newRequiredRecorder(p.AgentConfig.StateDir, p.ClusterInfo.ID, g.nodeName)
 		p.Lifecycle.Append(cell.Hook{OnStop: func(cell.HookContext) error { return g.recorder.Close() }})
 		if p.Config.EnableRemoteWorkloadMembership {
-			if p.KVStore == nil || !p.KVStore.IsEnabled() || p.Endpoints == nil {
-				return out{}, fmt.Errorf("remote workload membership requires an enabled KVStore and endpoint manager")
+			if p.Endpoints == nil {
+				return out{}, fmt.Errorf("remote workload membership requires the endpoint manager")
 			}
-			publisher, err := membership.NewSourcePublisher(g.membership, p.Endpoints, []membership.EndpointRevalidator{g}, p.KVStore, p.Logger,
-				membership.SourcePublisherConfig{ClusterInfo: p.ClusterInfo, NodeName: g.nodeName()})
-			if err != nil {
-				return out{}, fmt.Errorf("remote workload membership cannot start without a short-lease KVStore backend: %w", err)
+			publisherConfig := membership.SourcePublisherConfig{ClusterInfo: p.ClusterInfo, NodeName: g.nodeName()}
+			switch path := p.Config.SourceMembershipEtcdConfig; {
+			case path != "":
+				p.JobGroup.Add(job.OneShot(logSourcePublisher, g.dedicatedSourcePublisher(
+					openMembershipBackend(p.Logger, path, p.Resolver), p.Endpoints, publisherConfig, path)))
+			case p.KVStore != nil && p.KVStore.IsEnabled():
+				publisher, err := membership.NewSourcePublisher(g.membership, p.Endpoints, []membership.EndpointRevalidator{g}, p.KVStore, p.Logger,
+					publisherConfig)
+				if err != nil {
+					return out{}, fmt.Errorf("remote workload membership cannot start without a short-lease KVStore backend: %w", err)
+				}
+				p.JobGroup.Add(job.OneShot(logSourcePublisher, func(ctx context.Context, _ cell.Health) error {
+					return publisher.Run(ctx)
+				}))
+			default:
+				return out{}, fmt.Errorf("remote workload membership requires a dedicated membership etcd connection or an enabled KVStore")
 			}
-			p.JobGroup.Add(job.OneShot(logSourcePublisher, func(ctx context.Context, _ cell.Health) error {
-				return publisher.Run(ctx)
-			}))
 		}
 	}
 	return out{Gate: g, Revalidator: g, PolicyTransition: g}, nil

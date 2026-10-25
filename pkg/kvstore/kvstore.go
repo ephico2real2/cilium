@@ -45,6 +45,14 @@ const (
 	// synchronization from an external source has completed for a given prefix
 	SyncedPrefix = BaseKeyPrefix + "/synced"
 
+	// ZtunnelMembershipPrefix is the root of the short-leased ztunnel source
+	// membership records and of their writer locks.
+	ZtunnelMembershipPrefix = StatePrefix + "/ztunnel/membership/v1"
+
+	// LeaseTTLWriteHeadsPrefix holds the persistent heads that fence
+	// lock-protected short-lease writes.
+	LeaseTTLWriteHeadsPrefix = StatePrefix + "/lease-ttl-write-heads/v1"
+
 	// HeartbeatWriteInterval is the interval in which the heartbeat key at
 	// HeartbeatPath is updated
 	HeartbeatWriteInterval = time.Minute

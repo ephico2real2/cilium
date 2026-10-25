@@ -123,6 +123,16 @@ func (cl *clientImpl) commands() map[string]script.Cmd {
 	}
 }
 
+// StandaloneClient exposes a backend connection that its caller established
+// and owns, rather than the kvstore cell, as a Client. It is meant for a
+// subsystem that needs a dedicated connection with its own credentials while
+// the global kvstore stays disabled. A nil backend yields a disabled client.
+// Optional backend capabilities such as LeaseTTLWriterFor are reported for the
+// actual backend only.
+func StandaloneClient(backend BackendOperations) Client {
+	return &clientImpl{enabled: backend != nil, BackendOperations: backend}
+}
+
 // NewClient returns a new kvstore client based on the configuration
 func NewClient(ctx context.Context, logger *slog.Logger, selectedBackend string, opts map[string]string, options ExtraOptions) (BackendOperations, chan error) {
 	// Channel used to report immediate errors, module.newClient will
