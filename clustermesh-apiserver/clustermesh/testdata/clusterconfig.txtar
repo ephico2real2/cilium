@@ -30,6 +30,8 @@ kvstore/list -o json cilium/cluster-config config.actual
   "id": 3,
   "capabilities": {
     "syncedCanaries": true,
+    "workloadIdentityV1": true,
+    "ztunnelMembershipV1": true,
     "maxConnectedClusters": 255,
     "serviceExportsEnabled": false,
     "endpointSlicesExportMode": "services-and-endpointslices"
