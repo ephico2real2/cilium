@@ -4,6 +4,7 @@
 package zds
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log/slog"
@@ -36,7 +37,8 @@ const (
 )
 
 type ztunnelConn struct {
-	conn *net.UnixConn
+	conn       *net.UnixConn
+	proxyEpoch []byte
 }
 
 func (zc *ztunnelConn) Close() error {
@@ -86,8 +88,17 @@ func (zc *ztunnelConn) sendMsg(req *pb.WorkloadRequest, ns *netns.NetNS) error {
 		return err
 	}
 
-	_, _, err = zc.conn.WriteMsgUnix(data, rights, nil)
-	return err
+	if len(data) > 1024 {
+		return fmt.Errorf("ZDS request exceeds native 1024-byte packet bound")
+	}
+	n, oob, err := zc.conn.WriteMsgUnix(data, rights, nil)
+	if err != nil {
+		return err
+	}
+	if n != len(data) || oob != len(rights) {
+		return fmt.Errorf("incomplete native ZDS packet write")
+	}
+	return nil
 }
 
 func (zc *ztunnelConn) sendAndWaitForAck(req *pb.WorkloadRequest, netnsPath string) error {
@@ -107,6 +118,28 @@ func (zc *ztunnelConn) sendAndWaitForAckWithTimeout(req *pb.WorkloadRequest, net
 			return fmt.Errorf("failed to open netns: %w", err)
 		}
 		defer ns.Close()
+	}
+
+	if add := req.GetAdd(); add != nil && add.Binding != nil {
+		if ns == nil {
+			return fmt.Errorf("bound ADD has no sandbox FD")
+		}
+		var st unix.Stat_t
+		if err := unix.Fstat(ns.FD(), &st); err != nil {
+			return err
+		}
+		if add.Binding.NetnsDev != uint64(st.Dev) || add.Binding.NetnsIno != st.Ino {
+			return fmt.Errorf("sandbox changed between capture and actual ADD FD")
+		}
+		if len(add.Binding.ProxyEpoch) == 0 {
+			add.Binding.ProxyEpoch = append([]byte(nil), zc.proxyEpoch...)
+		}
+		if err := validateBinding(add.Binding); err != nil {
+			return err
+		}
+		if !bytes.Equal(add.Binding.ProxyEpoch, zc.proxyEpoch) {
+			return fmt.Errorf("ADD belongs to an earlier proxy execution; explicit recovery required")
+		}
 	}
 
 	if err := zc.sendMsg(req, ns); err != nil {
@@ -188,6 +221,7 @@ type Server struct {
 	endpointCache                map[uint16]*endpoint.Endpoint
 	endpointCacheMutex           lock.Mutex
 	strictDeletedEndpointCleanup bool
+	drainBindings                map[endpointIncarnation]*pb.WorkloadBinding
 	endpointOperationGate        chan struct{}
 
 	updates               chan zdsUpdate // updates to send to ztunnel
@@ -333,6 +367,11 @@ func (s *Server) handleConn(ctx context.Context, zc *ztunnelConn) error {
 	defer s.metrics.ConnectionActive.Dec()
 
 	s.logger.Info("new ztunnel connection")
+	if s.strictDeletedEndpointCleanup {
+		if err := requireRootProxyPeer(zc); err != nil {
+			return err
+		}
+	}
 
 	if err := zc.conn.SetReadDeadline(time.Now().Add(defaultZDSAckTimeout)); err != nil {
 		return fmt.Errorf("setting ZDS hello deadline: %w", err)
@@ -344,8 +383,17 @@ func (s *Server) handleConn(ctx context.Context, zc *ztunnelConn) error {
 	if err := zc.conn.SetReadDeadline(time.Time{}); err != nil {
 		return err
 	}
-	if hello.GetVersion() != pb.Version_V1 {
+	if hello.GetVersion() != pb.Version_V1 && hello.GetVersion() != pb.Version_V2_DRAIN {
 		return fmt.Errorf("unsupported ztunnel ZDS version: %s", hello.GetVersion())
+	}
+	if s.strictDeletedEndpointCleanup && hello.GetVersion() != pb.Version_V2_DRAIN {
+		return fmt.Errorf("strict capture requires typed drain protocol")
+	}
+	if hello.GetVersion() == pb.Version_V2_DRAIN {
+		if len(hello.ProxyEpoch) != 32 {
+			return fmt.Errorf("invalid proxy execution epoch")
+		}
+		zc.proxyEpoch = append([]byte(nil), hello.ProxyEpoch...)
 	}
 	s.logger.Info("received hello from ztunnel", logfields.Version, hello.GetVersion())
 
@@ -402,7 +450,12 @@ func (s *Server) processUpdate(ctx context.Context, zc *ztunnelConn, update zdsU
 		zc.Close()
 		close(closed)
 	})
-	err := zc.sendAndWaitForAck(update.request, update.netnsPath)
+	var err error
+	if drain := update.request.GetDrain(); drain != nil {
+		err = zc.sendDrain(drain)
+	} else {
+		err = zc.sendAndWaitForAck(update.request, update.netnsPath)
+	}
 	// Stop (or join) cancellation before publishing success: the caller
 	// normally cancels its context as soon as it receives the result.
 	if !stopClose() {
@@ -510,6 +563,13 @@ func (s *Server) EnrollEndpointForOwnerContext(ctx context.Context, owner, ep *e
 		acknowledged = freezeAcknowledgedEndpoint(ep, workload, netnsPath)
 	}
 
+	if s.strictDeletedEndpointCleanup {
+		workload.Binding, err = bindingForCapture(ctx, ep, ns)
+		if err != nil {
+			return err
+		}
+	}
+
 	req := &pb.WorkloadRequest{
 		Payload: &pb.WorkloadRequest_Add{
 			Add: workload,
@@ -523,6 +583,15 @@ func (s *Server) EnrollEndpointForOwnerContext(ctx context.Context, owner, ep *e
 		onAck: func() {
 			if s.strictDeletedEndpointCleanup {
 				s.commitStrictEnrollment(ctx, owner, acknowledged)
+				s.endpointCacheMutex.Lock()
+				if ctx.Err() == nil && owner.IsAlive() {
+					if s.drainBindings == nil {
+						s.drainBindings = make(map[endpointIncarnation]*pb.WorkloadBinding)
+					}
+					key, _ := incarnation(acknowledged)
+					s.drainBindings[key] = proto.Clone(workload.Binding).(*pb.WorkloadBinding)
+				}
+				s.endpointCacheMutex.Unlock()
 				return
 			}
 			s.endpointCacheMutex.Lock()
@@ -711,6 +780,19 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 				logfields.Error, err,
 			)
 			return err
+		}
+
+		if s.strictDeletedEndpointCleanup {
+			s.endpointCacheMutex.Lock()
+			key, _ := incarnation(ep)
+			binding := s.drainBindings[key]
+			if binding != nil {
+				workload.Binding = proto.Clone(binding).(*pb.WorkloadBinding)
+			}
+			s.endpointCacheMutex.Unlock()
+			if workload.Binding == nil {
+				return fmt.Errorf("restored Required intent has no original live proxy ADD binding; explicit recovery required")
+			}
 		}
 
 		req := &pb.WorkloadRequest{

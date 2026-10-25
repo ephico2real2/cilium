@@ -4,12 +4,14 @@
 package zds
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
 	"github.com/cilium/hive/hivetest"
 	goiptables "github.com/coreos/go-iptables/iptables"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/cilium/cilium/api/v1/models"
@@ -24,6 +26,7 @@ import (
 	testpolicy "github.com/cilium/cilium/pkg/testutils/policy"
 	"github.com/cilium/cilium/pkg/time"
 	inpodiptables "github.com/cilium/cilium/pkg/ztunnel/iptables"
+	"github.com/cilium/cilium/pkg/ztunnel/membership"
 	"github.com/cilium/cilium/pkg/ztunnel/pb"
 )
 
@@ -79,6 +82,7 @@ func receiveCleanupUpdate(t *testing.T, s *Server) zdsUpdate {
 func exchangeCleanupUpdate(t *testing.T, s *Server, update zdsUpdate, reply []byte) (*pb.WorkloadRequest, error) {
 	t.Helper()
 	connection, peer := zdsSocketPair(t)
+	connection.proxyEpoch = bytes.Repeat([]byte{3}, 32)
 	require.NoError(t, peer.SetDeadline(time.Now().Add(time.Second)))
 	done := make(chan error, 1)
 	go func() { done <- s.processUpdate(context.Background(), connection, update) }()
@@ -317,7 +321,7 @@ func TestPrivilegedStrictDeletedCleanupRetainsCaptureAndFreshSandboxRecovers(t *
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	result := make(chan error, 1)
-	go func() { result <- s.EnrollEndpointContext(ctx, old) }()
+	go func() { result <- s.EnrollEndpointContext(strictCaptureTestContext(t, ctx, old), old) }()
 	add := receiveCleanupUpdate(t, s)
 	request, err := exchangeCleanupUpdate(t, s, add, []byte{0x0a, 0x00})
 	require.NoError(t, err)
@@ -335,7 +339,7 @@ func TestPrivilegedStrictDeletedCleanupRetainsCaptureAndFreshSandboxRecovers(t *
 	// Runtime retries the same Pod using a distinct sandbox path and ID.
 	fresh, cleanupFresh := createTestEndpoint(t, old.K8sUID, 32)
 	defer cleanupFresh()
-	go func() { result <- s.EnrollEndpointContext(ctx, fresh) }()
+	go func() { result <- s.EnrollEndpointContext(strictCaptureTestContext(t, ctx, fresh), fresh) }()
 	add = receiveCleanupUpdate(t, s)
 	request, err = exchangeCleanupUpdate(t, s, add, []byte{0x0a, 0x00})
 	require.NoError(t, err)
@@ -358,6 +362,16 @@ func TestPrivilegedStrictDeletedNetnsCannotBlockHealthySnapshotAndQueuedDEL(t *t
 	old, cleanupOld := createTestEndpoint(t, "snapshot-retired", 41)
 	healthy, cleanupHealthy := createTestEndpoint(t, "snapshot-healthy", 42)
 	defer cleanupHealthy()
+	healthyCtx := strictCaptureTestContext(t, t.Context(), healthy)
+	healthyNS, err := netns.OpenPinned(healthy.GetContainerNetnsPath())
+	require.NoError(t, err)
+	healthyBinding, err := bindingForCapture(healthyCtx, healthy, healthyNS)
+	require.NoError(t, err)
+	healthyNS.Close()
+	healthyBinding.ProxyEpoch = bytes.Repeat([]byte{3}, 32)
+	healthyKey, err := incarnation(healthy)
+	require.NoError(t, err)
+	s.drainBindings = map[endpointIncarnation]*pb.WorkloadBinding{healthyKey: healthyBinding}
 	s.SeedInitialSnapshot(old, healthy)
 	managed := deletedManagedEndpoint(t, old.GetID16(), old.K8sUID, old.GetContainerNetnsPath())
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -372,11 +386,14 @@ func TestPrivilegedStrictDeletedNetnsCannotBlockHealthySnapshotAndQueuedDEL(t *t
 	cleanupOld() // The old pinned netns is now really gone.
 	peer := dialZDSAckPeer(t, address)
 	require.NoError(t, peer.conn.SetDeadline(time.Now().Add(3*time.Second)))
-	sendHello(t, peer.conn)
+	helloBytes, err := proto.Marshal(&pb.ZdsHello{Version: pb.Version_V2_DRAIN, ProxyEpoch: bytes.Repeat([]byte{3}, 32)})
+	require.NoError(t, err)
+	_, err = peer.conn.Write(helloBytes)
+	require.NoError(t, err)
 	request := &pb.WorkloadRequest{}
 	require.NoError(t, peer.readMsg(request))
 	require.Equal(t, healthy.K8sUID, request.GetAdd().Uid, "healthy ADD must progress despite absent retired namespace")
-	_, err := peer.conn.Write([]byte{0x0a, 0x00})
+	_, err = peer.conn.Write([]byte{0x0a, 0x00})
 	require.NoError(t, err)
 	request = &pb.WorkloadRequest{}
 	require.NoError(t, peer.readMsg(request))
@@ -401,7 +418,7 @@ func TestPrivilegedStrictDeletedCleanupWaitsForNewACKAndSkipsOldDEL(t *testing.T
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	enrolled := make(chan error, 1)
-	go func() { enrolled <- s.EnrollEndpointContext(ctx, fresh) }()
+	go func() { enrolled <- s.EnrollEndpointContext(strictCaptureTestContext(t, ctx, fresh), fresh) }()
 	add := receiveCleanupUpdate(t, s) // New ADD holds the producer semaphore.
 	require.NotNil(t, add.request.GetAdd())
 	deleted := make(chan error, 1)
@@ -462,7 +479,9 @@ func TestPrivilegedStrictOwnedADDCannotReinsertDeletedOwnerWhileCleanupWaits(t *
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	enrolled := make(chan error, 1)
-	go func() { enrolled <- s.EnrollEndpointForOwnerContext(ctx, owner, view) }()
+	go func() {
+		enrolled <- s.EnrollEndpointForOwnerContext(strictCaptureTestContext(t, ctx, view), owner, view)
+	}()
 	add := receiveCleanupUpdate(t, s) // Producer now holds the semaphore.
 	require.NotNil(t, add.request.GetAdd())
 	disconnectManagedOwner(t, owner)
@@ -572,7 +591,7 @@ func TestPrivilegedStrictLiveUnenrollmentRetainsCaptureAndCanRefreshEnrollment(t
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
 	result := make(chan error, 1)
-	go func() { result <- s.EnrollEndpointContext(ctx, ep) }()
+	go func() { result <- s.EnrollEndpointContext(strictCaptureTestContext(t, ctx, ep), ep) }()
 	add := receiveCleanupUpdate(t, s)
 	_, err := exchangeCleanupUpdate(t, s, add, []byte{0x0a, 0x00})
 	require.NoError(t, err)
@@ -586,10 +605,20 @@ func TestPrivilegedStrictLiveUnenrollmentRetainsCaptureAndCanRefreshEnrollment(t
 	require.Empty(t, s.updates)
 	// A true -> false -> true label sequence cannot leave a stale DEL queued
 	// behind the fresh ADD. Each refresh still requires a fresh explicit ACK.
-	go func() { result <- s.EnrollEndpointContext(ctx, ep) }()
+	go func() { result <- s.EnrollEndpointContext(strictCaptureTestContext(t, ctx, ep), ep) }()
 	add = receiveCleanupUpdate(t, s)
 	_, err = exchangeCleanupUpdate(t, s, add, []byte{0x0a, 0x00})
 	require.NoError(t, err)
 	require.NoError(t, <-result)
 	require.True(t, strictCapturePresent(t, ep.GetContainerNetnsPath()))
+}
+
+func strictCaptureTestContext(t *testing.T, ctx context.Context, ep *endpoint.Endpoint) context.Context {
+	t.Helper()
+	registry := membership.NewRegistry(1)
+	ref, err := registry.Require("namespace-uid", ep.K8sUID, ep.GetID16(), ep.GetContainerNetnsPath())
+	require.NoError(t, err)
+	generation, ok := registry.BeginZDS(ref)
+	require.True(t, ok)
+	return WithCaptureReference(ctx, ref, generation)
 }

@@ -367,7 +367,7 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 			K8sNamespace: namespace, K8sPodName: name}
 		view.SetContainerNetnsPath(path)
 		view.SetPod(pod.DeepCopy())
-		if err := g.enroll(ctx, ep, view); err != nil {
+		if err := g.enroll(zds.WithCaptureReference(ctx, ref, generation), ep, view); err != nil {
 			return fmt.Errorf("capture/proxy enrollment: %w", err)
 		}
 		if err := recheck(); err != nil {

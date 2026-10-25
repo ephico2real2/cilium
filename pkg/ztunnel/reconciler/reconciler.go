@@ -348,21 +348,43 @@ func (ops *EnrollmentReconciler) EndpointDeleted(ep *endpoint.Endpoint, _ endpoi
 		if ep.K8sUID == "" && ep.GetK8sNamespace() == "" && ep.GetK8sPodName() == "" {
 			return
 		}
-		if ref, state, ok := ops.membership.CurrentForPodUID(ep.GetK8sPodUID()); ok && state.EndpointID == ep.GetID16() {
-			if _, began := ops.membership.BeginDrain(ref); began {
-				ops.publishRevokedMembership(ep, ref)
-			}
-		}
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := ops.endpointDeletionCleaner.CleanupDeletedEndpointContext(ctx, ep); err != nil {
-			ops.logger.Error("Strict deleted endpoint proxy cleanup incomplete",
+		ref, state, ok := ops.membership.CurrentForPodUID(ep.GetK8sPodUID())
+		if !ok || state.EndpointID != ep.GetID16() || state.NetnsPath != ep.GetContainerNetnsPath() {
+			// Retire stale replay intent without granting membership retirement.
+			// A generic cleanup ACK is never a native drain receipt.
+			if err := ops.endpointDeletionCleaner.CleanupDeletedEndpointContext(ctx, ep); err != nil {
+				ops.logger.Error("Unbound endpoint cleanup incomplete; membership retained", logfields.Error, err)
+			}
+			return
+		}
+		generation, began := ops.membership.BeginDrain(ref)
+		if !began {
+			return
+		}
+		ops.publishRevokedMembership(ep, ref)
+		cleaner, ok := ops.endpointDeletionCleaner.(zds.EndpointDrainCleaner)
+		if !ok {
+			ops.logger.Error("Native typed drain cleaner unavailable; membership retained", logfields.EndpointID, ep.GetID16())
+			// Compatibility cleanup may retire replay intent, but never state.
+			if err := ops.endpointDeletionCleaner.CleanupDeletedEndpointContext(ctx, ep); err != nil {
+				ops.logger.Error("Compatibility cleanup incomplete; membership retained", logfields.Error, err)
+			}
+			return
+		}
+		receipt, err := cleaner.DrainDeletedEndpointContext(ctx, ep, ref, generation)
+		if err == nil {
+			err = receipt.Retire(ops.membership, ref, generation)
+		}
+		if err != nil {
+			ops.logger.Error("Native workload retirement incomplete; capture retained",
 				logfields.EndpointID, ep.GetID16(),
-				logfields.K8sUID, ep.K8sUID,
-				logfields.K8sNamespace, ep.GetK8sNamespace(),
 				logfields.Error, err,
 			)
 		}
+
 		return
 	}
 	epNamespace := ep.GetK8sNamespace()
