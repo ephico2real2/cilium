@@ -258,6 +258,64 @@ func TestADSReconnectFencesOldACKsAndRequiresFreshResources(t *testing.T) {
 	}
 }
 
+// The current ztunnel stream belongs to the registry; a State records only the
+// stream its Address evidence came from. A workload admitted while a stream is
+// open (a new Pod, or an endpoint re-admitted after an agent restart) publishes
+// on that stream like one admitted before it, and no stream other than the
+// current one can publish or acknowledge anything.
+func TestMembershipAdmittedAfterADSStreamBeganPublishesOnThatStream(t *testing.T) {
+	registry := NewRegistry(17)
+	if registry.ADSGeneration() != 0 {
+		t.Fatal("a registry without a stream reported one")
+	}
+	early := requireMembership(t, registry, "ns-uid", "pod-early", 41, "/var/run/netns/pod-41")
+	establishCaptureAndZDS(t, registry, early)
+	generation := registry.BeginADSGeneration()
+	if registry.ADSGeneration() != generation {
+		t.Fatal("registry does not report the stream it began")
+	}
+
+	late := requireMembership(t, registry, "ns-uid", "pod-late", 42, "/var/run/netns/pod-42")
+	if state, _ := registry.Get(late); state.ADSGeneration != 0 || state.AddressVersion != 0 || state.AddressAcked {
+		t.Fatalf("a new incarnation has no Address evidence on any stream: %+v", state)
+	}
+	if _, ok := registry.PublishAddress(late, generation); ok {
+		t.Fatal("address published before capture and ZDS were acknowledged")
+	}
+	establishCaptureAndZDS(t, registry, late)
+	for _, ref := range []Reference{early, late} {
+		version, ok := registry.PublishAddress(ref, generation)
+		if !ok || !registry.AcknowledgeAddress(ref, generation, version) {
+			t.Fatalf("%s could not publish and acknowledge its Address on the open stream", ref.Key.PodUID)
+		}
+		if state, _ := registry.Get(ref); state.ADSGeneration != generation || !state.AddressAcked {
+			t.Fatalf("Address evidence must name the stream it was published on: %+v", state)
+		}
+	}
+
+	lateState, _ := registry.Get(late)
+	next := registry.BeginADSGeneration()
+	if registry.AcknowledgeAddress(late, generation, lateState.AddressVersion) {
+		t.Fatal("old stream ACK advanced membership after reconnect")
+	}
+	if _, ok := registry.PublishAddress(late, generation); ok {
+		t.Fatal("a replaced stream published an Address")
+	}
+	if state, _ := registry.Get(late); state.ADSGeneration != 0 || state.AddressVersion != 0 || state.AddressAcked {
+		t.Fatalf("reconnect must drop Address evidence and its stream: %+v", state)
+	}
+	version, ok := registry.PublishAddress(late, next)
+	if !ok || !registry.AcknowledgeAddress(late, next, version) {
+		t.Fatal("the new stream could not publish the Address again")
+	}
+
+	// A renewed capture drops the evidence and the stream it came from together.
+	establishCaptureAndZDS(t, registry, late)
+	if state, _ := registry.Get(late); state.ADSGeneration != 0 || state.AddressVersion != 0 {
+		t.Fatalf("a new ZDS generation must drop Address evidence and its stream: %+v", state)
+	}
+}
+
 func TestEndpointReplacementAndDrainFenceOldIncarnation(t *testing.T) {
 	registry := NewRegistry(17)
 	oldRef := requireMembership(t, registry, "ns-uid", "pod-uid", 42, "/var/run/netns/pod-42")

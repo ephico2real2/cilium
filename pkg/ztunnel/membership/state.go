@@ -53,6 +53,10 @@ type State struct {
 	ZDSGeneration uint64
 	ZDSAcked      bool
 
+	// ADSGeneration is the ztunnel stream on which AddressVersion was
+	// published, and 0 while this incarnation has no Address evidence. The
+	// current stream belongs to the Registry alone: copying it into every
+	// State let an incarnation created after a stream began miss that stream.
 	ADSGeneration  uint64
 	AddressVersion uint64
 	AddressAcked   bool
@@ -142,7 +146,7 @@ type Registry struct {
 	nextPublicationRevision uint64
 	publicationPoisoned     bool
 	nextZDSGeneration       uint64
-	nextADSGeneration       uint64
+	adsGeneration           uint64 // current ztunnel stream; 0 before the first
 	nextDrainGeneration     uint64
 	nextVersion             uint64
 
@@ -210,15 +214,7 @@ func (r *Registry) BeginZDS(ref Reference) (uint64, bool) {
 	state.ZDSGeneration = r.nextZDSGeneration
 	state.ZDSAcked = false
 	state.Captured = false
-	state.AddressVersion = 0
-	state.AddressAcked = false
-	state.PolicyVersion = 0
-	state.PolicyAddressVersion = 0
-	state.PolicyAcked = false
-	state.PolicyRevision = ""
-	state.PolicyBoundToWorkload = false
-	state.PolicyRequiresAuthenticatedPeer = false
-	state.PolicyDenyByDefault = false
+	clearADSEvidence(&state)
 	r.storeStateLocked(ref, state)
 	return state.ZDSGeneration, true
 }
@@ -250,15 +246,7 @@ func (r *Registry) InvalidateCapture(ref Reference) bool {
 	state.Captured = false
 	state.ZDSGeneration = 0
 	state.ZDSAcked = false
-	state.AddressVersion = 0
-	state.AddressAcked = false
-	state.PolicyVersion = 0
-	state.PolicyAddressVersion = 0
-	state.PolicyAcked = false
-	state.PolicyRevision = ""
-	state.PolicyBoundToWorkload = false
-	state.PolicyRequiresAuthenticatedPeer = false
-	state.PolicyDenyByDefault = false
+	clearADSEvidence(&state)
 	r.storeStateLocked(ref, state)
 	return true
 }
@@ -275,26 +263,33 @@ func (r *Registry) AcknowledgeZDS(ref Reference, generation uint64) bool {
 	return true
 }
 
-// BeginADSGeneration invalidates Address and policy acknowledgments from any
-// previous ztunnel stream. The returned generation identifies the new stream.
+// BeginADSGeneration starts a new ztunnel stream and drops the Address and
+// policy evidence of every earlier one. The returned generation identifies the
+// new stream; each workload publishes its Address on it again, including one
+// admitted after the stream began.
 func (r *Registry) BeginADSGeneration() uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.nextADSGeneration++
+	r.adsGeneration++
 	for ref, state := range r.states {
-		state.ADSGeneration = r.nextADSGeneration
-		state.AddressVersion = 0
-		state.AddressAcked = false
-		state.PolicyVersion = 0
-		state.PolicyAddressVersion = 0
-		state.PolicyAcked = false
-		state.PolicyRevision = ""
-		state.PolicyBoundToWorkload = false
-		state.PolicyRequiresAuthenticatedPeer = false
-		state.PolicyDenyByDefault = false
+		clearADSEvidence(&state)
 		r.storeEvidenceLocked(ref, state)
 	}
-	return r.nextADSGeneration
+	return r.adsGeneration
+}
+
+// ADSGeneration returns the current ztunnel stream generation, 0 before the
+// first stream.
+func (r *Registry) ADSGeneration() uint64 {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.adsGeneration
+}
+
+// onCurrentStreamLocked reports whether generation is the current stream and
+// state's Address evidence was published on it.
+func (r *Registry) onCurrentStreamLocked(state State, generation uint64) bool {
+	return generation != 0 && generation == r.adsGeneration && state.ADSGeneration == generation
 }
 
 // PublishAddress records the exact workload resource version sent on the
@@ -303,19 +298,14 @@ func (r *Registry) PublishAddress(ref Reference, generation uint64) (uint64, boo
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state, ok := r.currentLocked(ref)
-	if !ok || !state.ReadyForAddress() || generation == 0 || state.ADSGeneration != generation {
+	if !ok || !state.ReadyForAddress() || generation == 0 || generation != r.adsGeneration {
 		return 0, false
 	}
 	r.nextVersion++
+	state.ADSGeneration = generation
 	state.AddressVersion = r.nextVersion
 	state.AddressAcked = false
-	state.PolicyVersion = 0
-	state.PolicyAddressVersion = 0
-	state.PolicyAcked = false
-	state.PolicyRevision = ""
-	state.PolicyBoundToWorkload = false
-	state.PolicyRequiresAuthenticatedPeer = false
-	state.PolicyDenyByDefault = false
+	clearPolicyEvidence(&state)
 	r.storeEvidenceLocked(ref, state)
 	return state.AddressVersion, true
 }
@@ -324,8 +314,8 @@ func (r *Registry) AcknowledgeAddress(ref Reference, generation, version uint64)
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state, ok := r.currentLocked(ref)
-	if !ok || !state.ReadyForAddress() || generation == 0 || version == 0 ||
-		state.ADSGeneration != generation || state.AddressVersion != version {
+	if !ok || !state.ReadyForAddress() || version == 0 ||
+		!r.onCurrentStreamLocked(state, generation) || state.AddressVersion != version {
 		return false
 	}
 	state.AddressAcked = true
@@ -353,7 +343,7 @@ func (r *Registry) PublishPolicy(ref Reference, generation uint64, evidence Poli
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state, ok := r.currentLocked(ref)
-	if !ok || !state.ReadyForAddress() || !state.AddressAcked || generation == 0 || state.ADSGeneration != generation ||
+	if !ok || !state.ReadyForAddress() || !state.AddressAcked || !r.onCurrentStreamLocked(state, generation) ||
 		evidence.WorkloadUID == "" || evidence.WorkloadUID != ref.Key.PodUID || evidence.AddressVersion == 0 ||
 		evidence.AddressVersion != state.AddressVersion || evidence.Revision == "" || !evidence.BoundToWorkload ||
 		!evidence.RequiresAuthenticatedPeer || !evidence.DenyByDefault {
@@ -375,8 +365,8 @@ func (r *Registry) AcknowledgePolicy(ref Reference, generation, version uint64) 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	state, ok := r.currentLocked(ref)
-	if !ok || !state.ReadyForAddress() || !state.AddressAcked || generation == 0 || version == 0 ||
-		state.ADSGeneration != generation || state.PolicyVersion != version ||
+	if !ok || !state.ReadyForAddress() || !state.AddressAcked || version == 0 ||
+		!r.onCurrentStreamLocked(state, generation) || state.PolicyVersion != version ||
 		state.PolicyAddressVersion != state.AddressVersion || state.PolicyRevision == "" ||
 		!state.PolicyBoundToWorkload || !state.PolicyRequiresAuthenticatedPeer || !state.PolicyDenyByDefault {
 		return false
@@ -543,15 +533,7 @@ func (r *Registry) InvalidateCaptureGeneration(ref Reference, generation uint64)
 	state.Captured = false
 	state.ZDSGeneration = 0
 	state.ZDSAcked = false
-	state.AddressVersion = 0
-	state.AddressAcked = false
-	state.PolicyVersion = 0
-	state.PolicyAddressVersion = 0
-	state.PolicyAcked = false
-	state.PolicyRevision = ""
-	state.PolicyBoundToWorkload = false
-	state.PolicyRequiresAuthenticatedPeer = false
-	state.PolicyDenyByDefault = false
+	clearADSEvidence(&state)
 	r.storeStateLocked(ref, state)
 	return true
 }
@@ -560,8 +542,21 @@ func closedPublicationState(state State) State {
 	state.Captured = false
 	state.ZDSGeneration = 0
 	state.ZDSAcked = false
+	clearADSEvidence(&state)
+	return state
+}
+
+// clearADSEvidence drops an incarnation's Address and effective-policy
+// evidence together with the stream it was obtained on.
+func clearADSEvidence(state *State) {
+	state.ADSGeneration = 0
 	state.AddressVersion = 0
 	state.AddressAcked = false
+	clearPolicyEvidence(state)
+}
+
+// clearPolicyEvidence drops the effective-policy evidence bound to an Address.
+func clearPolicyEvidence(state *State) {
 	state.PolicyVersion = 0
 	state.PolicyAddressVersion = 0
 	state.PolicyAcked = false
@@ -569,7 +564,6 @@ func closedPublicationState(state State) State {
 	state.PolicyBoundToWorkload = false
 	state.PolicyRequiresAuthenticatedPeer = false
 	state.PolicyDenyByDefault = false
-	return state
 }
 
 // SourceEntry binds a publication to its exact process-local CNI incarnation.

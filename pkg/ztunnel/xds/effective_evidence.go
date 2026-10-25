@@ -58,17 +58,19 @@ func (sp *StreamProcessor) acknowledgeAddressEvidence(nonce string) {
 	sp.policyOwner.kick()
 }
 
-// refreshAddressEvidence re-sends, unchanged, every local workload whose
-// capture generation was renewed after its Address was acknowledged on this
-// stream, so the new generation is bound to an acknowledged Address too.
+// refreshAddressEvidence re-sends, unchanged, every ready local workload that
+// has no Address evidence on this stream: one whose capture generation was
+// renewed after its Address was acknowledged, and one that became ready only
+// after its Address was sent (a new Pod, or an endpoint re-admitted after an
+// agent restart). A stream that a newer one replaced sends nothing.
 func (sp *StreamProcessor) refreshAddressEvidence() error {
-	if sp.policyOwner == nil || sp.adsGeneration == 0 {
+	if sp.policyOwner == nil || sp.adsGeneration == 0 || sp.adsGeneration != sp.policyOwner.registry.ADSGeneration() {
 		return nil
 	}
 	var names []string
 	for name := range sp.localResources {
 		_, state, ok := sp.policyOwner.registry.CurrentForPodUID(name)
-		if ok && state.ReadyForAddress() && state.ADSGeneration == sp.adsGeneration && state.AddressVersion == 0 {
+		if ok && state.ReadyForAddress() && state.AddressVersion == 0 {
 			names = append(names, name)
 		}
 	}

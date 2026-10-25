@@ -420,6 +420,47 @@ func TestStreamEvidenceHooksAttributeAcknowledgments(t *testing.T) {
 	require.Equal(t, uint64(7), f.owner.acked)
 }
 
+// The order seen after an agent restart: ztunnel subscribes to Address while
+// the restored workload is still quarantined and not yet required, and the
+// workload is re-admitted afterwards. The evidence tick publishes its Address
+// on the open stream, ztunnel's ACK of that response counts, and the workload
+// is released without a reconnect.
+func TestWorkloadAdmittedAfterStreamBeganIsPublishedAndReleased(t *testing.T) {
+	f := newOwnerFixture(t)
+	stream := &MockStream{}
+	var sent []*v3.DeltaDiscoveryResponse
+	stream.OnSendMsg = func(m any) error { sent = append(sent, m.(*v3.DeltaDiscoveryResponse)); return nil }
+	sp := &StreamProcessor{stream: stream, policyOwner: f.owner, metrics: NewMetrics(), expectedNonce: map[string]struct{}{},
+		log: slog.New(slog.DiscardHandler)}
+	sp.adsGeneration = f.owner.beginStream()
+	sp.recordAddressEvidence(&v3.DeltaDiscoveryResponse{TypeUrl: xdsTypeURLAddress, Nonce: "snapshot", Resources: []*v3.Resource{{Name: podD}}})
+	require.Empty(t, sp.addressEvidence, "a workload that is not yet required has no Address evidence")
+
+	d := f.capture("api", 10, podD, "10.0.0.20", 300, l4Snapshot(t, entries(allowAll(ingress), allowAll(egress))...))
+	deny, err := quarantineAuthorization("orders", remoteNamespaceUID, podD)
+	require.NoError(t, err)
+	require.NoError(t, f.policies.applyQuarantines(map[string]*security.Authorization{deny.Namespace + "/" + deny.Name: deny}, nil))
+
+	require.NoError(t, sp.refreshAddressEvidence())
+	require.Len(t, sent, 1)
+	require.Equal(t, []string{podD}, names(sent[0].Resources))
+	sp.acknowledgeAddressEvidence(sent[0].Nonce)
+	state, _ := f.registry.Get(f.refs[podD])
+	require.True(t, state.AddressAcked, "the ACK of the evidence response acknowledges the Address on the open stream")
+
+	f.owner.reconcile()
+	f.owner.observeAuthorizationAck(sp.adsGeneration, f.cacheVersion())
+	f.owner.reconcile()
+	require.Len(t, d.receipts, 1)
+	require.False(t, d.quarantined)
+	require.Equal(t, security.Action_ALLOW, f.effective(podD).Action)
+
+	// A newer stream drops the evidence; the replaced stream re-sends nothing.
+	f.owner.beginStream()
+	require.NoError(t, sp.refreshAddressEvidence())
+	require.Len(t, sent, 1, "a replaced stream sends no Address evidence")
+}
+
 // The endpoint fence quarantines a released workload whose enforced content
 // changed. The owner compiles the new content, publishes it, and releases the
 // same incarnation again once ztunnel acknowledges it.
