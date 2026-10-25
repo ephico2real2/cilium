@@ -67,6 +67,7 @@ type Server struct {
 	nodeNames                 nodeNameResolver
 	remotePeers               *remote.PeerSnapshotStore
 	remoteTrust               *remoteTrustAuthority
+	policyOwner               *effectivePolicyOwner
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -225,6 +226,7 @@ func (x *Server) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_D
 		NodeNames:                 x.nodeNames,
 		RemotePeers:               x.remotePeers,
 		RemoteTrust:               x.remoteTrust,
+		PolicyOwner:               x.policyOwner,
 	}
 
 	x.log.Debug("begin processing DeltaAggregatedResources stream")

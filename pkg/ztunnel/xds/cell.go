@@ -17,6 +17,7 @@ import (
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
+	"github.com/cilium/cilium/pkg/ztunnel/membership"
 	remote "github.com/cilium/cilium/pkg/ztunnel/remote_workload"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 )
@@ -61,6 +62,8 @@ type xdsServerParams struct {
 	Nodes statedb.Table[*node.Node]
 	// RemotePeers holds authenticated remote ClusterMesh workload snapshots.
 	RemotePeers *remote.PeerSnapshotStore `optional:"true"`
+	// Registry is the native capture/ZDS membership of local workloads.
+	Registry *membership.Registry `optional:"true"`
 }
 
 func NewServer(params xdsServerParams) *Server {
@@ -101,12 +104,22 @@ func NewServer(params xdsServerParams) *Server {
 		server.remoteTrust = newRemoteTrustAuthority(params.Logger, params.IssuerProfile, params.ClusterInfo.Name, params.Config.SpiffeTrustDomain)
 	}
 
+	// Effective policy publication and quarantine release need strict mTLS,
+	// the per-incarnation policy binding and the native membership registry.
+	if params.Config.RequireMTLS && params.Config.EffectivePolicyQuarantine && params.Registry != nil {
+		server.policyOwner = newEffectivePolicyOwner(params.Logger, params.Registry, managerLookup{manager: params.EPManager}, server.authorizations,
+			params.ClusterInfo, params.Config.SpiffeTrustDomain, params.Metrics)
+	}
+
 	params.Lifecycle.Append(cell.Hook{
 		OnStart: func(_ cell.HookContext) error {
+			var ctx context.Context
+			ctx, stopTrust = context.WithCancel(context.Background())
 			if server.remoteTrust != nil {
-				var ctx context.Context
-				ctx, stopTrust = context.WithCancel(context.Background())
 				go server.remoteTrust.run(ctx)
+			}
+			if server.policyOwner != nil {
+				go server.policyOwner.run(ctx)
 			}
 			return server.Serve()
 		},

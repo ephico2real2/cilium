@@ -30,6 +30,9 @@ type Metrics struct {
 	// RemoteWorkloads is the number of remote workloads last published by a
 	// stream, by peer cluster. Absent before the first projection.
 	RemoteWorkloads metric.Vec[metric.Gauge]
+	// EffectivePolicyEvents counts effective policy publication and
+	// quarantine release events by event.
+	EffectivePolicyEvents metric.Vec[metric.Counter]
 }
 
 // Enable enables XDS metrics for Prometheus scraping.
@@ -41,11 +44,17 @@ func (m *Metrics) Enable() {
 	m.AuthorizationEvents.SetEnabled(true)
 	m.RemoteProjectionEvents.SetEnabled(true)
 	m.RemoteWorkloads.SetEnabled(true)
+	m.EffectivePolicyEvents.SetEnabled(true)
 }
 
 // NewMetrics creates a new Metrics instance for XDS enrollment failures
 func NewMetrics() *Metrics {
 	return &Metrics{
+		EffectivePolicyEvents: metric.NewCounterVec(metric.CounterOpts{
+			Disabled: true, Namespace: metrics.Namespace, Subsystem: subsystem,
+			Name: "effective_policy_events_total",
+			Help: "Effective ztunnel policy events (published, acknowledged, compile_failed, released, release_refused); acknowledgments are ztunnel ACKs on the current stream, not traffic evidence",
+		}, []string{"event"}),
 		RemoteProjectionEvents: metric.NewCounterVec(metric.CounterOpts{
 			Disabled: true, Namespace: metrics.Namespace, Subsystem: subsystem,
 			Name: "remote_projection_events_total",

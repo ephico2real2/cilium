@@ -20,7 +20,11 @@ import (
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 )
 
-const effectiveQuarantinePrefix = "cilium_l4_quarantine_"
+// effectiveQuarantinePrefix names the per-incarnation effective inbound
+// policy of a workload. Its Address always references it. The content starts
+// as a wildcard DENY quarantine; only the effective policy owner replaces it
+// with the compiled ALLOW rules, and reverts it to DENY when compilation fails.
+const effectiveQuarantinePrefix = "cilium_l4_effective_"
 const logQuarantineNamespaceUID = "namespaceUID"
 
 // Namespace and Pod UIDs bind the resource to one incarnation. This resource
@@ -130,15 +134,47 @@ func (p *AuthorizationPolicies) applyQuarantines(upserts map[string]*security.Au
 	for _, key := range removals {
 		delete(names, key)
 	}
-	for key := range upserts {
+	// Bind DENY only to keys that have no content yet: a later Address
+	// republication must never overwrite a compiled effective policy.
+	fresh := make(map[string]*security.Authorization, len(upserts))
+	for key, policy := range upserts {
+		if !names[key] {
+			fresh[key] = policy
+		}
 		names[key] = true
 	}
 	if len(names) > maxZtunnelQuarantines {
 		return fmt.Errorf("shared quarantine cache is full; native resync required")
 	}
 	slices.Sort(removals)
-	if _, _, err := p.Apply(upserts, removals); err != nil {
+	if len(fresh) == 0 && len(removals) == 0 {
+		return nil
+	}
+	if _, _, err := p.Apply(fresh, removals); err != nil {
 		return fmt.Errorf("publish native quarantine policy: %w", err)
 	}
 	return nil
+}
+
+// setEffective replaces the content of a bound per-incarnation effective
+// policy. It refuses a key no stream has bound (or one already removed), so
+// a compiled ALLOW can never outlive its workload Address binding. It
+// returns the cache version that contains the content.
+func (p *AuthorizationPolicies) setEffective(key string, policy *security.Authorization) (uint64, error) {
+	p.quarantineMu.Lock()
+	defer p.quarantineMu.Unlock()
+	current := p.cache.GetResources(xdsTypeURLAuthorization, 0, []string{key})
+	bound := false
+	if current != nil {
+		for _, resource := range current.VersionedResources {
+			if resource.Name == key {
+				bound = true
+			}
+		}
+	}
+	if !bound {
+		return 0, fmt.Errorf("effective policy %q is not bound to a published workload", key)
+	}
+	version, _, err := p.Apply(map[string]*security.Authorization{key: policy}, nil)
+	return version, err
 }

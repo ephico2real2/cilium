@@ -23,9 +23,11 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	"github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
+	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/time"
+	"github.com/cilium/cilium/pkg/ztunnel/membership"
 	remote "github.com/cilium/cilium/pkg/ztunnel/remote_workload"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 )
@@ -64,6 +66,9 @@ type StreamProcessorParams struct {
 	// to its trust domain from the validated issuer profile.
 	RemotePeers *remote.PeerSnapshotStore
 	RemoteTrust *remoteTrustAuthority
+	// PolicyOwner publishes effective policy and releases quarantine from the
+	// Address and Authorization acknowledgments of this stream.
+	PolicyOwner *effectivePolicyOwner
 }
 
 // StreamProcessor implements the logic for handling xDS streams to zTunnel.
@@ -103,6 +108,21 @@ type StreamProcessor struct {
 	remoteInitial      *remoteDelta
 	remoteInitialTrust remoteTrustView
 	localAddresses     map[netip.Addr]string
+	// Effective policy evidence of this stream: its ADS generation, the
+	// Address versions awaiting ACK by nonce, the last sent local workload
+	// resources, and Authorization cache versions by nonce.
+	policyOwner     *effectivePolicyOwner
+	adsGeneration   uint64
+	addressEvidence map[string][]addressEvidence
+	localResources  map[string]*v3.Resource
+	authMu          lock.Mutex
+	authSent        map[string]uint64
+	authAcked       uint64
+}
+
+type addressEvidence struct {
+	ref     membership.Reference
+	version uint64
 }
 
 // CiliumEndpointsWatcher defines the interface for watching CiliumEndpoints and CiliumEndpointSlices.
@@ -171,6 +191,7 @@ func NewStreamProcessor(params *StreamProcessorParams) *StreamProcessor {
 		nodeNames:                 params.NodeNames,
 		remotePeers:               params.RemotePeers,
 		remoteTrust:               params.RemoteTrust,
+		policyOwner:               params.PolicyOwner,
 	}
 	sp.endpointSource = NewEndpointSource(params.K8sCiliumEndpointsWatcher, sp)
 	return sp
@@ -580,6 +601,10 @@ func (sp *StreamProcessor) handleAddressTypeURL(req *v3.DeltaDiscoveryRequest) e
 	}
 
 	ctx := sp.stream.Context()
+	if sp.policyOwner != nil && sp.adsGeneration == 0 {
+		sp.adsGeneration = sp.policyOwner.beginStream()
+		sp.reportAuthorizationAck()
+	}
 
 	// Subscribe to endpoint events. The subscription buffers all replayed
 	// events until the initial Sync, then sends the batch on syncCh.
@@ -631,6 +656,7 @@ func (sp *StreamProcessor) handleAddressTypeURL(req *v3.DeltaDiscoveryRequest) e
 	if err := sp.sendAddressResponse(resp, "xds-address-snapshot"); err != nil {
 		return err
 	}
+	sp.recordAddressEvidence(resp)
 	if sp.remoteEnabled() {
 		if err := sp.updateLocalAddresses(resp); err != nil {
 			return err
@@ -752,6 +778,9 @@ func (sp *StreamProcessor) handleDeltaDiscoveryReq(req *v3.DeltaDiscoveryRequest
 		// remove expected Nonce
 		delete(sp.expectedNonce, req.ResponseNonce)
 
+		if req.ErrorDetail == nil {
+			sp.acknowledgeAddressEvidence(req.ResponseNonce)
+		}
 		if req.ErrorDetail != nil {
 			sp.metrics.EnrollmentFailures.WithLabelValues("nack_received").Inc()
 			sp.log.Error("Nack received from ztunnel",
@@ -800,7 +829,11 @@ func (sp *StreamProcessor) handleEPEvent(epEvent *EndpointEvent) error {
 		return fmt.Errorf("failed to build workload Address event response: %w", err)
 	}
 	if !sp.remoteEnabled() || sp.remote == nil {
-		return sp.sendAddressResponse(resp, "xds-address-event")
+		if err := sp.sendAddressResponse(resp, "xds-address-event"); err != nil {
+			return err
+		}
+		sp.recordAddressEvidence(resp)
+		return nil
 	}
 	// A new local address owned by a published remote workload withdraws
 	// that peer in the same response.
@@ -810,6 +843,7 @@ func (sp *StreamProcessor) handleEPEvent(epEvent *EndpointEvent) error {
 	if err := sp.sendAddressResponse(resp, "xds-address-event"); err != nil {
 		return err
 	}
+	sp.recordAddressEvidence(resp)
 	if err := sp.updateLocalAddresses(resp); err != nil {
 		return err
 	}
@@ -896,6 +930,12 @@ func (sp *StreamProcessor) Start() error {
 		}
 	}()
 
+	var evidenceTick <-chan time.Time
+	if sp.policyOwner != nil {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		evidenceTick = ticker.C
+	}
 	var profileRequests chan *v3.DeltaDiscoveryRequest
 	var profileError chan error
 	var node *corev3.Node
@@ -955,10 +995,12 @@ func (sp *StreamProcessor) Start() error {
 					req = proto.Clone(req).(*v3.DeltaDiscoveryRequest)
 					req.Node = node
 				}
+				sp.observeAuthorizationRequest(req)
 				if authorizationRequests == nil {
 					authorizationRequests = make(chan *v3.DeltaDiscoveryRequest)
 					authorizationError = make(chan error, 1)
-					adapter := &authorizationDeltaStream{ctx: ctx, requests: authorizationRequests, stream: stream, metrics: sp.metrics}
+					adapter := &authorizationDeltaStream{ctx: ctx, requests: authorizationRequests, stream: stream, metrics: sp.metrics,
+						onSend: sp.recordAuthorizationSend}
 					go func() {
 						authorizationError <- sp.authorizations.server.HandleDeltaRequestStream(ctx, adapter, xdsTypeURLAuthorization, "")
 					}()
@@ -993,6 +1035,10 @@ func (sp *StreamProcessor) Start() error {
 			}
 		case <-sp.remoteTimer():
 			if err := sp.syncRemote(time.Now()); err != nil {
+				return err
+			}
+		case <-evidenceTick:
+			if err := sp.refreshAddressEvidence(); err != nil {
 				return err
 			}
 		case ep, ok := <-sp.endpointRecv:

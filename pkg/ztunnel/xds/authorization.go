@@ -104,6 +104,8 @@ type authorizationDeltaStream struct {
 	requests <-chan *v3.DeltaDiscoveryRequest
 	stream   *serializedDeltaStream
 	metrics  *Metrics
+	// onSend observes each sent response before it can be acknowledged.
+	onSend func(*v3.DeltaDiscoveryResponse)
 }
 
 func (s *authorizationDeltaStream) Recv() (*v3.DeltaDiscoveryRequest, error) {
@@ -117,6 +119,9 @@ func (s *authorizationDeltaStream) Recv() (*v3.DeltaDiscoveryRequest, error) {
 }
 
 func (s *authorizationDeltaStream) Send(resp *v3.DeltaDiscoveryResponse) error {
+	if s.onSend != nil {
+		s.onSend(resp)
+	}
 	err := s.stream.SendMsg(resp)
 	if err != nil {
 		s.metrics.AuthorizationEvents.WithLabelValues("send_failed").Inc()

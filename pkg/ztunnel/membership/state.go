@@ -463,6 +463,20 @@ func (r *Registry) Get(ref Reference) (State, bool) {
 	return state, ok
 }
 
+// Snapshot returns a copy of every state that is current for this registry
+// execution, keyed by its exact reference.
+func (r *Registry) Snapshot() map[Reference]State {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make(map[Reference]State, len(r.states))
+	for ref := range r.states {
+		if state, ok := r.currentLocked(ref); ok {
+			out[ref] = state
+		}
+	}
+	return out
+}
+
 func (r *Registry) CurrentForPodUID(podUID string) (Reference, State, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

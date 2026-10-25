@@ -18,6 +18,39 @@ func (e *Endpoint) SnapshotZtunnelPolicy() (policy.ZtunnelPolicySubject, error) 
 		return policy.ZtunnelPolicySubject{}, err
 	}
 	defer e.runlock()
+	return e.snapshotZtunnelPolicyRLocked()
+}
+
+// ZtunnelReleaseCandidate is everything a release owner binds to one
+// workload incarnation, read under one endpoint lock: the exact incarnation,
+// its published membership, and its realized native policy.
+type ZtunnelReleaseCandidate struct {
+	Binding        ZtunnelPolicyBinding
+	Membership     ZtunnelMembership
+	HasMembership  bool
+	Subject        policy.ZtunnelPolicySubject
+	PolicyRevision uint64
+	PolicyDigest   string
+}
+
+// SnapshotZtunnelReleaseCandidate returns the native evidence for a release
+// receipt. It is evidence, not a release: ReleaseZtunnelQuarantine verifies it
+// again against the endpoint's state at release time.
+func (e *Endpoint) SnapshotZtunnelReleaseCandidate() (ZtunnelReleaseCandidate, error) {
+	if err := e.rlockAlive(); err != nil {
+		return ZtunnelReleaseCandidate{}, err
+	}
+	defer e.runlock()
+	subject, err := e.snapshotZtunnelPolicyRLocked()
+	if err != nil {
+		return ZtunnelReleaseCandidate{}, err
+	}
+	membership, ok := e.GetZtunnelMembership()
+	return ZtunnelReleaseCandidate{Binding: e.ztunnelPolicyBindingLocked(), Membership: membership, HasMembership: ok,
+		Subject: subject, PolicyRevision: e.policyRevision, PolicyDigest: subject.Policy.Digest()}, nil
+}
+
+func (e *Endpoint) snapshotZtunnelPolicyRLocked() (policy.ZtunnelPolicySubject, error) {
 	if e.state != StateReady || e.realizedPolicy == nil || e.realizedPolicy != e.desiredPolicy ||
 		e.policyRevision == 0 || e.desiredPolicyRevision != e.policyRevision || e.SecurityIdentity == nil {
 		return policy.ZtunnelPolicySubject{}, fmt.Errorf("endpoint native policy is not current and realized")
