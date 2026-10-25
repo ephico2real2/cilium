@@ -149,10 +149,16 @@ func (e *Endpoint) prepareZtunnelPolicyChange(ctx context.Context, res *policyGe
 	return nil
 }
 
-// ObserveZtunnelRequired records restrictive process-local intent before strict
-// ADD work can start. It provides no capture/ACK/TLS evidence and is never cleared.
-// Atomic-only: safe for callers that already hold another subsystem's mutex.
-func (e *Endpoint) ObserveZtunnelRequired() { e.ztunnelSourceIPRequired.Store(true) }
+// ObserveZtunnelRequired records the sticky SourceIPVerification obligation and
+// independently closes the datapath quarantine. It provides no capture/ACK/TLS
+// evidence. Release requires ReleaseZtunnelQuarantine with a verified receipt;
+// every later observation (including a new membership generation) withdraws
+// it. Atomics plus one endpoint-map write: safe for callers that already hold
+// another subsystem's mutex.
+func (e *Endpoint) ObserveZtunnelRequired() {
+	e.ztunnelSourceIPRequired.Store(true)
+	e.WithdrawZtunnelAdmission("Required intent or a new membership generation observed")
+}
 
 // Restrictive intent may strengthen during a first ADD attempt; it is not part
 // of the immutable endpoint/sandbox identity. Weakening known intent is rejected.

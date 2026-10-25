@@ -143,6 +143,12 @@ local_delivery(struct __ctx_buff *ctx, __u32 seclabel, __u32 magic,
 {
 	bool use_redirect_peer;
 
+	/* Host, overlay and local endpoint routes may bypass cil_to_container.
+	 * Keep quarantined destinations blocked at the shared delivery boundary.
+	 */
+	if (ep->flags & ENDPOINT_F_ZTUNNEL_QUARANTINED)
+		return DROP_POLICY;
+
 #if defined(IS_BPF_LXC) || defined(IS_BPF_HOST)
 	/*
 	 * Special LXC case for updating egress forwarding metrics.

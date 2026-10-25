@@ -53,6 +53,9 @@ func Endpoint(ep endpoint.Config, lnc *Config) any {
 	cfg.AllowICMPFragNeeded = option.Config.AllowICMPFragNeeded
 	cfg.EnableICMPRule = option.Config.EnableICMPRules
 	cfg.EnableSIPVerification = ep.GetOptions().IsEnabled(option.SourceIPVerification)
+	if quarantine, ok := ep.(endpoint.ZtunnelQuarantineProvider); ok {
+		cfg.ZtunnelQuarantined = quarantine.IsZtunnelQuarantined()
+	}
 	cfg.EnableLRP = lnc.EnableLocalRedirectPolicy
 
 	cfg.EphemeralMin = lnc.EphemeralMin

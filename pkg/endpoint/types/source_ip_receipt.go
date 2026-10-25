@@ -59,3 +59,10 @@ type SourceIPDatapathVerifier interface {
 type SourceIPDatapathIdentityProvider interface {
 	SourceIPDatapathIdentity() SourceIPDatapathIdentity
 }
+
+// ZtunnelQuarantineProvider exposes the independent datapath hold state while
+// a cached endpoint is translated into BPF configuration. It must not be
+// derived from SourceIPDatapathIdentity.ZtunnelRequired.
+type ZtunnelQuarantineProvider interface {
+	IsZtunnelQuarantined() bool
+}

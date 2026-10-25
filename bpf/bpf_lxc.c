@@ -45,6 +45,7 @@
 #include "lib/srv6.h"
 #include "lib/encap.h"
 #include "lib/eps.h"
+#include "lib/ztunnel_admission.h"
 #include "lib/nat.h"
 #include "lib/fib.h"
 #include "lib/nodeport.h"
@@ -897,6 +898,20 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		 * within the cluster, it must match policy or be dropped. If it's
 		 * bound for the host/outside, perform the CIDR policy check.
 		 */
+		/* A released Required endpoint sends only TCP/15008 (HBONE
+		 * transport shape; ztunnel authenticates). Native policy still
+		 * applies to the outer flow and is not widened here.
+		 */
+		if (ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
+			verdict = ztunnel_hbone_egress_verdict(tuple->nexthdr, tuple->dport);
+			if (verdict != CTX_ACT_OK) {
+				send_policy_verdict_notify(ctx, *dst_sec_identity, tuple->dport,
+							   tuple->nexthdr, POLICY_EGRESS, 1,
+							   verdict, 0, POLICY_MATCH_NONE, 0, 0);
+				return verdict;
+			}
+		}
+
 		verdict = policy_can_egress6(ctx, tuple, l4_off, SECLABEL_IPV6,
 					     *dst_sec_identity, &policy_match_type, &audited,
 					     &proxy_port, &cookie);
@@ -927,6 +942,17 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 	case CT_RELATED:
 	case CT_REPLY:
 		/* Skip policy enforcement for return traffic. */
+
+		/* An HBONE-only endpoint's replies must belong to an HBONE
+		 * flow (or a local-host probe), whatever conntrack recorded.
+		 */
+		if (ct_status == CT_REPLY &&
+		    ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
+			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off,
+							      true, *dst_sec_identity);
+			if (verdict != CTX_ACT_OK)
+				return verdict;
+		}
 
 		/* Check if this is return traffic to an ingress proxy. */
 		if (ct_state->proxy_redirect) {
@@ -1433,6 +1459,20 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		 * within the cluster, it must match policy or be dropped. If it's
 		 * bound for the host/outside, perform the CIDR policy check.
 		 */
+		/* A released Required endpoint sends only TCP/15008 (HBONE
+		 * transport shape; ztunnel authenticates). Native policy still
+		 * applies to the outer flow and is not widened here.
+		 */
+		if (ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
+			verdict = ztunnel_hbone_egress_verdict(tuple->nexthdr, tuple->dport);
+			if (verdict != CTX_ACT_OK) {
+				send_policy_verdict_notify(ctx, *dst_sec_identity, tuple->dport,
+							   tuple->nexthdr, POLICY_EGRESS, 0,
+							   verdict, 0, POLICY_MATCH_NONE, 0, 0);
+				return verdict;
+			}
+		}
+
 		verdict = policy_can_egress4(ctx, tuple, l4_off, SECLABEL_IPV4,
 					     *dst_sec_identity, &policy_match_type, &audited,
 					     &proxy_port, &cookie);
@@ -1463,6 +1503,17 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 	case CT_RELATED:
 	case CT_REPLY:
 		/* Skip policy enforcement for return traffic. */
+
+		/* An HBONE-only endpoint's replies must belong to an HBONE
+		 * flow (or a local-host probe), whatever conntrack recorded.
+		 */
+		if (ct_status == CT_REPLY &&
+		    ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
+			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off,
+							      true, *dst_sec_identity);
+			if (verdict != CTX_ACT_OK)
+				return verdict;
+		}
 
 		/* Check if this is return traffic to an ingress proxy. */
 		if (ct_state->proxy_redirect) {
@@ -1699,6 +1750,9 @@ int cil_from_container(struct __ctx_buff *ctx)
 
 	bpf_clear_meta(ctx);
 	check_and_store_ip_trace_id(ctx);
+	if (ztunnel_own_mode() == ZTUNNEL_MODE_QUARANTINED)
+		return send_drop_notify(ctx, LXC_ID, UNKNOWN_ID, 0,
+					DROP_POLICY, METRIC_EGRESS);
 
 	/* Workaround for GH-18311 where veth driver might have recorded
 	 * veth's RX queue mapping instead of leaving it at 0. This can
@@ -1800,6 +1854,16 @@ ipv6_policy(struct __ctx_buff *ctx, struct ipv6hdr *ip6, __u32 src_label,
 	case CT_RELATED:
 		/* Skip policy enforcement for return traffic. */
 
+		/* Replies into an HBONE-only endpoint must come from an HBONE
+		 * listener; an older plaintext CT entry cannot carry data.
+		 */
+		if (ret == CT_REPLY && ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
+			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off,
+							      false, src_label);
+			if (verdict != CTX_ACT_OK)
+				return verdict;
+		}
+
 		/* Check it this is return traffic to an egress proxy.
 		 * Do not redirect again if the packet is coming from the egress proxy.
 		 * Always redirect connections that originated from L7 LB.
@@ -1847,6 +1911,20 @@ ipv6_policy(struct __ctx_buff *ctx, struct ipv6hdr *ip6, __u32 src_label,
 
 			if (unlikely(ct_state->loopback))
 				break;
+		}
+
+		/* A released Required endpoint accepts only TCP/15008 (HBONE
+		 * transport shape) and local-host probes on declared probe ports.
+		 */
+		if (ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
+			verdict = ztunnel_hbone_ingress_verdict(tuple->nexthdr, tuple->dport,
+								src_label);
+			if (verdict != CTX_ACT_OK) {
+				send_policy_verdict_notify(ctx, src_label, tuple->dport,
+							   tuple->nexthdr, POLICY_INGRESS, 1,
+							   verdict, 0, POLICY_MATCH_NONE, 0, 0);
+				return verdict;
+			}
 		}
 
 		verdict = policy_can_ingress6(ctx, tuple, l4_off,
@@ -2088,6 +2166,16 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 	case CT_RELATED:
 		/* Skip policy enforcement for return traffic. */
 
+		/* Replies into an HBONE-only endpoint must come from an HBONE
+		 * listener; an older plaintext CT entry cannot carry data.
+		 */
+		if (ret == CT_REPLY && ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
+			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off,
+							      false, src_label);
+			if (verdict != CTX_ACT_OK)
+				return verdict;
+		}
+
 		/* Check it this is return traffic to an egress proxy.
 		 * Do not redirect again if the packet is coming from the egress proxy.
 		 * Always redirect connections that originated from L7 LB.
@@ -2142,6 +2230,20 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 
 			if (unlikely(ct_state->loopback))
 				break;
+		}
+
+		/* A released Required endpoint accepts only TCP/15008 (HBONE
+		 * transport shape) and local-host probes on declared probe ports.
+		 */
+		if (ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
+			verdict = ztunnel_hbone_ingress_verdict(tuple->nexthdr, tuple->dport,
+								src_label);
+			if (verdict != CTX_ACT_OK) {
+				send_policy_verdict_notify(ctx, src_label, tuple->dport,
+							   tuple->nexthdr, POLICY_INGRESS, 0,
+							   verdict, 0, POLICY_MATCH_NONE, 0, 0);
+				return verdict;
+			}
 		}
 
 		verdict = policy_can_ingress4(ctx, tuple, l4_off,
@@ -2373,6 +2475,11 @@ int cil_lxc_policy(struct __ctx_buff *ctx)
 	__be16 proto;
 	int ret;
 
+	if (ztunnel_own_mode() == ZTUNNEL_MODE_QUARANTINED) {
+		ret = DROP_POLICY;
+		goto out;
+	}
+
 	if (!validate_ethertype(ctx, &proto)) {
 		ret = DROP_UNSUPPORTED_L2;
 		goto out;
@@ -2426,6 +2533,9 @@ out:
 __section_entry
 int cil_lxc_policy_egress(struct __ctx_buff *ctx __maybe_unused)
 {
+	if (ztunnel_own_mode() == ZTUNNEL_MODE_QUARANTINED)
+		return send_drop_notify(ctx, LXC_ID, UNKNOWN_ID, 0,
+					DROP_POLICY, METRIC_EGRESS);
 	if (!CONFIG(enable_l7_lb))
 		return CTX_ACT_OK;
 
@@ -2489,6 +2599,10 @@ int cil_to_container(struct __ctx_buff *ctx)
 	__s8 ext_err = 0;
 	__be16 proto;
 	int ret;
+
+	if (ztunnel_own_mode() == ZTUNNEL_MODE_QUARANTINED)
+		return send_drop_notify(ctx, UNKNOWN_ID, LXC_ID, LXC_ID,
+					DROP_POLICY, METRIC_INGRESS);
 
 	if (!validate_ethertype(ctx, &proto)) {
 		ret = DROP_UNSUPPORTED_L2;

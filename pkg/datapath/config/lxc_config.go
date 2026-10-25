@@ -89,6 +89,8 @@ type BPFLXC struct {
 	TunnelProtocol uint8 `config:"tunnel_protocol"`
 	// VXLAN tunnel endpoint network mask.
 	VTEPMask uint32 `config:"vtep_mask"`
+	// Deny endpoint traffic while native ztunnel admission is quarantined.
+	ZtunnelQuarantined bool `config:"ztunnel_quarantined"`
 
 	Node
 }
@@ -103,5 +105,5 @@ func NewBPFLXC(node Node) *BPFLXC {
 		cast[types.V4Addr]([]byte{0x0, 0x0, 0x0, 0x0}),
 		cast[types.V6Addr]([]byte{0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0}),
 		0x0, false, 0x0, 0x20, 0x0, cast[types.SocketLBConfig]([]byte{0x0, 0x0, 0x0}),
-		0x0, 0x0, 0x0, node}
+		0x0, 0x0, 0x0, false, node}
 }

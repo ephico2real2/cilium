@@ -29,6 +29,8 @@ struct endpoint_key {
 #define ENDPOINT_F_ATHOSTNS		2 /* Endpoint located at the host networking namespace */
 #define ENDPOINT_F_NO_SNAT_V4	4 /* Endpoint should not be masqueraded for IPv4 */
 #define ENDPOINT_F_NO_SNAT_V6	8 /* Endpoint should not be masqueraded for IPv6 */
+#define ENDPOINT_F_ZTUNNEL_QUARANTINED 16 /* Endpoint is held pending native admission */
+#define ENDPOINT_F_ZTUNNEL_MESH_ONLY 32 /* Required endpoint: authenticated-HBONE-only forwarding */
 #define ENDPOINT_MASK_HOST_DELIVERY	(ENDPOINT_F_HOST | ENDPOINT_F_ATHOSTNS)
 #define ENDPOINT_MASK_SKIP_MASQ_V4 (ENDPOINT_F_HOST | ENDPOINT_F_NO_SNAT_V4)
 #define ENDPOINT_MASK_SKIP_MASQ_V6 (ENDPOINT_F_HOST | ENDPOINT_F_NO_SNAT_V6)

@@ -56,7 +56,9 @@ func (e *Endpoint) SetZtunnelMembership(m ZtunnelMembership) bool {
 		}
 	}
 	if m.State != ZtunnelMembershipUnenrolled {
-		e.ztunnelSourceIPRequired.Store(true)
+		// Membership can assert the durable source-IP obligation, but neither
+		// Captured nor a later Unenrolled publication releases quarantine.
+		e.ObserveZtunnelRequired()
 	}
 	copy := m
 	e.ztunnelMembership.Store(&copy)

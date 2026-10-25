@@ -326,6 +326,16 @@ type Endpoint struct {
 	// fresh ZDS acknowledgment before this can be republished.
 	ztunnelMembership       atomic.Pointer[ZtunnelMembership]
 	ztunnelSourceIPRequired atomic.Bool
+	// ztunnelDatapathQuarantined is independent of the sticky SourceIP
+	// requirement. It is set when Required intent is observed and cleared only
+	// by ReleaseZtunnelQuarantine with a verified receipt. It is process-local;
+	// restore ordering remains a separate gate.
+	ztunnelDatapathQuarantined atomic.Bool
+	// ztunnelAdmission is the verified release receipt; nil while quarantined.
+	ztunnelAdmission atomic.Pointer[ZtunnelAdmissionReceipt]
+	// ztunnelLxcFrontend is the endpoint-map frontend last written by a
+	// regeneration, so a withdrawal can rewrite it without the endpoint lock.
+	ztunnelLxcFrontend atomic.Pointer[lxcmap.EndpointFrontend]
 
 	// Protected by mutex; never serialized or restored as security evidence.
 	ztunnelPolicyTransitions []ZtunnelPolicyTransitioner

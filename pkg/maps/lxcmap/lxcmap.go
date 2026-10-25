@@ -110,6 +110,13 @@ const (
 
 	// EndpointFlagSkipMasqueradeV6 indicates that this endpoint should skip IPv6 masquerade for remote traffic
 	EndpointFlagSkipMasqueradeV6 = 8
+
+	// EndpointFlagZtunnelQuarantined marks endpoints held by the datapath.
+	EndpointFlagZtunnelQuarantined = 16
+
+	// EndpointFlagZtunnelMeshOnly marks Required endpoints. Once quarantine is
+	// released they forward only authenticated HBONE to and from workloads.
+	EndpointFlagZtunnelMeshOnly = 32
 )
 
 // EndpointFrontend is the interface to implement for an object to synchronize
@@ -171,6 +178,12 @@ func (m *lxcMap) getBPFValue(e EndpointFrontend) (*EndpointInfo, error) {
 	}
 	if e.SkipMasqueradeV6() {
 		info.Flags |= EndpointFlagSkipMasqueradeV6
+	}
+	if quarantine, ok := e.(interface{ IsZtunnelQuarantined() bool }); ok && quarantine.IsZtunnelQuarantined() {
+		info.Flags |= EndpointFlagZtunnelQuarantined
+	}
+	if meshOnly, ok := e.(interface{ IsZtunnelMeshOnly() bool }); ok && meshOnly.IsZtunnelMeshOnly() {
+		info.Flags |= EndpointFlagZtunnelMeshOnly
 	}
 
 	return info, nil

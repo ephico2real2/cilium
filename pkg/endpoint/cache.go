@@ -30,30 +30,32 @@ type epInfoCache struct {
 	ifName string
 
 	// For endpoint.Config
-	identity               identity.NumericIdentity
-	mac                    mac.MAC
-	ipv4                   netip.Addr
-	ipv6                   netip.Addr
-	requireARPPassthrough  bool
-	requireEgressProg      bool
-	requireBPFRouting      bool
-	requireEndpointRoute   bool
-	atHostNS               bool
-	policyVerdictLogFilter uint32
-	options                *option.IntOptions
-	lxcMAC                 mac.MAC
-	ifIndex                int
-	parentIfIndex          int
-	netNsCookie            uint64
-	rtInfo                 uint32
-	properties             map[string]any
-	k8sNamespace           string
-	k8sPodName             string
-	k8sNamespaceUID        string
-	k8sPodUID              string
-	netNsPath              string
-	bpfConfigHash          string
-	ztunnelRequired        bool
+	identity                identity.NumericIdentity
+	mac                     mac.MAC
+	ipv4                    netip.Addr
+	ipv6                    netip.Addr
+	requireARPPassthrough   bool
+	requireEgressProg       bool
+	requireBPFRouting       bool
+	requireEndpointRoute    bool
+	atHostNS                bool
+	policyVerdictLogFilter  uint32
+	options                 *option.IntOptions
+	lxcMAC                  mac.MAC
+	ifIndex                 int
+	parentIfIndex           int
+	netNsCookie             uint64
+	rtInfo                  uint32
+	properties              map[string]any
+	k8sNamespace            string
+	k8sPodName              string
+	k8sNamespaceUID         string
+	k8sPodUID               string
+	netNsPath               string
+	bpfConfigHash           string
+	ztunnelSourceIPRequired bool
+	ztunnelQuarantined      bool
+	ztunnelMeshOnly         bool
 
 	// endpoint is used to get the endpoint's logger.
 	//
@@ -66,26 +68,30 @@ type epInfoCache struct {
 
 // Must be called when endpoint is still locked.
 func (e *Endpoint) createEpInfoCache(epdir, bpfConfigHash string) *epInfoCache {
-	ztunnelRequired := e.ztunnelRequiresSourceIPLocked()
+	ztunnelSourceIPRequired := e.ztunnelRequiresSourceIPLocked()
+	ztunnelQuarantined := e.ztunnelQuarantinedLocked()
+	ztunnelMeshOnly := e.IsZtunnelMeshOnly()
 	if e.isPropertyLocked(endpoint.PropertyAtHostNS) {
 		return &epInfoCache{
 			revision: e.desiredPolicyRevision,
 
-			id:              e.GetID(),
-			identity:        e.getIdentity(),
-			ifIndex:         e.GetIfIndex(),
-			mac:             e.GetNodeMAC(),
-			ipv4:            e.IPv4Address(),
-			ipv6:            e.IPv6Address(),
-			atHostNS:        true,
-			properties:      maps.Clone(e.properties),
-			k8sNamespace:    e.GetK8sNamespace(),
-			k8sPodName:      e.GetK8sPodName(),
-			k8sNamespaceUID: e.GetK8sNamespaceUID(),
-			k8sPodUID:       e.GetK8sPodUID(),
-			netNsPath:       e.GetContainerNetnsPath(),
-			bpfConfigHash:   bpfConfigHash,
-			ztunnelRequired: ztunnelRequired,
+			id:                      e.GetID(),
+			identity:                e.getIdentity(),
+			ifIndex:                 e.GetIfIndex(),
+			mac:                     e.GetNodeMAC(),
+			ipv4:                    e.IPv4Address(),
+			ipv6:                    e.IPv6Address(),
+			atHostNS:                true,
+			properties:              maps.Clone(e.properties),
+			k8sNamespace:            e.GetK8sNamespace(),
+			k8sPodName:              e.GetK8sPodName(),
+			k8sNamespaceUID:         e.GetK8sNamespaceUID(),
+			k8sPodUID:               e.GetK8sPodUID(),
+			netNsPath:               e.GetContainerNetnsPath(),
+			bpfConfigHash:           bpfConfigHash,
+			ztunnelSourceIPRequired: ztunnelSourceIPRequired,
+			ztunnelQuarantined:      ztunnelQuarantined,
+			ztunnelMeshOnly:         ztunnelMeshOnly,
 
 			endpoint: e,
 		}
@@ -93,32 +99,34 @@ func (e *Endpoint) createEpInfoCache(epdir, bpfConfigHash string) *epInfoCache {
 	return &epInfoCache{
 		revision: e.desiredPolicyRevision,
 
-		epdir:                  epdir,
-		id:                     e.GetID(),
-		ifName:                 e.ifName,
-		identity:               e.getIdentity(),
-		mac:                    e.GetNodeMAC(),
-		ipv4:                   e.IPv4Address(),
-		ipv6:                   e.IPv6Address(),
-		requireARPPassthrough:  e.RequireARPPassthrough(),
-		requireEgressProg:      e.RequireEgressProg(),
-		requireBPFRouting:      e.RequireBPFRouting(),
-		requireEndpointRoute:   e.RequireEndpointRoute(),
-		policyVerdictLogFilter: e.GetPolicyVerdictLogFilter(),
-		options:                e.Options.DeepCopy(),
-		lxcMAC:                 e.mac,
-		ifIndex:                e.ifIndex,
-		parentIfIndex:          e.parentIfIndex,
-		netNsCookie:            e.NetNsCookie,
-		rtInfo:                 e.rtInfo,
-		properties:             maps.Clone(e.properties),
-		k8sNamespace:           e.GetK8sNamespace(),
-		k8sPodName:             e.GetK8sPodName(),
-		k8sNamespaceUID:        e.GetK8sNamespaceUID(),
-		k8sPodUID:              e.GetK8sPodUID(),
-		netNsPath:              e.GetContainerNetnsPath(),
-		bpfConfigHash:          bpfConfigHash,
-		ztunnelRequired:        ztunnelRequired,
+		epdir:                   epdir,
+		id:                      e.GetID(),
+		ifName:                  e.ifName,
+		identity:                e.getIdentity(),
+		mac:                     e.GetNodeMAC(),
+		ipv4:                    e.IPv4Address(),
+		ipv6:                    e.IPv6Address(),
+		requireARPPassthrough:   e.RequireARPPassthrough(),
+		requireEgressProg:       e.RequireEgressProg(),
+		requireBPFRouting:       e.RequireBPFRouting(),
+		requireEndpointRoute:    e.RequireEndpointRoute(),
+		policyVerdictLogFilter:  e.GetPolicyVerdictLogFilter(),
+		options:                 e.Options.DeepCopy(),
+		lxcMAC:                  e.mac,
+		ifIndex:                 e.ifIndex,
+		parentIfIndex:           e.parentIfIndex,
+		netNsCookie:             e.NetNsCookie,
+		rtInfo:                  e.rtInfo,
+		properties:              maps.Clone(e.properties),
+		k8sNamespace:            e.GetK8sNamespace(),
+		k8sPodName:              e.GetK8sPodName(),
+		k8sNamespaceUID:         e.GetK8sNamespaceUID(),
+		k8sPodUID:               e.GetK8sPodUID(),
+		netNsPath:               e.GetContainerNetnsPath(),
+		bpfConfigHash:           bpfConfigHash,
+		ztunnelSourceIPRequired: ztunnelSourceIPRequired,
+		ztunnelQuarantined:      ztunnelQuarantined,
+		ztunnelMeshOnly:         ztunnelMeshOnly,
 
 		endpoint: e,
 	}
@@ -180,7 +188,7 @@ func (ep *epInfoCache) SourceIPDatapathIdentity() endpoint.SourceIPDatapathIdent
 		IPv4:            ep.ipv4,
 		IPv6:            ep.ipv6,
 		SourceIPEnabled: ep.options != nil && ep.options.IsEnabled(option.SourceIPVerification),
-		ZtunnelRequired: ep.ztunnelRequired,
+		ZtunnelRequired: ep.ztunnelSourceIPRequired,
 	}
 }
 
@@ -248,6 +256,17 @@ func (ep *epInfoCache) SkipMasqueradeV4() bool {
 
 func (ep *epInfoCache) SkipMasqueradeV6() bool {
 	return ep.isProperty(endpoint.PropertySkipMasqueradeV6)
+}
+
+// IsZtunnelQuarantined merges the cached value with the live endpoint state.
+// A regeneration that began before a withdrawal can never write a release.
+func (ep *epInfoCache) IsZtunnelQuarantined() bool {
+	return ep.ztunnelQuarantined || (ep.endpoint != nil && ep.endpoint.ztunnelQuarantinedAtomic())
+}
+
+// IsZtunnelMeshOnly merges the cached and live sticky Required obligation.
+func (ep *epInfoCache) IsZtunnelMeshOnly() bool {
+	return ep.ztunnelMeshOnly || (ep.endpoint != nil && ep.endpoint.IsZtunnelMeshOnly())
 }
 
 // isProperty checks if the value of the properties map is set, it's a boolean

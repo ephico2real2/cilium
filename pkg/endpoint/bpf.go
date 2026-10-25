@@ -452,6 +452,7 @@ func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint
 			if err != nil {
 				return 0, newRegenerationErrorf(regenerationFailureReasonBPFError, "exposing endpoint in endpoints BPF map failed: %w", err)
 			}
+			e.recordZtunnelLxcFrontend(datapathRegenCtxt.epInfoCache)
 		}
 
 		// Allow another builder to start while we wait for the proxy
@@ -495,6 +496,7 @@ func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint
 		if err != nil {
 			return 0, newRegenerationErrorf(regenerationFailureReasonBPFError, "exposing endpoint in endpoints BPF map failed: %w", err)
 		}
+		e.recordZtunnelLxcFrontend(datapathRegenCtxt.epInfoCache)
 	}
 
 	// Signal that BPF program has been generated.

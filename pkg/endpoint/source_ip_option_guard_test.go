@@ -73,6 +73,44 @@ func TestSourceIPRequirementStaysLatchedAfterUnenrollment(t *testing.T) {
 	require.True(t, ep.sourceIPDisableDeniedLocked(option.OptionDisabled))
 }
 
+func TestRequiredIntentIsExportedToDatapathIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		required bool
+	}{
+		{name: "ordinary", required: false},
+		{name: "required", required: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ep := sourceIPGuardTestEndpoint(true)
+			if tc.required {
+				ep.ObserveZtunnelRequired()
+			}
+
+			ep.mutex.Lock()
+			identity := ep.sourceIPDatapathIdentityLocked()
+			ep.mutex.Unlock()
+			require.Equal(t, tc.required, identity.ZtunnelRequired)
+			require.Equal(t, tc.required, ep.IsZtunnelQuarantined(), "Required observation separately closes quarantine")
+		})
+	}
+}
+
+func TestMembershipTransitionsCannotReleaseQuarantine(t *testing.T) {
+	ep := sourceIPGuardTestEndpoint(true)
+	cases := []ZtunnelMembership{
+		{Version: 1, Revision: 1, Epoch: "agent-a", Generation: 1, State: ZtunnelMembershipRequired},
+		{Version: 1, Revision: 2, Epoch: "agent-a", Generation: 2, State: ZtunnelMembershipCaptured},
+		{Version: 1, Revision: 3, Epoch: "agent-a", Generation: 3, State: ZtunnelMembershipDraining},
+		{Version: 1, Revision: 4, Epoch: "agent-a", Generation: 4, State: ZtunnelMembershipUnenrolled},
+	}
+	for _, membership := range cases {
+		require.True(t, ep.SetZtunnelMembership(membership), membership.State)
+		require.True(t, ep.IsZtunnelQuarantined(), "membership state cannot release the datapath hold")
+	}
+	require.True(t, ep.ztunnelRequiresSourceIPLocked(), "SourceIP requirement remains sticky")
+}
+
 func TestEndpointAPICannotDisableSourceIPForRequiredMembership(t *testing.T) {
 	ep := sourceIPGuardTestEndpoint(true)
 	ep.state = StateReady
