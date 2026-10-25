@@ -80,8 +80,8 @@ func (g *gate) BeginPolicyTransition(ep *endpoint.Endpoint, b endpoint.ZtunnelPo
 		if ownership == zds.PolicyOwnershipAbsent {
 			return nil, nil
 		}
-		g.membership.BeginDrain(ref)
-		return nil, fmt.Errorf("pre-ADD registry conflicts with retained native ADD ownership")
+		// Generation zero may follow a lost ACK. It is not pre-ADD anymore:
+		// the native worker must resolve exact recorded ownership by receipt.
 	}
 	generation, ok := g.membership.BeginDrain(ref)
 	if !ok {

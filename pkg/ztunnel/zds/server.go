@@ -232,6 +232,8 @@ type Server struct {
 	strictDeletedEndpointCleanup bool
 	drainBindings                map[endpointIncarnation]*pb.WorkloadBinding
 	policyADDAttempts            map[endpointIncarnation]*pb.WorkloadBinding
+	policyADDHistory             map[endpointIncarnation][]*pb.WorkloadBinding
+	policyADDPending             map[*pendingPolicyADD]struct{}
 	endpointOperationGate        chan struct{}
 
 	updates               chan zdsUpdate // updates to send to ztunnel
@@ -240,11 +242,12 @@ type Server struct {
 }
 
 type zdsUpdate struct {
-	ctx       context.Context // Caller lifetime; expired queued work must not be sent.
-	request   *pb.WorkloadRequest
-	netnsPath string     // Path to network namespace; empty string if no netns needed
-	errCh     chan error // Channel to signal if the update was sent successfully
-	onAck     func()     // Commit cache state before publishing acknowledgment.
+	ctx           context.Context // Caller lifetime; expired queued work must not be sent.
+	request       *pb.WorkloadRequest
+	netnsPath     string     // Path to network namespace; empty string if no netns needed
+	errCh         chan error // Channel to signal if the update was sent successfully
+	onAck         func()     // Commit cache state before publishing acknowledgment.
+	policyPending *pendingPolicyADD
 }
 
 // newZDSServer creates a new ZDS (Ztunnel Discovery Service) server that communicates
@@ -437,6 +440,7 @@ func (s *Server) handleConn(ctx context.Context, zc *ztunnelConn) error {
 }
 
 func (s *Server) processUpdate(ctx context.Context, zc *ztunnelConn, update zdsUpdate) error {
+	defer s.finishPendingPolicyADD(update.policyPending)
 	complete := func(err error) {
 		if update.errCh != nil {
 			update.errCh <- err
@@ -601,6 +605,7 @@ func (s *Server) EnrollEndpointForOwnerContext(ctx context.Context, owner, ep *e
 					}
 					key, _ := incarnation(acknowledged)
 					s.drainBindings[key] = proto.Clone(workload.Binding).(*pb.WorkloadBinding)
+					s.pruneAcknowledgedPolicyHistoryLocked(key, workload.Binding)
 				}
 				s.endpointCacheMutex.Unlock()
 				return
@@ -637,10 +642,16 @@ func (s *Server) sendUpdateAndWaitForAck(ctx context.Context, update zdsUpdate) 
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	pending, err := s.beginPendingPolicyADD(update.request, update.netnsPath)
+	if err != nil {
+		return err
+	}
+	update.policyPending = pending
 	update.ctx = ctx
 	select {
 	case s.updates <- update:
 	case <-ctx.Done():
+		s.finishPendingPolicyADD(pending) // Not enqueued: no consumer can transmit it.
 		return ctx.Err()
 	}
 	select {

@@ -5,8 +5,6 @@ package zds
 import (
 	"fmt"
 
-	"google.golang.org/protobuf/proto"
-
 	"github.com/cilium/cilium/pkg/ztunnel/pb"
 )
 
@@ -37,6 +35,21 @@ func (s *Server) ObservePolicyOwnership(id uint16, uid, path string) (PolicyOwne
 	defer s.endpointCacheMutex.UnlockIgnoreTime()
 	matches := func(candidateID uint16, candidateUID, candidatePath string) bool {
 		return (id != 0 && id == candidateID) || (uid != "" && uid == candidateUID) || (path != "" && path == candidatePath)
+	}
+	for pending := range s.policyADDPending {
+		if matches(pending.key.id, pending.key.uid, pending.key.netnsPath) {
+			return PolicyOwnershipRetained, nil
+		}
+	}
+	for key, history := range s.policyADDHistory {
+		if matches(key.id, key.uid, key.netnsPath) {
+			return PolicyOwnershipRetained, nil
+		}
+		for _, binding := range history {
+			if binding != nil && matches(uint16(binding.EndpointId), binding.PodUid, "") {
+				return PolicyOwnershipRetained, nil
+			}
+		}
 	}
 	for key, binding := range s.policyADDAttempts {
 		if matches(key.id, key.uid, key.netnsPath) || (binding != nil && matches(uint16(binding.EndpointId), binding.PodUid, "")) {
@@ -91,6 +104,5 @@ func (s *Server) recordPolicyADDAttempt(req *pb.WorkloadRequest, path string) er
 	if _, exists := s.policyADDAttempts[key]; !exists && len(s.policyADDAttempts) >= maxPolicyADDAttempts {
 		return fmt.Errorf("native ADD uncertainty capacity exhausted")
 	}
-	s.policyADDAttempts[key] = proto.Clone(add.Binding).(*pb.WorkloadBinding)
-	return nil
+	return s.appendPolicyADDHistoryLocked(key, add.Binding)
 }

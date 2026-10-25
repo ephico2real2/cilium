@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/cilium/cilium/pkg/endpoint"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/membership"
@@ -108,6 +110,9 @@ func (zc *ztunnelConn) sendDrain(req *pb.DrainWorkload) error {
 	if err != nil {
 		return err
 	}
+	if ack := resp.GetAck(); ack != nil && ack.GetError() != "" {
+		return fmt.Errorf("%w: %s", errNativeDrainNACK, ack.GetError())
+	}
 	got := resp.GetDrained()
 	if got == nil || got.DrainGeneration != req.DrainGeneration || !bytes.Equal(got.Nonce, req.Nonce) || !proto.Equal(got.Binding, req.Binding) {
 		return fmt.Errorf("missing or mismatched native workload-drained receipt")
@@ -136,6 +141,8 @@ func (s *Server) drainOriginalEndpointContext(ctx context.Context, ep *endpoint.
 	if !s.strictDeletedEndpointCleanup || ep == nil || generation == 0 {
 		return nil, fmt.Errorf("native drain requires strict original endpoint ownership")
 	}
+	ctx, cancel := context.WithTimeout(ctx, defaultZDSAckTimeout)
+	defer cancel()
 	key, err := incarnation(ep)
 	if err != nil {
 		return nil, err
@@ -151,41 +158,74 @@ func (s *Server) drainOriginalEndpointContext(ctx context.Context, ep *endpoint.
 		return nil, err
 	}
 	defer release()
-	s.endpointCacheMutex.Lock()
-	b := s.drainBindings[key]
-	if b != nil {
-		b = proto.Clone(b).(*pb.WorkloadBinding)
-	}
-	// An in-flight ADD can finish while the deletion waited on the semaphore.
-	if sameIncarnation(s.endpointCache[key.id], key) {
-		delete(s.endpointCache, key.id)
-	}
-	s.endpointCacheMutex.Unlock()
-	if b == nil || b.PodUid != ref.Key.PodUID || b.NamespaceUid != ref.Key.NamespaceUID || b.SourceEpoch != ref.Epoch || b.ClusterId != ref.Key.ClusterID || b.Incarnation != ref.Incarnation || b.EndpointId != uint32(key.id) {
-		return nil, fmt.Errorf("missing original acknowledged ADD binding for this incarnation")
-	}
-	nonce := make([]byte, 32)
-	if _, err := rand.Read(nonce); err != nil {
-		return nil, err
-	}
-	request := &pb.DrainWorkload{Binding: b, DrainGeneration: generation, Nonce: nonce}
-	update := zdsUpdate{request: &pb.WorkloadRequest{Payload: &pb.WorkloadRequest_Drain{Drain: request}}, errCh: make(chan error, 1)}
-	if err := s.sendUpdateAndWaitForAck(ctx, update); err != nil {
-		return nil, fmt.Errorf("native workload drain unavailable; capture retained: %w", err)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return &DrainReceipt{ref: ref, generation: generation, forget: func() {
+	var candidates []*pb.WorkloadBinding
+	for {
 		s.endpointCacheMutex.Lock()
-		defer s.endpointCacheMutex.Unlock()
-		if proto.Equal(s.drainBindings[key], b) {
-			delete(s.drainBindings, key)
-			if proto.Equal(s.policyADDAttempts[key], b) {
-				delete(s.policyADDAttempts, key)
+		pending := s.pendingPolicyADDCompletionsLocked(key)
+		if len(pending) == 0 {
+			var selectionErr error
+			candidates, selectionErr = s.originalDrainCandidatesLocked(key, ref)
+			if sameIncarnation(s.endpointCache[key.id], key) {
+				delete(s.endpointCache, key.id)
+			}
+			s.endpointCacheMutex.Unlock()
+			if selectionErr != nil {
+				return nil, selectionErr
+			}
+			break
+		}
+		s.endpointCacheMutex.Unlock()
+		// Canceled producers may have returned before their queued consumer stopped.
+		// Join that consumer before declaring pre-write absence or choosing history.
+		for _, done := range pending {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				return nil, ctx.Err()
 			}
 		}
-	}}, nil
+	}
+
+	started := time.Now()
+	deadline, _ := ctx.Deadline()
+	var failures []error
+	for i, b := range candidates {
+		if err := ctx.Err(); err != nil {
+			return nil, errors.Join(append(failures, err)...)
+		}
+		nonce := make([]byte, 32)
+		if _, err := rand.Read(nonce); err != nil {
+			return nil, err
+		}
+		request := &pb.DrainWorkload{Binding: b, DrainGeneration: generation, Nonce: nonce}
+		update := zdsUpdate{request: &pb.WorkloadRequest{Payload: &pb.WorkloadRequest_Drain{Drain: request}}, errCh: make(chan error, 1)}
+		err := s.sendUpdateAndWaitForAck(ctx, update)
+		if err == nil {
+			err = ctx.Err()
+		}
+		if err == nil {
+			return &DrainReceipt{ref: ref, generation: generation, forget: func() { s.forgetOriginalDrainCandidates(key, candidates) }}, nil
+		}
+		failures = append(failures, err)
+		// A typed-owner NACK only permits another exact, pre-recorded candidate.
+		// It is never evidence of absence or drain. Protocol mismatch, timeout,
+		// cancellation and a changed proxy execution abort without falling back.
+		if !errors.Is(err, errNativeDrainNACK) || ctx.Err() != nil {
+			break
+		}
+		if s.logger != nil && i+1 < len(candidates) {
+			s.logger.Warn("Native owner rejected a drain candidate; trying retained exact history",
+				logStage, "native-original-add-drain",
+				logfields.Attempt, i+1,
+				logfields.ElapsedDuration, time.Since(started),
+				logfields.Backoff, time.Duration(0),
+				logDrainDeadline, deadline,
+				logfields.Version, b.CaptureGeneration,
+				logfields.Error, err)
+		}
+	}
+	return nil, fmt.Errorf("native workload drain unavailable; capture and uncertainty retained: %w", errors.Join(failures...))
+
 }
 
 // The process epoch is correlation, not authentication. Strict receipt authority

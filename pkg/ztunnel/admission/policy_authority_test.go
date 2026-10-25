@@ -14,13 +14,13 @@ import (
 )
 
 func TestPolicyAuthorityAbsenceAndDisabledNeverDowngradeRequired(t *testing.T) {
-	for _, name := range []string{"disabled-required", "disabled-ref", "disabled-retained", "missing-registry", "missing-ref", "retired-ref", "busy-owner", "missing-inspector", "unknown-observation", "stale-pod-uid", "stale-endpoint", "preadd-retained"} {
+	for _, name := range []string{"disabled-required", "disabled-ref", "disabled-retained", "missing-registry", "missing-ref", "retired-ref", "busy-owner", "missing-inspector", "unknown-observation", "stale-pod-uid", "stale-endpoint"} {
 		t.Run(name, func(t *testing.T) {
 			registry := membership.NewRegistry(1)
 			b := endpoint.ZtunnelPolicyBinding{EndpointID: 9, NamespaceUID: "namespace", PodUID: "pod", NetNSPath: "/ns", ContainerID: "container", NetNSCookie: 5, RequiredObserved: true}
 			g := &gate{enabled: true, membership: registry, policyOwnership: policyOwnershipFixture{state: zds.PolicyOwnershipAbsent}}
 			var ref membership.Reference
-			if name == "disabled-ref" || name == "retired-ref" || name == "stale-pod-uid" || name == "stale-endpoint" || name == "preadd-retained" {
+			if name == "disabled-ref" || name == "retired-ref" || name == "stale-pod-uid" || name == "stale-endpoint" {
 				var err error
 				ref, err = registry.Require("namespace", "pod", 9, "/ns")
 				require.NoError(t, err)
@@ -55,8 +55,6 @@ func TestPolicyAuthorityAbsenceAndDisabledNeverDowngradeRequired(t *testing.T) {
 				g.policyOwnership = policyOwnershipFixture{state: zds.PolicyOwnershipRetained}
 			case "stale-endpoint":
 				b.EndpointID++
-				g.policyOwnership = policyOwnershipFixture{state: zds.PolicyOwnershipRetained}
-			case "preadd-retained":
 				g.policyOwnership = policyOwnershipFixture{state: zds.PolicyOwnershipRetained}
 			}
 			result, err := g.BeginPolicyTransition(&endpoint.Endpoint{}, b)

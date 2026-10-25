@@ -12,6 +12,7 @@ import (
 	"golang.org/x/sys/unix"
 	"google.golang.org/protobuf/proto"
 
+	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/membership"
@@ -78,6 +79,33 @@ func TestPolicyADDUncertaintySurvivesLostACKAndZeroedRegistry(t *testing.T) {
 	ownership, err := s.ObservePolicyOwnership(9, ep.K8sUID, path)
 	require.NoError(t, err)
 	require.Equal(t, PolicyOwnershipRetained, ownership)
+	// The same execution can now prove actual native drain using the recorded
+	// pre-write binding. This does not fabricate an acknowledged ADD.
+	owner := liveManagedEndpoint(t, 9, ep.K8sUID, path)
+	drainGeneration, ok := r.BeginDrain(ref)
+	require.True(t, ok)
+	drainCtx, drainCancel := context.WithTimeout(t.Context(), time.Second)
+	defer drainCancel()
+	drained := startRecoveryDrain(s, drainCtx, owner, ref, drainGeneration)
+	request, processErr := exchangeRecoveryDrain(t, s, receiveCleanupUpdate(t, s), bytes.Repeat([]byte{3}, 32), func(request *pb.DrainWorkload) *pb.WorkloadResponse {
+		return recoveryResponse(request)
+	})
+	require.NoError(t, processErr)
+	require.True(t, proto.Equal(binding, request.Binding))
+	result := <-drained
+	require.NoError(t, result.err)
+	require.NotNil(t, result.receipt)
+	require.Empty(t, s.drainBindings, "uncertain ADD must not become an ADD ACK")
+	require.NoError(t, result.receipt.ConfirmPolicyQuarantine(r, ref, drainGeneration))
+	require.True(t, owner.SetState(endpoint.StateDisconnecting, "delete drained owner"))
+	require.True(t, owner.SetState(endpoint.StateDisconnected, "delete complete"))
+	require.NoError(t, result.receipt.Retire(r, ref, drainGeneration))
+	require.Empty(t, s.policyADDAttempts)
+	require.Empty(t, s.policyADDHistory)
+	ownership, err = s.ObservePolicyOwnership(9, ep.K8sUID, path)
+	require.NoError(t, err)
+	require.Equal(t, PolicyOwnershipAbsent, ownership)
+
 }
 func TestPolicyADDAttemptBoundAndDefensiveCopy(t *testing.T) {
 	s := strictCleanupServer(t)
