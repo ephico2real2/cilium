@@ -52,6 +52,10 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      # SPIRE delegated attestation consumes host PIDs reported by node CRI.
+      {{- if eq .Values.encryption.ztunnel.ca.type "spire" }}
+      hostPID: true
+      {{- end }}
       hostNetwork: true
       dnsPolicy: ClusterFirst
       containers:
