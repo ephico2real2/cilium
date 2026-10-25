@@ -335,9 +335,11 @@ func TestEgressCIDRTCPPort(t *testing.T) {
 	_, _, err := repo.mustAdd(rule1)
 	require.NoError(t, err)
 
-	repo.mutex.RLock()
-	defer repo.mutex.RUnlock()
-	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
+	selPolicy, err := func() (*selectorPolicy, error) {
+		repo.mutex.RLock()
+		defer repo.mutex.RUnlock()
+		return repo.resolvePolicyLocked(fooIdentity)
+	}()
 	require.NoError(t, err)
 	require.Equal(t, redirectTypeNone, selPolicy.L4Policy.redirectTypes)
 
@@ -463,9 +465,11 @@ func TestEgressWildcardCIDRMatchesWorld(t *testing.T) {
 	_, _, err := repo.mustAdd(rule1)
 	require.NoError(t, err)
 
-	repo.mutex.RLock()
-	defer repo.mutex.RUnlock()
-	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
+	selPolicy, err := func() (*selectorPolicy, error) {
+		repo.mutex.RLock()
+		defer repo.mutex.RUnlock()
+		return repo.resolvePolicyLocked(fooIdentity)
+	}()
 	require.NoError(t, err)
 	require.Equal(t, redirectTypeNone, selPolicy.L4Policy.redirectTypes)
 
@@ -546,9 +550,11 @@ func TestL7WithIngressWildcard(t *testing.T) {
 	_, _, err := repo.mustAdd(rule1)
 	require.NoError(t, err)
 
-	repo.mutex.RLock()
-	defer repo.mutex.RUnlock()
-	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
+	selPolicy, err := func() (*selectorPolicy, error) {
+		repo.mutex.RLock()
+		defer repo.mutex.RUnlock()
+		return repo.resolvePolicyLocked(fooIdentity)
+	}()
 	require.NoError(t, err)
 	require.Equal(t, redirectTypeEnvoy, selPolicy.L4Policy.redirectTypes)
 
@@ -632,10 +638,11 @@ func TestL7WithLocalHostWildcard(t *testing.T) {
 	_, _, err := repo.mustAdd(rule1)
 	require.NoError(t, err)
 
-	repo.mutex.RLock()
-	defer repo.mutex.RUnlock()
-
-	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
+	selPolicy, err := func() (*selectorPolicy, error) {
+		repo.mutex.RLock()
+		defer repo.mutex.RUnlock()
+		return repo.resolvePolicyLocked(fooIdentity)
+	}()
 	require.NoError(t, err)
 
 	policy := selPolicy.DistillPolicy(logger, DummyOwner{logger: logger}, testRedirects)
@@ -726,9 +733,11 @@ func TestMapStateWithIngressWildcard(t *testing.T) {
 	_, _, err := repo.mustAdd(rule1)
 	require.NoError(t, err)
 
-	repo.mutex.RLock()
-	defer repo.mutex.RUnlock()
-	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
+	selPolicy, err := func() (*selectorPolicy, error) {
+		repo.mutex.RLock()
+		defer repo.mutex.RUnlock()
+		return repo.resolvePolicyLocked(fooIdentity)
+	}()
 	require.NoError(t, err)
 
 	policy := selPolicy.DistillPolicy(logger, DummyOwner{logger: logger}, testRedirects)
@@ -840,9 +849,11 @@ func TestMapStateWithIngress(t *testing.T) {
 	_, _, err := repo.mustAdd(rule1)
 	require.NoError(t, err)
 
-	repo.mutex.RLock()
-	defer repo.mutex.RUnlock()
-	selPolicy, err := repo.resolvePolicyLocked(fooIdentity)
+	selPolicy, err := func() (*selectorPolicy, error) {
+		repo.mutex.RLock()
+		defer repo.mutex.RUnlock()
+		return repo.resolvePolicyLocked(fooIdentity)
+	}()
 	require.NoError(t, err)
 
 	policy := selPolicy.DistillPolicy(logger, DummyOwner{logger: logger}, testRedirects)
