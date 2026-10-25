@@ -37,8 +37,9 @@ var Cell = cell.Module(
 type ztunnelParams struct {
 	cell.In
 
-	Config      config.Config
-	ClusterMesh *clustermesh.ClusterMesh
+	Config        config.Config
+	IssuerProfile xds.IssuerProfileProbeConfig
+	ClusterMesh   *clustermesh.ClusterMesh
 }
 
 func validateConfig(params ztunnelParams) error {
@@ -51,8 +52,36 @@ func validateConfig(params ztunnelParams) error {
 	}
 
 	if params.ClusterMesh != nil {
-		return fmt.Errorf("ztunnel is not compatible with clustermesh")
+		if err := clusterMeshCapability(params.Config, params.IssuerProfile); err != nil {
+			return fmt.Errorf("ztunnel with clustermesh requires the native mesh runtime: %w", err)
+		}
 	}
 
+	return nil
+}
+
+// clusterMeshCapability validates that every native owner a ClusterMesh
+// deployment depends on is assembled. Remote workloads are reachable through
+// ztunnel only when they are authenticated and projected (remote workload
+// membership), bound to a trust domain approved by the issuer profile
+// (issuer-profile pins), and verified as SPIRE identities; local workloads
+// stay deny-by-default until their effective policy is compiled and
+// acknowledged, which also gates their datapath release (effective policy
+// quarantine with strict mTLS). Each owner fails closed at runtime: without
+// a valid peer, profile or acknowledgment, remote workloads are withdrawn and
+// local workloads stay quarantined.
+func clusterMeshCapability(c config.Config, issuer xds.IssuerProfileProbeConfig) error {
+	switch {
+	case !c.RequireMTLS:
+		return fmt.Errorf("ztunnel-require-mtls is required")
+	case c.CAType != config.CATypeSpire:
+		return fmt.Errorf("ztunnel-ca-type=spire is required")
+	case !c.EffectivePolicyQuarantine:
+		return fmt.Errorf("ztunnel-effective-policy-quarantine is required")
+	case !c.EnableRemoteWorkloadMembership || c.RemoteOriginConfigDirectory == "" || c.RemoteOriginClientCommonName == "":
+		return fmt.Errorf("authenticated remote workload membership with a direct-origin configuration directory is required")
+	case issuer.IssuerProfileProbePins == "":
+		return fmt.Errorf("ztunnel-issuer-profile-probe-pins is required")
+	}
 	return nil
 }
