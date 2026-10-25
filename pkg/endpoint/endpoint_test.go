@@ -198,16 +198,12 @@ func setupEndpointSuite(tb testing.TB) *EndpointSuite {
 		panic("ParseLabelPrefixCfg() failed")
 	}
 
-	// Register metrics once before running the suite
-	metrics.NewLegacyMetrics().EndpointStateCount.SetEnabled(true)
-
 	/* Required to test endpoint CEP policy model */
 	client := kvstore.SetupDummy(tb, "etcd")
 	// The nils are only used by k8s CRD identities. We default to kvstore.
 	<-s.mgr.InitIdentityAllocator(nil, client)
 
 	tb.Cleanup(func() {
-		metrics.NewLegacyMetrics().EndpointStateCount.SetEnabled(false)
 		s.mgr.Close()
 	})
 
@@ -1601,6 +1597,10 @@ func TestMetadataResolver(t *testing.T) {
 				p.KVStoreSynchronizer = kvstoreSync
 				ep, err := NewEndpointFromChangeModel(p, nil, &FakeEndpointProxy{}, model, nil)
 				require.NoError(t, err)
+				t.Cleanup(func() {
+					ep.Stop()
+					ep.controllers.RemoveAllAndWait()
+				})
 
 				ep.K8sNamespace, ep.K8sPodName, ep.K8sUID = "bar", "foo", "uid"
 

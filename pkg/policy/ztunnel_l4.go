@@ -58,13 +58,23 @@ func (p *EndpointPolicy) SnapshotZtunnelL4(realizedRevision uint64) (*ZtunnelL4S
 	if len(p.policyMapChanges.changes) != 0 || len(p.policyMapChanges.synced) != 0 {
 		return nil, fmt.Errorf("native selector updates are pending")
 	}
-	if len(p.policyMapState.entries) > maxZtunnelPolicyEntries {
+	return cloneZtunnelL4Snapshot(p.policyMapState, realizedRevision, p.selectors.Revision)
+}
+
+// One constructor is shared by native capture and the bounded wire decoder.
+// It preserves the native LPM map and priority semantics; no selectors are
+// translated into SPIFFE wildcards.
+func cloneZtunnelL4Snapshot(source mapState, realizedRevision uint64, selectorRevision policyTypes.SelectorRevision) (*ZtunnelL4Snapshot, error) {
+	if len(source.entries) > maxZtunnelPolicyEntries {
 		return nil, fmt.Errorf("native policy exceeds bounded compiler size")
 	}
-	cloned := newMapState(p.policyMapState.logger, p.policyMapState.Sizes(), allFeatures, p.policyMapState.clusterInfo)
-	keys := make([]Key, 0, len(p.policyMapState.entries))
+	cloned := newMapState(source.logger, source.Sizes(), allFeatures, source.clusterInfo)
+	keys := make([]Key, 0, len(source.entries))
 	cuts := []uint32{1, 65536}
-	for key, entry := range p.policyMapState.entries {
+	for key, entry := range source.entries {
+		if err := validateNativeZtunnelL4Entry(key, entry.MapStateEntry); err != nil {
+			return nil, err
+		}
 		if !entry.IsValid() || entry.ProxyPort != 0 || entry.Precedence.IsPass() {
 			return nil, fmt.Errorf("unsupported or unrealized native policy entry")
 		}
@@ -95,9 +105,9 @@ func (p *EndpointPolicy) SnapshotZtunnelL4(realizedRevision uint64) (*ZtunnelL4S
 	var encoded [8]byte
 	append64 := func(v uint64) { binary.BigEndian.PutUint64(encoded[:], v); _, _ = h.Write(encoded[:]) }
 	append64(realizedRevision)
-	append64(uint64(p.selectors.Revision))
+	append64(uint64(selectorRevision))
 	for _, k := range keys {
-		v := p.policyMapState.entries[k]
+		v := source.entries[k]
 		append64(uint64(k.TrafficDirection()))
 		append64(uint64(k.Nexthdr))
 		append64(uint64(k.DestPort))
@@ -108,7 +118,7 @@ func (p *EndpointPolicy) SnapshotZtunnelL4(realizedRevision uint64) (*ZtunnelL4S
 		append64(uint64(v.Cookie))
 	}
 	return &ZtunnelL4Snapshot{state: cloned, revision: realizedRevision,
-		selectorRevision: p.selectors.Revision, digest: hex.EncodeToString(h.Sum(nil)), boundaries: cuts}, nil
+		selectorRevision: selectorRevision, digest: hex.EncodeToString(h.Sum(nil)), boundaries: cuts}, nil
 }
 
 func (s *ZtunnelL4Snapshot) Revision() uint64 {
