@@ -227,6 +227,10 @@ type EndpointEvent struct {
 	Type EndpointEventType
 	*types.CiliumEndpoint
 	Err error
+	// NodeName is the Kubernetes Node metadata.name bound from Cilium's native
+	// node discovery at the Address response boundary. Networking.NodeIP stays
+	// an address and is never used as the node identity.
+	NodeName string
 }
 
 // getPodUID returns the Pod UID from the CiliumEndpoint's OwnerReferences.
@@ -285,6 +289,9 @@ func (e *EndpointEvent) ToXDSAddress() (*pb.Address, error) {
 	if e.Networking == nil {
 		return nil, wrapValidationError(errInvalidWorkloadData, "cannot transform EndpointEvent to XDS Address, missing networking information")
 	}
+	if e.NodeName == "" {
+		return nil, wrapValidationError(errInvalidWorkloadData, "cannot transform EndpointEvent to XDS Address, missing Kubernetes node name")
+	}
 
 	ipAddresses := make([][]byte, 0)
 
@@ -307,9 +314,8 @@ func (e *EndpointEvent) ToXDSAddress() (*pb.Address, error) {
 
 	w := &pb.Workload{
 		Uid: e.getPodUID(),
-		// TODO(hemanthmalla) Convert this field to node name.
-		// zTunnel will match this with it's own node name.
-		Node:           e.Networking.NodeIP,
+		// Kubernetes Node name; ztunnel matches it with its own NODE_NAME.
+		Node:           e.NodeName,
 		Name:           e.Name,
 		Namespace:      e.Namespace,
 		ServiceAccount: e.ServiceAccount,

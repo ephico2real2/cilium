@@ -56,6 +56,9 @@ func Endpoint(ep endpoint.Config, lnc *Config) any {
 	if quarantine, ok := ep.(endpoint.ZtunnelQuarantineProvider); ok {
 		cfg.ZtunnelQuarantined = quarantine.IsZtunnelQuarantined()
 	}
+	if required, ok := ep.(endpoint.ZtunnelMeshOnlyProvider); ok {
+		cfg.ZtunnelRequired = required.IsZtunnelMeshOnly()
+	}
 	cfg.EnableLRP = lnc.EnableLocalRedirectPolicy
 
 	cfg.EphemeralMin = lnc.EphemeralMin

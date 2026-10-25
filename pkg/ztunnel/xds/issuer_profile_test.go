@@ -56,7 +56,7 @@ type profileTestServer struct {
 }
 
 func (s *profileTestServer) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_DeltaAggregatedResourcesServer) error {
-	sp := NewStreamProcessor(&StreamProcessorParams{Stream: stream, StreamRecv: make(chan *v3.DeltaDiscoveryRequest, 1), EndpointEventRecv: make(chan *EndpointEvent), Log: slog.New(slog.DiscardHandler), IssuerProfile: s.source})
+	sp := NewStreamProcessor(&StreamProcessorParams{NodeNames: mustFixtureNodeNames(), Stream: stream, StreamRecv: make(chan *v3.DeltaDiscoveryRequest, 1), EndpointEventRecv: make(chan *EndpointEvent), Log: slog.New(slog.DiscardHandler), IssuerProfile: s.source})
 	// Exercise the actual native router with a package-private test deadline.
 	return sp.Start()
 }

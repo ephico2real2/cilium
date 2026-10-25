@@ -97,11 +97,13 @@ spec:
               value: "false"
             - name: INPOD_UDS
               value: "/var/run/cilium/ztunnel.sock"
+            # Kubernetes Node metadata.name. Cilium xDS publishes the same
+            # native node name in Workload.Node; it is never a node IP.
             - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   apiVersion: v1
-                  fieldPath: status.hostIP
+                  fieldPath: spec.nodeName
             - name: INSTANCE_IP
               valueFrom:
                 fieldRef:

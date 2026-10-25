@@ -944,12 +944,11 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		/* Skip policy enforcement for return traffic. */
 
 		/* An HBONE-only endpoint's replies must belong to an HBONE
-		 * flow (or a local-host probe), whatever conntrack recorded.
+		 * flow, whatever conntrack recorded.
 		 */
 		if (ct_status == CT_REPLY &&
 		    ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off,
-							      true, *dst_sec_identity);
+			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off);
 			if (verdict != CTX_ACT_OK)
 				return verdict;
 		}
@@ -1505,12 +1504,11 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		/* Skip policy enforcement for return traffic. */
 
 		/* An HBONE-only endpoint's replies must belong to an HBONE
-		 * flow (or a local-host probe), whatever conntrack recorded.
+		 * flow, whatever conntrack recorded.
 		 */
 		if (ct_status == CT_REPLY &&
 		    ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off,
-							      true, *dst_sec_identity);
+			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off);
 			if (verdict != CTX_ACT_OK)
 				return verdict;
 		}
@@ -1858,8 +1856,7 @@ ipv6_policy(struct __ctx_buff *ctx, struct ipv6hdr *ip6, __u32 src_label,
 		 * listener; an older plaintext CT entry cannot carry data.
 		 */
 		if (ret == CT_REPLY && ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off,
-							      false, src_label);
+			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off);
 			if (verdict != CTX_ACT_OK)
 				return verdict;
 		}
@@ -1914,11 +1911,10 @@ ipv6_policy(struct __ctx_buff *ctx, struct ipv6hdr *ip6, __u32 src_label,
 		}
 
 		/* A released Required endpoint accepts only TCP/15008 (HBONE
-		 * transport shape) and local-host probes on declared probe ports.
+		 * transport shape; ztunnel authenticates). No host exception.
 		 */
 		if (ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_ingress_verdict(tuple->nexthdr, tuple->dport,
-								src_label);
+			verdict = ztunnel_hbone_ingress_verdict(tuple->nexthdr, tuple->dport);
 			if (verdict != CTX_ACT_OK) {
 				send_policy_verdict_notify(ctx, src_label, tuple->dport,
 							   tuple->nexthdr, POLICY_INGRESS, 1,
@@ -2170,8 +2166,7 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 		 * listener; an older plaintext CT entry cannot carry data.
 		 */
 		if (ret == CT_REPLY && ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off,
-							      false, src_label);
+			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off);
 			if (verdict != CTX_ACT_OK)
 				return verdict;
 		}
@@ -2233,11 +2228,10 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 		}
 
 		/* A released Required endpoint accepts only TCP/15008 (HBONE
-		 * transport shape) and local-host probes on declared probe ports.
+		 * transport shape; ztunnel authenticates). No host exception.
 		 */
 		if (ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_ingress_verdict(tuple->nexthdr, tuple->dport,
-								src_label);
+			verdict = ztunnel_hbone_ingress_verdict(tuple->nexthdr, tuple->dport);
 			if (verdict != CTX_ACT_OK) {
 				send_policy_verdict_notify(ctx, src_label, tuple->dport,
 							   tuple->nexthdr, POLICY_INGRESS, 0,

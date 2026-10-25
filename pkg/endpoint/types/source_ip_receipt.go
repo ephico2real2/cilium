@@ -66,3 +66,10 @@ type SourceIPDatapathIdentityProvider interface {
 type ZtunnelQuarantineProvider interface {
 	IsZtunnelQuarantined() bool
 }
+
+// ZtunnelMeshOnlyProvider exposes the sticky Required obligation as the
+// load-time ztunnel_required config: such a program never forwards as an
+// ordinary endpoint, even if its own endpoint-map entry is missing.
+type ZtunnelMeshOnlyProvider interface {
+	IsZtunnelMeshOnly() bool
+}

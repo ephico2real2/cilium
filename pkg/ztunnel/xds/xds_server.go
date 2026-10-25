@@ -63,6 +63,7 @@ type Server struct {
 	requireMTLS               bool
 	effectivePolicyQuarantine bool
 	issuerProfile             *issuerProfileSource
+	nodeNames                 nodeNameResolver
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -218,6 +219,7 @@ func (x *Server) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_D
 		RequireMTLS:               x.requireMTLS,
 		EffectivePolicyQuarantine: x.effectivePolicyQuarantine,
 		IssuerProfile:             x.issuerProfile,
+		NodeNames:                 x.nodeNames,
 	}
 
 	x.log.Debug("begin processing DeltaAggregatedResources stream")

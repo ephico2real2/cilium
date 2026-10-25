@@ -356,7 +356,7 @@ type multiplexAuthorizationTestServer struct {
 }
 
 func (s *multiplexAuthorizationTestServer) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_DeltaAggregatedResourcesServer) error {
-	sp := NewStreamProcessor(&StreamProcessorParams{
+	sp := NewStreamProcessor(&StreamProcessorParams{NodeNames: mustFixtureNodeNames(),
 		Stream: stream, StreamRecv: make(chan *v3.DeltaDiscoveryRequest, 1),
 		EndpointEventRecv: s.endpointEventChan, Log: s.log, Metrics: s.metrics,
 		Authorizations: s.authorizations, TrustDomain: s.trustDomain,
@@ -428,7 +428,7 @@ func TestAuthorizationSendFailureTerminatesStream(t *testing.T) {
 	stream.OnSendMsg = func(any) error { return writeError }
 	metrics := NewMetrics()
 	metrics.Enable()
-	sp := NewStreamProcessor(&StreamProcessorParams{Stream: stream, StreamRecv: make(chan *v3.DeltaDiscoveryRequest, 1), EndpointEventRecv: make(chan *EndpointEvent), Log: slog.New(slog.DiscardHandler), Metrics: metrics})
+	sp := NewStreamProcessor(&StreamProcessorParams{NodeNames: fixtureNodeNames(t), Stream: stream, StreamRecv: make(chan *v3.DeltaDiscoveryRequest, 1), EndpointEventRecv: make(chan *EndpointEvent), Log: slog.New(slog.DiscardHandler), Metrics: metrics})
 	done := make(chan error, 1)
 	go func() { done <- sp.Start() }()
 	select {

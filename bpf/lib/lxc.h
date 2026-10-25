@@ -21,14 +21,6 @@ DECLARE_CONFIG(bool, ztunnel_quarantined,
 	       "Deny endpoint traffic while native ztunnel admission is quarantined")
 DECLARE_CONFIG(bool, ztunnel_required,
 	       "Sticky Required ztunnel obligation: never ordinary forwarding")
-DECLARE_CONFIG(__u16, ztunnel_probe_port_0,
-	       "Kubelet probe port accepted from the local host (network order, 0 unused)")
-DECLARE_CONFIG(__u16, ztunnel_probe_port_1,
-	       "Kubelet probe port accepted from the local host (network order, 0 unused)")
-DECLARE_CONFIG(__u16, ztunnel_probe_port_2,
-	       "Kubelet probe port accepted from the local host (network order, 0 unused)")
-DECLARE_CONFIG(__u16, ztunnel_probe_port_3,
-	       "Kubelet probe port accepted from the local host (network order, 0 unused)")
 
 static __always_inline
 int is_valid_lxc_src_ip(struct ipv6hdr *ip6 __maybe_unused)

@@ -27,7 +27,7 @@ func TestNativeQuarantineDeliveredOverADSAndBoundToIncarnation(t *testing.T) {
 	_, _, err = tbl.Insert(tx, &table.EnrolledNamespace{Name: "orders", UID: nsUID})
 	require.NoError(t, err)
 	tx.Commit()
-	sp := &StreamProcessor{db: db, enrolledNamespaceTable: tbl, authorizations: server.authorizations, log: server.log}
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), db: db, enrolledNamespaceTable: tbl, authorizations: server.authorizations, log: server.log}
 	wire, err := anypb.New(&pb.Address{Type: &pb.Address_Workload{Workload: &pb.Workload{Uid: podUID, Namespace: "orders"}}})
 	require.NoError(t, err)
 	response := &v3.DeltaDiscoveryResponse{TypeUrl: xdsTypeURLAddress, Resources: []*v3.Resource{{Name: podUID, Resource: wire}}}
@@ -71,7 +71,7 @@ func TestNativeQuarantineMissingNamespaceNeverPublishesOrphanAllow(t *testing.T)
 	db := statedb.New()
 	tbl, err := table.NewEnrolledNamespacesTable(db)
 	require.NoError(t, err)
-	sp := &StreamProcessor{db: db, enrolledNamespaceTable: tbl, authorizations: server.authorizations, log: server.log}
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), db: db, enrolledNamespaceTable: tbl, authorizations: server.authorizations, log: server.log}
 	wire, err := anypb.New(&pb.Address{Type: &pb.Address_Workload{Workload: &pb.Workload{Uid: "22222222-2222-4222-8222-222222222222", Namespace: "orders"}}})
 	require.NoError(t, err)
 	require.Error(t, sp.bindEffectiveQuarantine(&v3.DeltaDiscoveryResponse{Resources: []*v3.Resource{{Name: "pod", Resource: wire}}}))

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"sort"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -54,6 +55,8 @@ type StreamProcessorParams struct {
 	RequireMTLS               bool
 	EffectivePolicyQuarantine bool
 	IssuerProfile             *issuerProfileSource
+	// NodeNames binds Kubernetes Node names from native node discovery.
+	NodeNames nodeNameResolver
 }
 
 // StreamProcessor implements the logic for handling xDS streams to zTunnel.
@@ -77,6 +80,11 @@ type StreamProcessor struct {
 	effectivePolicyQuarantine bool
 	quarantineResources       map[string]string
 	issuerProfile             *issuerProfileSource
+	nodeNames                 nodeNameResolver
+	// Node bindings published on this stream and the native table watch from
+	// the read that produced the latest binding.
+	boundNodeNames map[netip.Addr]string
+	nodeNameWatch  <-chan struct{}
 }
 
 // CiliumEndpointsWatcher defines the interface for watching CiliumEndpoints and CiliumEndpointSlices.
@@ -142,6 +150,7 @@ func NewStreamProcessor(params *StreamProcessorParams) *StreamProcessor {
 		requireMTLS:               params.RequireMTLS,
 		effectivePolicyQuarantine: params.EffectivePolicyQuarantine,
 		issuerProfile:             params.IssuerProfile,
+		nodeNames:                 params.NodeNames,
 	}
 	sp.endpointSource = NewEndpointSource(params.K8sCiliumEndpointsWatcher, sp)
 	return sp
@@ -764,6 +773,10 @@ func (sp *StreamProcessor) drainEndpointEvents(first *EndpointEvent) (EndpointEv
 }
 
 func (sp *StreamProcessor) addressResponse(collection EndpointEventCollection) (*v3.DeltaDiscoveryResponse, error) {
+	collection, err := sp.bindNodeNames(collection)
+	if err != nil {
+		return nil, err
+	}
 	if sp.requireMTLS {
 		response, err := collection.toValidatedDeltaDiscoveryResponse(sp.trustDomain, sp.clusterName)
 		if err != nil {
@@ -883,6 +896,10 @@ func (sp *StreamProcessor) Start() error {
 				continue
 			}
 			if err := sp.handleDeltaDiscoveryReq(req); err != nil {
+				return err
+			}
+		case <-sp.nodeNameWatch:
+			if err := sp.revalidateNodeNames(); err != nil {
 				return err
 			}
 		case ep, ok := <-sp.endpointRecv:

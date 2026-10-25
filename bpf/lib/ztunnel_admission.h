@@ -29,11 +29,10 @@
  *   - own cilium_lxc flags: QUARANTINED overrides HBONE_ONLY. One map write
  *     changes both directions without a program reload.
  *
- * Exceptions are explicit and narrow:
- *   - ingress from the local host only to the Pod's declared probe ports;
- *   - no DNS, world, CIDR, remote-node or host egress exception. An approved
- *     resolver/service binding and a typed egress exception map are separate
- *     open dependencies; until then those flows are dropped.
+ * There are no plaintext exceptions: no host (kubelet probe), DNS, world,
+ * CIDR or remote-node exception in either direction. An approved resolver or
+ * service binding, a native probe-port source and a typed egress exception
+ * map are separate open dependencies; until then those flows are dropped.
  * Programs that predate these checks ignore all of this; a staged upgrade
  * remains required.
  */
@@ -74,34 +73,19 @@ static __always_inline int ztunnel_hbone_egress_verdict(__u8 nexthdr, __be16 dpo
 	return ztunnel_is_hbone(nexthdr, dport) ? CTX_ACT_OK : DROP_POLICY;
 }
 
+/* New or established ingress to an HBONE_ONLY endpoint, from any source. */
+static __always_inline int ztunnel_hbone_ingress_verdict(__u8 nexthdr, __be16 dport)
+{
+	return ztunnel_is_hbone(nexthdr, dport) ? CTX_ACT_OK : DROP_POLICY;
+}
+
 #ifdef IS_BPF_LXC
-static __always_inline bool ztunnel_is_probe_port(__be16 port)
-{
-	return port &&
-	       (port == CONFIG(ztunnel_probe_port_0) || port == CONFIG(ztunnel_probe_port_1) ||
-		port == CONFIG(ztunnel_probe_port_2) || port == CONFIG(ztunnel_probe_port_3));
-}
-
-/* New or established ingress to an HBONE_ONLY endpoint. */
-static __always_inline int
-ztunnel_hbone_ingress_verdict(__u8 nexthdr, __be16 dport, __u32 src_identity)
-{
-	if (ztunnel_is_hbone(nexthdr, dport))
-		return CTX_ACT_OK;
-	if (nexthdr == IPPROTO_TCP && identity_is_host(src_identity) &&
-	    ztunnel_is_probe_port(dport))
-		return CTX_ACT_OK;
-	return DROP_POLICY;
-}
-
 /* Reply packets. A conntrack entry that predates HBONE_ONLY cannot keep a
  * plaintext flow alive: the actual packet source port must be the HBONE
- * port (a reply from the endpoint's listener or from a peer listener), or an
- * egress reply from a declared probe port to the local host.
+ * port (a reply from the endpoint's listener or from a peer listener).
  */
 static __always_inline int
-ztunnel_hbone_reply_verdict(const struct __ctx_buff *ctx, __u8 nexthdr, int l4_off,
-			    bool egress, __u32 peer_identity)
+ztunnel_hbone_reply_verdict(const struct __ctx_buff *ctx, __u8 nexthdr, int l4_off)
 {
 	__be16 ports[2];
 
@@ -109,11 +93,7 @@ ztunnel_hbone_reply_verdict(const struct __ctx_buff *ctx, __u8 nexthdr, int l4_o
 		return DROP_POLICY;
 	if (l4_load_ports(ctx, l4_off, ports) < 0)
 		return DROP_INVALID;
-	if (ports[0] == bpf_htons(ZTUNNEL_HBONE_PORT))
-		return CTX_ACT_OK;
-	if (egress && identity_is_host(peer_identity) && ztunnel_is_probe_port(ports[0]))
-		return CTX_ACT_OK;
-	return DROP_POLICY;
+	return ports[0] == bpf_htons(ZTUNNEL_HBONE_PORT) ? CTX_ACT_OK : DROP_POLICY;
 }
 
 /* Collect the endpoint's own admission inputs. Every configured family must

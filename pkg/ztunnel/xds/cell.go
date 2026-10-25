@@ -12,7 +12,9 @@ import (
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
+	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 )
@@ -53,6 +55,8 @@ type xdsServerParams struct {
 	EnrolledNamespaceTable statedb.RWTable[*table.EnrolledNamespace]
 	Metrics                *Metrics
 	IssuerProfile          *issuerProfileSource
+	// Nodes is Cilium's native node table (Kubernetes Node discovery).
+	Nodes statedb.Table[*node.Node]
 }
 
 func NewServer(params xdsServerParams) *Server {
@@ -77,6 +81,12 @@ func NewServer(params xdsServerParams) *Server {
 	server.requireMTLS = params.Config.RequireMTLS
 	server.effectivePolicyQuarantine = params.Config.EffectivePolicyQuarantine
 	server.issuerProfile = params.IssuerProfile
+	if names, err := newNativeNodeNames(params.DB, params.Nodes, params.ClusterInfo); err != nil {
+		// Every Address response then fails closed; no IP fallback exists.
+		params.Logger.Error("ztunnel xDS has no Kubernetes node discovery", logfields.Error, err)
+	} else {
+		server.nodeNames = names
+	}
 
 	params.Lifecycle.Append(cell.Hook{
 		OnStart: func(_ cell.HookContext) error {

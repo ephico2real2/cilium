@@ -39,6 +39,7 @@ func (e testZtunnelConfigEndpoint) SourceIPDatapathIdentity() endpointtypes.Sour
 	return endpointtypes.SourceIPDatapathIdentity{ZtunnelRequired: e.required}
 }
 func (e testZtunnelConfigEndpoint) IsZtunnelQuarantined() bool { return e.quarantined }
+func (e testZtunnelConfigEndpoint) IsZtunnelMeshOnly() bool    { return e.required }
 
 func TestEndpointConfigSeparatesRequiredFromQuarantine(t *testing.T) {
 	lib := option.GetEndpointMutableOptionLibrary()
@@ -58,6 +59,7 @@ func TestEndpointConfigSeparatesRequiredFromQuarantine(t *testing.T) {
 			cfg := Endpoint(ep, &Config{}).(*BPFLXC)
 			require.Equal(t, tc.required, ep.SourceIPDatapathIdentity().ZtunnelRequired, "SourceIP identity keeps the sticky Required meaning")
 			require.Equal(t, tc.quarantined, cfg.ZtunnelQuarantined, "BPF drop config reads quarantine only")
+			require.Equal(t, tc.required, cfg.ZtunnelRequired, "sticky Required forbids ordinary forwarding at load time")
 		})
 	}
 }

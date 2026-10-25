@@ -56,6 +56,7 @@ func makeCEP(name, namespace, ip string) *types.CiliumEndpoint {
 			Addressing: v2.AddressPairList{
 				{IPV4: ip},
 			},
+			NodeIP: "10.0.0.1", // fixture node "worker-a"
 		}
 	}
 
@@ -154,7 +155,7 @@ func TestStreamProcessorStart(t *testing.T) {
 		require.NoError(t, err, "Failed to create EnrolledNamespaces table")
 
 		// Create stream processor
-		sp := NewStreamProcessor(&StreamProcessorParams{
+		sp := NewStreamProcessor(&StreamProcessorParams{NodeNames: fixtureNodeNames(t),
 			Stream:                 mockStream,
 			StreamRecv:             streamRecv,
 			EndpointEventRecv:      endpointEventRecv,
@@ -207,6 +208,7 @@ func TestStreamProcessorEndpointEvents(t *testing.T) {
 				NodeName:           "test-node-1",
 				ServiceAccountName: "test-sa-1",
 			},
+			Status: slim_corev1.PodStatus{HostIP: "10.3.3.1"},
 		}
 		createEp1.SetPod(createPod1)
 
@@ -222,6 +224,7 @@ func TestStreamProcessorEndpointEvents(t *testing.T) {
 				NodeName:           "test-node-2",
 				ServiceAccountName: "test-sa-2",
 			},
+			Status: slim_corev1.PodStatus{HostIP: "10.3.3.2"},
 		}
 		removeEp.SetPod(removePod)
 
@@ -237,6 +240,7 @@ func TestStreamProcessorEndpointEvents(t *testing.T) {
 				NodeName:           "test-node-3",
 				ServiceAccountName: "test-sa-3",
 			},
+			Status: slim_corev1.PodStatus{HostIP: "10.3.3.3"},
 		}
 		createEp2.SetPod(createPod3)
 
@@ -261,7 +265,7 @@ func TestStreamProcessorEndpointEvents(t *testing.T) {
 		endpointEventChan <- event3
 
 		// Create StreamProcessor with the populated channel
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:       NewMetrics(),
 			stream:        mockStream,
 			endpointRecv:  endpointEventChan,
@@ -298,6 +302,12 @@ func TestStreamProcessorEndpointEvents(t *testing.T) {
 			actualCreateUIDs[i] = resource.Name
 		}
 		require.ElementsMatch(t, expectedCreateUIDs, actualCreateUIDs, "CREATE resource UIDs should match expected")
+		for _, resource := range capturedResponse.Resources {
+			var address pb.Address
+			require.NoError(t, resource.Resource.UnmarshalTo(&address))
+			want := map[string]string{testUIDs[0]: "test-node-1", testUIDs[2]: "test-node-3"}[resource.Name]
+			require.Equal(t, want, address.GetWorkload().Node, "native Kubernetes node name, not host IP")
+		}
 		require.ElementsMatch(t, expectedRemoveUIDs, capturedResponse.RemovedResources, "REMOVE resource UIDs should match expected")
 
 		// Verify nonce was added to expectedNonce map
@@ -323,7 +333,7 @@ func TestStrictAddressSnapshotRejectsIncompleteWorkload(t *testing.T) {
 		sent++
 		return nil
 	}
-	sp := &StreamProcessor{
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 		stream:        stream,
 		metrics:       NewMetrics(),
 		expectedNonce: make(map[string]struct{}),
@@ -348,7 +358,7 @@ func TestStrictAddressInitialSubscriptionRequiresSync(t *testing.T) {
 		sent++
 		return nil
 	}
-	sp := &StreamProcessor{
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 		stream:        stream,
 		metrics:       NewMetrics(),
 		expectedNonce: make(map[string]struct{}),
@@ -373,7 +383,7 @@ func TestStrictAddressExplicitEmptySnapshotIsValid(t *testing.T) {
 		response = message.(*v3.DeltaDiscoveryResponse)
 		return nil
 	}
-	sp := &StreamProcessor{
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 		stream:        stream,
 		metrics:       NewMetrics(),
 		expectedNonce: make(map[string]struct{}),
@@ -401,7 +411,7 @@ func TestStrictAddressInitialSnapshotRemovesStaleClientResources(t *testing.T) {
 		return nil
 	}
 	current := makeStrictCEP("api", "orders", "pod-current", "10.0.0.20")
-	sp := &StreamProcessor{
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 		stream:        stream,
 		metrics:       NewMetrics(),
 		expectedNonce: make(map[string]struct{}),
@@ -434,7 +444,7 @@ func TestStrictAddressSendFailureDoesNotTrackNonce(t *testing.T) {
 		stream.OnSendMsg = func(any) error { return errTestStreamSendFailed }
 		metrics := NewMetrics()
 		metrics.Enable()
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			stream:        stream,
 			metrics:       metrics,
 			expectedNonce: make(map[string]struct{}),
@@ -457,7 +467,7 @@ func TestStrictAddressSendFailureDoesNotTrackNonce(t *testing.T) {
 		stream.OnSendMsg = func(any) error { return errTestStreamSendFailed }
 		metrics := NewMetrics()
 		metrics.Enable()
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			stream:        stream,
 			endpointRecv:  make(chan *EndpointEvent),
 			metrics:       metrics,
@@ -479,7 +489,7 @@ func TestDrainEndpointEventsRejectsInvalidOrUnboundedInput(t *testing.T) {
 	t.Run("closed channel", func(t *testing.T) {
 		stream := &MockStream{}
 		stream.OnContext = func() context.Context { return context.Background() }
-		sp := &StreamProcessor{stream: stream, endpointRecv: make(chan *EndpointEvent)}
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), stream: stream, endpointRecv: make(chan *EndpointEvent)}
 		close(sp.endpointRecv)
 		_, err := sp.drainEndpointEvents(&EndpointEvent{})
 		require.ErrorContains(t, err, "channel closed")
@@ -490,7 +500,7 @@ func TestDrainEndpointEventsRejectsInvalidOrUnboundedInput(t *testing.T) {
 		stream.OnContext = func() context.Context { return context.Background() }
 		endpointRecv := make(chan *EndpointEvent, 1)
 		endpointRecv <- nil
-		sp := &StreamProcessor{stream: stream, endpointRecv: endpointRecv}
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), stream: stream, endpointRecv: endpointRecv}
 		_, err := sp.drainEndpointEvents(&EndpointEvent{})
 		require.ErrorContains(t, err, "contains a nil event")
 	})
@@ -502,7 +512,7 @@ func TestDrainEndpointEventsRejectsInvalidOrUnboundedInput(t *testing.T) {
 		for range maxEndpointEventsPerBatch + 50 {
 			endpointRecv <- &EndpointEvent{}
 		}
-		sp := &StreamProcessor{stream: stream, endpointRecv: endpointRecv}
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), stream: stream, endpointRecv: endpointRecv}
 		batch, err := sp.drainEndpointEvents(&EndpointEvent{})
 		require.NoError(t, err)
 		require.Len(t, batch, maxEndpointEventsPerBatch)
@@ -514,7 +524,7 @@ func TestDrainEndpointEventsRejectsInvalidOrUnboundedInput(t *testing.T) {
 		cancel()
 		stream := &MockStream{}
 		stream.OnContext = func() context.Context { return ctx }
-		sp := &StreamProcessor{stream: stream, endpointRecv: make(chan *EndpointEvent, 1)}
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), stream: stream, endpointRecv: make(chan *EndpointEvent, 1)}
 		_, err := sp.drainEndpointEvents(&EndpointEvent{})
 		require.ErrorIs(t, err, context.Canceled)
 	})
@@ -581,7 +591,7 @@ func TestStrictStreamProcessorCoalescesQueuedEndpointChurn(t *testing.T) {
 			for _, event := range tt.queued {
 				endpointRecv <- event
 			}
-			sp := &StreamProcessor{
+			sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 				stream:        stream,
 				endpointRecv:  endpointRecv,
 				metrics:       NewMetrics(),
@@ -619,7 +629,7 @@ func TestStrictIncrementalInvalidWorkloadIsNotSent(t *testing.T) {
 	}
 	metrics := NewMetrics()
 	metrics.Enable()
-	sp := &StreamProcessor{
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 		stream:        stream,
 		endpointRecv:  make(chan *EndpointEvent),
 		metrics:       metrics,
@@ -643,7 +653,7 @@ func TestStrictIncrementalInvalidWorkloadIsNotSent(t *testing.T) {
 // DeltaDiscoveryRequest from the client.
 func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 	t.Run("Ack", func(t *testing.T) {
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics: NewMetrics(),
 			expectedNonce: map[string]struct{}{
 				"x": {},
@@ -665,7 +675,7 @@ func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 	})
 
 	t.Run("Unexpected Nonce", func(t *testing.T) {
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics: NewMetrics(),
 			// no Nonce recorded
 			expectedNonce: map[string]struct{}{},
@@ -687,7 +697,7 @@ func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 	})
 
 	t.Run("Nack logs error but does not return error", func(t *testing.T) {
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics: NewMetrics(),
 			expectedNonce: map[string]struct{}{
 				"nack-nonce": {},
@@ -713,7 +723,7 @@ func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 	})
 
 	t.Run("Strict Nack terminates the stream for full snapshot recovery", func(t *testing.T) {
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:     NewMetrics(),
 			clusterName: "cluster-alpha", requireMTLS: true,
 			expectedNonce: map[string]struct{}{
@@ -742,7 +752,7 @@ func TestStreamProcessorDeltaDiscoveryRequest(t *testing.T) {
 	})
 
 	t.Run("Unexpected TypeURL returns error", func(t *testing.T) {
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:       NewMetrics(),
 			expectedNonce: make(map[string]struct{}),
 			log:           slog.New(slog.DiscardHandler),
@@ -765,7 +775,7 @@ func TestHandleAddressTypeURL(t *testing.T) {
 			return context.Background()
 		}
 
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:       NewMetrics(),
 			stream:        mockStream,
 			expectedNonce: make(map[string]struct{}),
@@ -800,7 +810,7 @@ func TestHandleAddressTypeURL(t *testing.T) {
 		require.NoError(t, err)
 
 		mockEpSource := &MockEndpointEventSource{}
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			stream:                 mockStream,
 			expectedNonce:          make(map[string]struct{}),
@@ -1140,7 +1150,7 @@ func TestSubscribeToEndpointEvents_CEP(t *testing.T) {
 		require.NoError(t, err)
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1175,7 +1185,7 @@ func TestSubscribeToEndpointEvents_CEP(t *testing.T) {
 		enrollNamespace(t, db, tbl, "default")
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1225,7 +1235,7 @@ func TestSubscribeToEndpointEvents_CEP(t *testing.T) {
 		enrollNamespace(t, db, tbl, "default")
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1281,7 +1291,7 @@ func TestSubscribeToEndpointEvents_CEP(t *testing.T) {
 		require.NoError(t, err)
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1321,7 +1331,7 @@ func TestSubscribeToEndpointEvents_CEP(t *testing.T) {
 		require.NoError(t, err)
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1366,7 +1376,7 @@ func TestSubscribeToEndpointEvents_CES(t *testing.T) {
 		require.NoError(t, err)
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1401,7 +1411,7 @@ func TestSubscribeToEndpointEvents_CES(t *testing.T) {
 		enrollNamespace(t, db, tbl, "default")
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1450,7 +1460,7 @@ func TestSubscribeToEndpointEvents_CES(t *testing.T) {
 		enrollNamespace(t, db, tbl, "default")
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1506,7 +1516,7 @@ func TestSubscribeToEndpointEvents_CES(t *testing.T) {
 		enrollNamespace(t, db, tbl, "default")
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1588,7 +1598,7 @@ func TestSubscribeToEndpointEvents_CES(t *testing.T) {
 		enrollNamespace(t, db, tbl, "default")
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1652,7 +1662,7 @@ func TestSubscribeToEndpointEvents_CES(t *testing.T) {
 		require.NoError(t, err)
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1691,7 +1701,7 @@ func TestSubscribeToEndpointEvents_CES(t *testing.T) {
 		require.NoError(t, err)
 
 		endpointRecv := make(chan *EndpointEvent, 10)
-		sp := &StreamProcessor{
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 			metrics:                NewMetrics(),
 			endpointRecv:           endpointRecv,
 			db:                     db,
@@ -1786,14 +1796,14 @@ func TestStrictPreSyncCEPReplayBuildsFinalSnapshot(t *testing.T) {
 			tbl, err := table.NewEnrolledNamespacesTable(db)
 			require.NoError(t, err)
 			enrollNamespace(t, db, tbl, "orders")
-			sp := &StreamProcessor{
+			sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 				metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl,
 				log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true,
 			}
 			es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
 			batch := subscribeAndSync(es, context.Background())
 			if tt.wantError != "" {
-				_, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+				_, err := fixtureBound(t, batch).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
 				require.ErrorContains(t, err, tt.wantError)
 				return
 			}
@@ -1804,7 +1814,7 @@ func TestStrictPreSyncCEPReplayBuildsFinalSnapshot(t *testing.T) {
 			require.Len(t, batch, 1)
 			require.Equal(t, CREATE, batch[0].Type)
 			require.Equal(t, tt.wantUID, string(batch[0].CiliumEndpoint.OwnerReferences[0].UID))
-			_, err = batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+			_, err = fixtureBound(t, batch).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
 			require.NoError(t, err)
 		})
 	}
@@ -1842,12 +1852,12 @@ func TestStrictPreSyncCESReplayBuildsFinalSnapshot(t *testing.T) {
 		tbl, err := table.NewEnrolledNamespacesTable(db)
 		require.NoError(t, err)
 		enrollNamespace(t, db, tbl, "orders")
-		sp := &StreamProcessor{metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
 		es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
 		batch := subscribeAndSync(es, context.Background())
 		require.Len(t, batch, 1)
 		require.Equal(t, "pod-new", string(batch[0].CiliumEndpoint.OwnerReferences[0].UID))
-		_, err = batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+		_, err = fixtureBound(t, batch).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
 		require.NoError(t, err)
 	})
 
@@ -1864,7 +1874,7 @@ func TestStrictPreSyncCESReplayBuildsFinalSnapshot(t *testing.T) {
 		tbl, err := table.NewEnrolledNamespacesTable(db)
 		require.NoError(t, err)
 		enrollNamespace(t, db, tbl, "orders")
-		sp := &StreamProcessor{metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+		sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
 		es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
 		require.Empty(t, subscribeAndSync(es, context.Background()))
 	})
@@ -1892,7 +1902,7 @@ func TestStrictPostSyncCEPRecreationRemovesOldUID(t *testing.T) {
 	require.NoError(t, err)
 	enrollNamespace(t, db, tbl, "orders")
 	endpointRecv := make(chan *EndpointEvent, 4)
-	sp := &StreamProcessor{metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
 	es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
 	syncCh := make(chan EndpointEventCollection, 1)
 	es.SubscribeToEndpointEvents(context.Background(), syncCh)
@@ -1908,7 +1918,7 @@ func TestStrictPostSyncCEPRecreationRemovesOldUID(t *testing.T) {
 	require.Equal(t, "pod-new", string(created.CiliumEndpoint.OwnerReferences[0].UID))
 	require.Equal(t, CREATE, added.Type, "a new CEP key after Sync must be accepted without an old snapshot entry")
 	require.Equal(t, "pod-added", string(added.CiliumEndpoint.OwnerReferences[0].UID))
-	response, err := EndpointEventCollection{removed, created, added}.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+	response, err := fixtureBound(t, EndpointEventCollection{removed, created, added}).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
 	require.NoError(t, err, "same-address reuse is safe when the previous UID is removed in the same batch")
 	require.Equal(t, []string{"pod-old"}, response.RemovedResources)
 	require.ElementsMatch(t, []string{"pod-new", "pod-added"}, []string{response.Resources[0].Name, response.Resources[1].Name})
@@ -1943,7 +1953,7 @@ func TestStrictPostSyncCESRecreationRemovesOldUID(t *testing.T) {
 	require.NoError(t, err)
 	enrollNamespace(t, db, tbl, "orders")
 	endpointRecv := make(chan *EndpointEvent, 4)
-	sp := &StreamProcessor{metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
 	es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
 	syncCh := make(chan EndpointEventCollection, 1)
 	es.SubscribeToEndpointEvents(context.Background(), syncCh)
@@ -1957,7 +1967,7 @@ func TestStrictPostSyncCESRecreationRemovesOldUID(t *testing.T) {
 	require.Equal(t, "pod-old", string(removed.CiliumEndpoint.OwnerReferences[0].UID))
 	require.Equal(t, CREATE, created.Type)
 	require.Equal(t, "pod-new", string(created.CiliumEndpoint.OwnerReferences[0].UID))
-	response, err := EndpointEventCollection{removed, created}.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+	response, err := fixtureBound(t, EndpointEventCollection{removed, created}).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
 	require.NoError(t, err)
 	require.Equal(t, []string{"pod-old"}, response.RemovedResources)
 	require.Equal(t, []string{"pod-new"}, []string{response.Resources[0].Name})
@@ -2008,7 +2018,7 @@ func TestStrictCESDuplicateEndpointNamesFailClosed(t *testing.T) {
 			sent := 0
 			stream.OnSendMsg = func(any) error { sent++; return nil }
 			metrics := NewMetrics()
-			sp := &StreamProcessor{
+			sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 				stream: stream, metrics: metrics, expectedNonce: make(map[string]struct{}),
 				log: slog.New(slog.DiscardHandler), db: db, enrolledNamespaceTable: tbl,
 				trustDomain: "mesh.example.com", clusterName: "cluster-alpha", requireMTLS: true,
@@ -2048,10 +2058,10 @@ func TestStrictCESReplayRecoveryAfterInvalidSliceDeleted(t *testing.T) {
 	tbl, err := table.NewEnrolledNamespacesTable(db)
 	require.NoError(t, err)
 	enrollNamespace(t, db, tbl, "orders")
-	sp := &StreamProcessor{metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
 	es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
 	batch := subscribeAndSync(es, context.Background())
-	response, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+	response, err := fixtureBound(t, batch).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
 	require.NoError(t, err, "deleting the malformed CES before Sync clears the source error")
 	require.Empty(t, response.Resources)
 }
@@ -2101,10 +2111,10 @@ func TestStrictCESReplayRecoveryAfterDuplicateEndpointFix(t *testing.T) {
 			tbl, err := table.NewEnrolledNamespacesTable(db)
 			require.NoError(t, err)
 			enrollNamespace(t, db, tbl, "orders")
-			sp := &StreamProcessor{metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+			sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), metrics: NewMetrics(), db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
 			es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
 			batch := subscribeAndSync(es, context.Background())
-			response, err := batch.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+			response, err := fixtureBound(t, batch).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
 			if tt.wantError {
 				require.ErrorContains(t, err, "duplicate endpoint")
 				require.Nil(t, response)
@@ -2146,7 +2156,7 @@ func TestStrictPostSyncCESRejectsDuplicateNamesAndReconnectRecovers(t *testing.T
 	require.NoError(t, err)
 	enrollNamespace(t, db, tbl, "orders")
 	endpointRecv := make(chan *EndpointEvent, 2)
-	sp := &StreamProcessor{metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
+	sp := &StreamProcessor{nodeNames: fixtureNodeNames(t), metrics: NewMetrics(), endpointRecv: endpointRecv, db: db, enrolledNamespaceTable: tbl, log: slog.New(slog.DiscardHandler), clusterName: "cluster-alpha", requireMTLS: true}
 	es := &EndpointSource{k8sCiliumEndpointsWatcher: watcher, sp: sp}
 	syncCh := make(chan EndpointEventCollection, 1)
 	es.SubscribeToEndpointEvents(context.Background(), syncCh)
@@ -2167,7 +2177,7 @@ func TestStrictPostSyncCESRejectsDuplicateNamesAndReconnectRecovers(t *testing.T
 	recoveryWatcher := &MockCiliumEndpointsWatcher{cesResource: &MockCESResource{eventsChan: recoveryChan}}
 	recoverySource := &EndpointSource{k8sCiliumEndpointsWatcher: recoveryWatcher, sp: sp}
 	recovered := subscribeAndSync(recoverySource, context.Background())
-	recoveryResponse, err := recovered.toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
+	recoveryResponse, err := fixtureBound(t, recovered).toValidatedDeltaDiscoveryResponse("mesh.example.com", "cluster-alpha")
 	require.NoError(t, err)
 	require.Len(t, recoveryResponse.Resources, 1)
 	require.Equal(t, "pod-recovered", recoveryResponse.Resources[0].Name)

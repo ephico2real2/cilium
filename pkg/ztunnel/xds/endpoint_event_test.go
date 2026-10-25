@@ -49,8 +49,8 @@ func TestEndpointEventToXDSAddress(t *testing.T) {
 			CiliumEndpoint: cep,
 		}
 
-		// Transform to XDS Address
-		address, err := event.ToXDSAddress()
+		// Transform to XDS Address after native node-name binding.
+		address, err := withFixtureNodeName(t, event).ToXDSAddress()
 		require.NoError(t, err, "ToXDSAddress should not error for valid endpoint")
 		require.NotNil(t, address, "Address should not be nil")
 
@@ -63,9 +63,9 @@ func TestEndpointEventToXDSAddress(t *testing.T) {
 		require.Equal(t, ep.K8sUID, workload.Uid, "Workload.Uid should match Pod UID from OwnerReferences")
 		require.Equal(t, ep.K8sPodName, workload.Name, "Workload.Name should match endpoint.K8sPodName")
 		require.Equal(t, ep.K8sNamespace, workload.Namespace, "Workload.Namespace should match endpoint.K8sNamespace")
-		// TODO(hemanthmalla): Currently we're setting zTunnel node name to host IP due to lack of nodename in CEP.
-		// Revert to node name once we lookup with a local object that has node name.
-		require.Equal(t, pod.Status.HostIP, workload.Node, "Workload.Node should match pod.Status.HostIP")
+		// Native node discovery binds the Kubernetes Node name, never the host IP.
+		require.Equal(t, pod.Spec.NodeName, workload.Node, "Workload.Node should match pod.Spec.NodeName")
+		require.NotEqual(t, pod.Status.HostIP, workload.Node, "Workload.Node must not be the host IP")
 
 		require.Equal(t, pod.Spec.ServiceAccountName, workload.ServiceAccount, "Workload.ServiceAccount should match pod.Spec.ServiceAccountName")
 		require.Equal(t, pb.TunnelProtocol_HBONE, workload.TunnelProtocol, "Workload.TunnelProtocol should be HBONE")
@@ -115,7 +115,7 @@ func TestEndpointEventToXDSAddress(t *testing.T) {
 		// Note: REMOVE events don't use ToXDSAddress() in the transformation pipeline.
 		// They are handled directly by adding the K8sUID to RemovedResources in
 		// ToDeltaDiscoveryResponse(). However, the method should still work.
-		address, err := event.ToXDSAddress()
+		address, err := withFixtureNodeName(t, event).ToXDSAddress()
 		require.NoError(t, err, "ToXDSAddress should not error for REMOVE event")
 		require.NotNil(t, address, "Address should not be nil")
 
@@ -128,9 +128,9 @@ func TestEndpointEventToXDSAddress(t *testing.T) {
 		require.Equal(t, ep.K8sUID, workload.Uid, "Workload.Uid should match Pod UID from OwnerReferences")
 		require.Equal(t, ep.K8sPodName, workload.Name, "Workload.Name should match endpoint.K8sPodName")
 		require.Equal(t, ep.K8sNamespace, workload.Namespace, "Workload.Namespace should match endpoint.K8sNamespace")
-		// TODO(hemanthmalla): Currently we're setting zTunnel node name to host IP due to lack of nodename in CEP.
-		// Revert to node name once we lookup with a local object that has node name.
-		require.Equal(t, pod.Status.HostIP, workload.Node, "Workload.Node should match pod.Status.HostIP")
+		// Native node discovery binds the Kubernetes Node name, never the host IP.
+		require.Equal(t, pod.Spec.NodeName, workload.Node, "Workload.Node should match pod.Spec.NodeName")
+		require.NotEqual(t, pod.Status.HostIP, workload.Node, "Workload.Node must not be the host IP")
 		require.Equal(t, pod.Spec.ServiceAccountName, workload.ServiceAccount, "Workload.ServiceAccount should match pod.Spec.ServiceAccountName")
 		require.Equal(t, pb.TunnelProtocol_HBONE, workload.TunnelProtocol, "Workload.TunnelProtocol should be HBONE")
 
@@ -263,7 +263,7 @@ func TestEndpointEventCollectionToDeltaDiscoveryResponse(t *testing.T) {
 		}
 
 		// Transform to DeltaDiscoveryResponse
-		response := collection.ToDeltaDiscoveryResponse()
+		response := bindFixtureNodes(t, collection).ToDeltaDiscoveryResponse()
 		require.NotNil(t, response, "DeltaDiscoveryResponse should not be nil")
 
 		// Validate response structure
@@ -292,8 +292,7 @@ func TestEndpointEventCollectionToDeltaDiscoveryResponse(t *testing.T) {
 				require.Equal(t, testUIDs[0], workload.Uid)
 				require.Equal(t, "create-pod-1", workload.Name)
 				require.Equal(t, "create-namespace-1", workload.Namespace)
-				// require.Equal(t, "create-node-1", workload.Node)
-				require.Equal(t, "100.1.1.10", workload.Node)
+				require.Equal(t, "create-node-1", workload.Node)
 				require.Equal(t, "create-sa-1", workload.ServiceAccount)
 				require.Equal(t, pb.TunnelProtocol_HBONE, workload.TunnelProtocol)
 				require.Len(t, workload.Addresses, 2, "Should have 2 IP addresses")
@@ -302,8 +301,7 @@ func TestEndpointEventCollectionToDeltaDiscoveryResponse(t *testing.T) {
 				require.Equal(t, testUIDs[2], workload.Uid)
 				require.Equal(t, "create-pod-2", workload.Name)
 				require.Equal(t, "create-namespace-2", workload.Namespace)
-				// require.Equal(t, "create-node-2", workload.Node)
-				require.Equal(t, "100.1.1.20", workload.Node)
+				require.Equal(t, "create-node-2", workload.Node)
 				require.Equal(t, "create-sa-2", workload.ServiceAccount)
 				require.Equal(t, pb.TunnelProtocol_HBONE, workload.TunnelProtocol)
 				require.Len(t, workload.Addresses, 2, "Should have 2 IP addresses")
@@ -332,7 +330,8 @@ func TestEndpointEventCollectionToValidatedDeltaDiscoveryResponse(t *testing.T) 
 			Spec:   slim_corev1.PodSpec{ServiceAccountName: "api"},
 			Status: slim_corev1.PodStatus{HostIP: "10.0.0.1"},
 		})
-		return &EndpointEvent{Type: eventType, CiliumEndpoint: endpointToCiliumEndpoint(ep)}
+		// Bound as at the Address response boundary (native node discovery).
+		return &EndpointEvent{Type: eventType, CiliumEndpoint: endpointToCiliumEndpoint(ep), NodeName: "worker-a"}
 	}
 
 	t.Run("valid batch binds trust domain and removes exact UID", func(t *testing.T) {
@@ -469,7 +468,7 @@ func TestStreamProcessorAddressResponseCarriesClusterID(t *testing.T) {
 
 	for _, clusterName := range []string{"cluster-alpha", "cluster-beta"} {
 		for _, requireMTLS := range []bool{true, false} {
-			sp := &StreamProcessor{
+			sp := &StreamProcessor{nodeNames: fixtureNodeNames(t),
 				trustDomain: "mesh.example.com",
 				clusterName: clusterName,
 				requireMTLS: requireMTLS,
@@ -496,7 +495,8 @@ func TestEndpointEventCollectionCoalesceStrictEndpointEvents(t *testing.T) {
 			Spec:   slim_corev1.PodSpec{ServiceAccountName: "api"},
 			Status: slim_corev1.PodStatus{HostIP: "10.0.0.1"},
 		})
-		return &EndpointEvent{Type: eventType, CiliumEndpoint: endpointToCiliumEndpoint(ep)}
+		// Bound as at the Address response boundary (native node discovery).
+		return &EndpointEvent{Type: eventType, CiliumEndpoint: endpointToCiliumEndpoint(ep), NodeName: "worker-a"}
 	}
 
 	t.Run("last create wins", func(t *testing.T) {
@@ -541,4 +541,22 @@ func TestEndpointEventCollectionCoalesceStrictEndpointEvents(t *testing.T) {
 		require.NoError(t, response.Resources[0].Resource.UnmarshalTo(&address))
 		require.Equal(t, netip.MustParseAddr("10.0.0.12").AsSlice(), address.GetWorkload().Addresses[0])
 	})
+}
+
+// withFixtureNodeName binds a single event through native node discovery,
+// including REMOVED events that are converted directly by these unit tests.
+func withFixtureNodeName(t testing.TB, event *EndpointEvent) *EndpointEvent {
+	probe := *event
+	probe.Type = CREATE
+	bound, _, _, err := fixtureNodeNames(t).bind(EndpointEventCollection{&probe})
+	require.NoError(t, err)
+	copy := *event
+	copy.NodeName = bound[0].NodeName
+	return &copy
+}
+
+func bindFixtureNodes(t testing.TB, collection EndpointEventCollection) EndpointEventCollection {
+	bound, _, _, err := fixtureNodeNames(t).bind(collection)
+	require.NoError(t, err)
+	return bound
 }
