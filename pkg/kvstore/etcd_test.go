@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
@@ -43,6 +44,27 @@ func TestHint(t *testing.T) {
 	err = ctx.Err()
 
 	require.ErrorContains(t, Hint(err), "etcd client timeout exceeded")
+}
+
+func TestEtcdNewClientStopsWaitingForMissingConfigWhenContextIsCanceled(t *testing.T) {
+	logger := hivetest.Logger(t)
+	module := newEtcdModule().(*etcdModule)
+	configPath := filepath.Join(t.TempDir(), "not-yet-projected-etcd-config")
+	require.NoError(t, module.setConfig(logger, map[string]string{EtcdOptionConfig: configPath}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	backend, ready := module.newClient(ctx, logger, ExtraOptions{})
+	require.Nil(t, backend)
+	select {
+	case err, open := <-ready:
+		require.True(t, open, "canceled startup should report its context error")
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+	case <-time.After(time.Second):
+		t.Fatal("etcd client factory kept waiting after its context expired")
+	}
+	_, open := <-ready
+	require.False(t, open, "startup error channel should close after cancellation")
 }
 
 func setupEtcdLockedSuite(tb testing.TB) (BackendOperations, *etcdAPI.Client) {

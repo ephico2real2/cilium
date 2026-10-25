@@ -246,7 +246,15 @@ func (e *etcdModule) newClient(ctx context.Context, logger *slog.Logger, opts Ex
 			logger.Info("Waiting for all etcd configuration files to be available",
 				logfields.Error, err,
 			)
-			time.Sleep(5 * time.Second)
+			timer := time.NewTimer(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				errChan <- ctx.Err()
+				close(errChan)
+				return nil, errChan
+			case <-timer.C:
+			}
 		case err != nil:
 			errChan <- err
 			close(errChan)
