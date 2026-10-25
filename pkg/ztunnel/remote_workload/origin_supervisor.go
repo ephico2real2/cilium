@@ -32,8 +32,10 @@ import (
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
+	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/time"
+	ztmembership "github.com/cilium/cilium/pkg/ztunnel/membership"
 )
 
 const (
@@ -317,6 +319,7 @@ func readSecretFile(path string, maxBytes int64) ([]byte, os.FileMode, error) {
 type OriginPeerConnection struct {
 	Backend       kvstore.BackendOperations
 	Evidence      kvstore.RemotePeerEvidenceProvider
+	RemoteConfig  cmtypes.CiliumClusterConfig
 	ProfileID     [sha256.Size]byte
 	IdentityEpoch uint64
 	cancel        context.CancelFunc
@@ -459,6 +462,10 @@ func (o PinnedEtcdOriginPeerOpener) Open(ctx context.Context, logger *slog.Logge
 		closeBackend(backend)
 		return nil, fmt.Errorf("direct origin ClusterID %d does not match configured ClusterID %d", remoteConfig.ID, profile.ExpectedClusterID)
 	}
+	if remoteConfig.Capabilities.Cached || !remoteConfig.Capabilities.WorkloadIdentityV1 || !remoteConfig.Capabilities.ZtunnelMembershipV1 {
+		closeBackend(backend)
+		return nil, fmt.Errorf("direct origin does not advertise required workload identity and membership formats")
+	}
 	binder, ok := backend.(kvstore.RemotePeerBackendBinder)
 	if !ok {
 		closeBackend(backend)
@@ -508,6 +515,7 @@ func (o PinnedEtcdOriginPeerOpener) Open(ctx context.Context, logger *slog.Logge
 	return &OriginPeerConnection{
 		Backend:       bound,
 		Evidence:      provider,
+		RemoteConfig:  remoteConfig,
 		ProfileID:     profileID,
 		IdentityEpoch: evidence.IdentityEpoch(),
 		cancel:        cancelClient,
@@ -552,31 +560,57 @@ type OriginPeerWatchSession interface {
 type IPIdentityOriginWatchSession struct {
 	Factory     store.Factory
 	ClusterInfo cmtypes.ClusterInfo
-	Sink        SnapshotSink
-	OnListDone  func()
+	Logger      *slog.Logger
+	Joiner      *SourceMembershipJoiner
+	OnInventory func(*Inventory, store.WatchStore, store.WatchStore)
+
+	mu          lock.Mutex
+	clusterName string
+	clusterID   uint32
 }
 
-func (s IPIdentityOriginWatchSession) Run(ctx context.Context, profile OriginPeerConfig, connection *OriginPeerConnection) error {
-	if s.Factory == nil || s.Sink == nil || connection == nil || connection.Backend == nil || connection.Evidence == nil {
+func (s *IPIdentityOriginWatchSession) Run(ctx context.Context, profile OriginPeerConfig, connection *OriginPeerConnection) error {
+	if s == nil || s.Factory == nil || s.Logger == nil || s.Joiner == nil || connection == nil || connection.Backend == nil || connection.Evidence == nil {
 		return fmt.Errorf("direct-origin watch session dependencies are incomplete")
 	}
-	inventory, err := NewInventory(profile.Name, profile.ExpectedClusterID, s.ClusterInfo, connection.Evidence, s.Sink)
+	s.mu.Lock()
+	if s.clusterName == "" {
+		s.clusterName = profile.Name
+		s.clusterID = profile.ExpectedClusterID
+	} else if s.clusterName != profile.Name || s.clusterID != profile.ExpectedClusterID {
+		s.mu.Unlock()
+		return fmt.Errorf("direct-origin watch session cannot change its pinned cluster identity")
+	}
+	joiner := s.Joiner
+	s.mu.Unlock()
+
+	inventory, err := NewInventory(profile.Name, profile.ExpectedClusterID, s.ClusterInfo, connection.Evidence, joiner)
 	if err != nil {
 		return err
 	}
-	inventory.SetOnListDone(s.OnListDone)
 	watch := s.Factory.NewWatchStore(
 		profile.Name,
 		func() store.Key { return &identity.IPIdentityPair{} },
 		inventory,
 		store.RWSWithSessionObserver(inventory),
 	)
+	sourceWatch := s.Factory.NewWatchStore(
+		profile.Name,
+		func() store.Key { return &SourceMembershipKey{} },
+		joiner,
+		store.RWSWithSessionObserver(joiner),
+	)
+	if s.OnInventory != nil {
+		s.OnInventory(inventory, watch, sourceWatch)
+	}
 	prefix := kvstore.JoinKey(ipcache.IPIdentitiesPath, ipcache.AddressSpace)
-	watch.Watch(ctx, connection.Backend, prefix)
+	sourcePrefix := kvstore.JoinKey(ztmembership.SourceMembershipPrefix)
+	err = runSourceMembershipWatchPair(ctx, connection.Backend, watch, prefix, sourceWatch, sourcePrefix,
+		inventory, joiner, connection.Evidence, profile.Name, profile.ExpectedClusterID)
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	return fmt.Errorf("direct-origin watch returned while its context remained active")
+	return err
 }
 
 // OriginPeerInvalidator synchronously withdraws this peer's current security
@@ -890,6 +924,12 @@ func validateOriginPeerProfile(profile OriginPeerConfig, expectedName string, ex
 }
 
 func validateOriginPeerConnection(profile OriginPeerConfig, connection *OriginPeerConnection, now time.Time) error {
+	if connection.RemoteConfig.ID != profile.ExpectedClusterID ||
+		connection.RemoteConfig.Capabilities.Cached ||
+		!connection.RemoteConfig.Capabilities.WorkloadIdentityV1 ||
+		!connection.RemoteConfig.Capabilities.ZtunnelMembershipV1 {
+		return fmt.Errorf("direct-origin cluster configuration lacks the required authenticated workload identity and membership formats")
+	}
 	evidence, err := connection.Evidence.CurrentRemotePeerEvidence()
 	if err != nil {
 		return fmt.Errorf("read direct-origin TLS evidence: %w", err)
@@ -965,4 +1005,4 @@ func hashOriginDigest(digest []byte) [sha256.Size]byte {
 
 var _ OriginPeerConfigLoader = FilesystemOriginPeerConfigLoader{}
 var _ OriginPeerConnectionOpener = PinnedEtcdOriginPeerOpener{}
-var _ OriginPeerWatchSession = IPIdentityOriginWatchSession{}
+var _ OriginPeerWatchSession = (*IPIdentityOriginWatchSession)(nil)

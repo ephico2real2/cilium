@@ -48,18 +48,20 @@ type Workload struct {
 // Snapshot is a complete replacement view. Invalid=true withdraws the prior
 // snapshot. Generation is strictly increasing for this observer instance.
 type Snapshot struct {
-	ClusterName             string
-	ClusterID               uint32
-	Generation              uint64
-	SessionEpoch            uint64
-	PeerIdentityEpoch       uint64
-	PeerCertificateNotAfter time.Time
-	PeerHeartbeatAt         time.Time
-	EnrollmentGeneration    uint64
-	PolicyGeneration        uint64
-	Valid                   bool
-	Workloads               []Workload
-	Reason                  string
+	ClusterName                     string
+	ClusterID                       uint32
+	Generation                      uint64
+	SessionEpoch                    uint64
+	SourceMembershipSessionEpoch    uint64
+	SourceMembershipLeaseValidUntil time.Time
+	PeerIdentityEpoch               uint64
+	PeerCertificateNotAfter         time.Time
+	PeerHeartbeatAt                 time.Time
+	EnrollmentGeneration            uint64
+	PolicyGeneration                uint64
+	Valid                           bool
+	Workloads                       []Workload
+	Reason                          string
 }
 
 // SnapshotSink must be bounded and nonblocking. WatchStore invokes this from
@@ -319,6 +321,15 @@ func (i *Inventory) CheckPeerEvidence() error {
 		i.invalidateLocked(err.Error())
 		return err
 	}
+	snapshot, err := i.snapshotLockedChecked()
+	if err != nil {
+		i.invalidateLocked(err.Error())
+		return err
+	}
+	// Refresh the downstream bounded peer-evidence deadline even when the
+	// workload key set is unchanged. The source lease itself is not extended by
+	// this event; it still requires a fresh source publisher generation.
+	i.publishLocked(true, "", snapshot)
 	return nil
 }
 

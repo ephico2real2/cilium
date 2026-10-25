@@ -1794,3 +1794,84 @@ type yamlKeyPairConfig struct {
 	Certfile string `json:"cert-file"`
 	Keyfile  string `json:"key-file"`
 }
+
+// UpdateWithLeaseTTLIfLocked writes a value under a fresh, caller-selected
+// short lease and atomically checks the provided distributed lock. This method
+// is reserved for fail-closed freshness records; ordinary KVStore entries keep
+// using the shared configured lease manager.
+func (e *etcdClient) UpdateWithLeaseTTLIfLocked(ctx context.Context, key string, value []byte, ttl time.Duration, lock KVLocker) (err error) {
+	if ttl < time.Second || ttl%time.Second != 0 || ttl > time.Minute {
+		return fmt.Errorf("explicit key lease TTL must be whole seconds between 1s and 1m")
+	}
+	if lock == nil || lock.Comparator() == nil {
+		return fmt.Errorf("explicit key lease update requires a live distributed lock")
+	}
+	cmp, ok := lock.Comparator().(client.Cmp)
+	if !ok {
+		return fmt.Errorf("distributed lock comparator has unsupported type %T", lock.Comparator())
+	}
+
+	lr, err := e.limiter.Wait(ctx)
+	if err != nil {
+		return Hint(err)
+	}
+	defer func() { lr.Error(err, -1) }()
+	defer func(duration *spanstat.SpanStat) {
+		increaseMetric(key, metricSet, "UpdateWithLeaseTTLIfLocked", duration.EndError(err).Total(), err)
+	}(spanstat.Start())
+
+	grant, err := e.client.Grant(ctx, int64(ttl/time.Second))
+	if err != nil {
+		return Hint(err)
+	}
+	if err := validateLeaseTTLGrant(grant, ttl); err != nil {
+		return err
+	}
+
+	// Read a persistent, unleased head once. Never retry a failed comparison:
+	// a newer operation may have completed while this operation was ambiguous.
+	head := leaseTTLWriteHead(key)
+	current, err := e.client.Get(ctx, head)
+	if err != nil {
+		return Hint(err)
+	}
+	var revision int64
+	if current == nil || len(current.Kvs) > 1 {
+		return fmt.Errorf("etcd returned an invalid short lease write head")
+	}
+	if len(current.Kvs) == 1 {
+		if current.Kvs[0].Lease != 0 || current.Kvs[0].ModRevision <= 0 {
+			return fmt.Errorf("short lease write head must be persistent")
+		}
+		revision = current.Kvs[0].ModRevision
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return e.commitLeaseTTLWrite(ctx, key, value, grant.ID, cmp, revision)
+}
+
+func validateLeaseTTLGrant(grant *client.LeaseGrantResponse, ttl time.Duration) error {
+	if grant == nil || grant.ID == client.NoLease || grant.TTL != int64(ttl/time.Second) {
+		return fmt.Errorf("etcd returned an invalid short lease grant")
+	}
+	return nil
+}
+
+// commitLeaseTTLWrite performs exactly one transaction against a captured head.
+// It is separate so the real-etcd regression can submit a delayed old operation
+// after a newer publication, expiry and ownership rotation.
+func (e *etcdClient) commitLeaseTTLWrite(ctx context.Context, key string, value []byte, lease client.LeaseID, owner client.Cmp, headRevision int64) error {
+	head := leaseTTLWriteHead(key)
+	result, err := e.client.Txn(ctx).If(owner, client.Compare(client.ModRevision(head), "=", headRevision)).Then(
+		client.OpPut(head, "1"), // no lease: expiry must not reset the CAS token
+		client.OpPut(key, string(value), client.WithLease(lease)),
+	).Commit()
+	if err != nil {
+		return Hint(err)
+	}
+	if result == nil || !result.Succeeded {
+		return ErrLeaseTTLWriteConflict
+	}
+	return nil
+}

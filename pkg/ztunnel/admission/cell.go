@@ -10,6 +10,7 @@ import (
 	"log/slog"
 
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/job"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -19,6 +20,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	k8sclient "github.com/cilium/cilium/pkg/k8s/client"
 	slimcore "github.com/cilium/cilium/pkg/k8s/slim/k8s/client/clientset/versioned/typed/core/v1"
+	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	nodetypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
@@ -33,6 +35,7 @@ const (
 	logDeadline           = "deadline"
 	logNamespaceUID       = "namespaceUID"
 	logEnrollmentRequired = "enrollmentRequired"
+	logSourcePublisher    = "ztunnel-source-membership-publisher"
 )
 
 var Cell = cell.Module(
@@ -61,6 +64,9 @@ type params struct {
 	AgentConfig *option.DaemonConfig
 	Logger      *slog.Logger
 	Registry    *membership.Registry
+	JobGroup    job.Group
+	KVStore     kvstore.Client                  `optional:"true"`
+	Endpoints   endpointmanager.EndpointManager `optional:"true"`
 }
 
 type out struct {
@@ -110,6 +116,19 @@ func newGate(p params) (out, error) {
 		g.enroll = p.Server.EnrollEndpointForOwnerContext
 		g.recorder = newRequiredRecorder(p.AgentConfig.StateDir, p.ClusterInfo.ID, g.nodeName)
 		p.Lifecycle.Append(cell.Hook{OnStop: func(cell.HookContext) error { return g.recorder.Close() }})
+		if p.Config.EnableRemoteWorkloadMembership {
+			if p.KVStore == nil || !p.KVStore.IsEnabled() || p.Endpoints == nil {
+				return out{}, fmt.Errorf("remote workload membership requires an enabled KVStore and endpoint manager")
+			}
+			publisher, err := membership.NewSourcePublisher(g.membership, p.Endpoints, []membership.EndpointRevalidator{g}, p.KVStore, p.Logger,
+				membership.SourcePublisherConfig{ClusterInfo: p.ClusterInfo, NodeName: g.nodeName()})
+			if err != nil {
+				return out{}, fmt.Errorf("remote workload membership cannot start without a short-lease KVStore backend: %w", err)
+			}
+			p.JobGroup.Add(job.OneShot(logSourcePublisher, func(ctx context.Context, _ cell.Health) error {
+				return publisher.Run(ctx)
+			}))
+		}
 	}
 	return out{Gate: g, Revalidator: g}, nil
 }

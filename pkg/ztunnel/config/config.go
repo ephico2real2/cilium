@@ -19,6 +19,7 @@ var DefaultConfig = Config{
 	EnableZTunnel:                  false,
 	CAType:                         CATypeInternal,
 	SpiffeTrustDomain:              "cluster.local",
+	RemoteOriginClientCommonName:   "ztunnel-origin-reader",
 	EndpointEventChannelBufferSize: 1,
 }
 
@@ -29,6 +30,9 @@ type Config struct {
 	EnableZTunnel                  bool
 	RequireMTLS                    bool   `mapstructure:"ztunnel-require-mtls"`
 	EffectivePolicyQuarantine      bool   `mapstructure:"ztunnel-effective-policy-quarantine"`
+	EnableRemoteWorkloadMembership bool   `mapstructure:"ztunnel-enable-remote-workload-membership"`
+	RemoteOriginConfigDirectory    string `mapstructure:"ztunnel-remote-origin-config-dir"`
+	RemoteOriginClientCommonName   string `mapstructure:"ztunnel-remote-origin-client-common-name"`
 	CAType                         string `mapstructure:"ztunnel-ca-type"`
 	SpiffeTrustDomain              string `mapstructure:"mesh-auth-spiffe-trust-domain"`
 	EndpointEventChannelBufferSize int    `mapstructure:"ztunnel-endpoint-event-channel-buffer-size"`
@@ -38,6 +42,9 @@ func (c Config) Flags(flags *pflag.FlagSet) {
 	flags.Bool("enable-ztunnel", false, "Use zTunnel as Cilium's encryption infrastructure")
 	flags.Bool("ztunnel-effective-policy-quarantine", false, "Experimental: bind explicit deny-by-default policy quarantine to every native workload; no effective policy activation")
 	flags.Bool("ztunnel-require-mtls", false, "Experimental: require an authenticated peer for inbound ztunnel workload TCP connections")
+	flags.Bool("ztunnel-enable-remote-workload-membership", false, "Experimental: publish and consume short-lived, directly authenticated remote workload membership; does not enable remote authorization or traffic")
+	flags.String("ztunnel-remote-origin-config-dir", "", "Read-only directory containing per-peer direct ClusterMesh origin etcd configs for remote workload membership")
+	flags.String("ztunnel-remote-origin-client-common-name", "ztunnel-origin-reader", "Expected common name of the dedicated read-only direct-origin etcd client certificate")
 	flags.String("mesh-auth-spiffe-trust-domain", "cluster.local", "SPIFFE trust domain for ztunnel workloads")
 	flags.String("ztunnel-ca-type", CATypeInternal, "Workload CA backend: internal or spire")
 	flags.Int("ztunnel-endpoint-event-channel-buffer-size", 1, "Buffer size for the ztunnel endpoint event channel")
@@ -47,6 +54,15 @@ func (c Config) Flags(flags *pflag.FlagSet) {
 func (c Config) Validate() error {
 	if c.EffectivePolicyQuarantine && (!c.EnableZTunnel || !c.RequireMTLS) {
 		return fmt.Errorf("native effective policy quarantine requires enabled ztunnel and strict mTLS")
+	}
+	if c.EnableRemoteWorkloadMembership && (!c.EnableZTunnel || !c.RequireMTLS) {
+		return fmt.Errorf("remote workload membership requires enabled ztunnel and strict mTLS")
+	}
+	if c.EnableRemoteWorkloadMembership && c.RemoteOriginConfigDirectory == "" {
+		return fmt.Errorf("remote workload membership requires ztunnel-remote-origin-config-dir")
+	}
+	if c.EnableRemoteWorkloadMembership && c.RemoteOriginClientCommonName == "" {
+		return fmt.Errorf("remote workload membership requires ztunnel-remote-origin-client-common-name")
 	}
 	if c.RequireMTLS && !c.EnableZTunnel {
 		return fmt.Errorf("ztunnel-require-mtls requires enable-ztunnel")

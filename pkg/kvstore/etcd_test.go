@@ -537,6 +537,40 @@ func TestUpdateIfLocked(t *testing.T) {
 	}
 }
 
+func TestUpdateWithExplicitLeaseTTLIfLocked(t *testing.T) {
+	backend, client := setupEtcdLockedSuite(t)
+	selected, ok := backend.(Client)
+	require.True(t, ok)
+	writer, ok := LeaseTTLWriterFor(selected)
+	require.True(t, ok, "etcd backend must expose explicit short key leases")
+
+	ctx := context.Background()
+	key := t.TempDir() + "/ztunnel-source-membership"
+	lock, err := backend.LockPath(ctx, key+"/writer")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, lock.Unlock(context.Background())) }()
+
+	require.Error(t, writer.UpdateWithLeaseTTLIfLocked(ctx, key, []byte("invalid"), 1500*time.Millisecond, lock))
+	require.Error(t, writer.UpdateWithLeaseTTLIfLocked(ctx, key, []byte("invalid"), 2*time.Second, nil))
+	require.NoError(t, writer.UpdateWithLeaseTTLIfLocked(ctx, key, []byte("current"), 5*time.Second, lock))
+
+	value, err := client.Get(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, value.Kvs, 1)
+	require.Equal(t, "current", string(value.Kvs[0].Value))
+
+	deadline := time.Now().Add(12 * time.Second)
+	for time.Now().Before(deadline) {
+		value, err = client.Get(ctx, key)
+		require.NoError(t, err)
+		if len(value.Kvs) == 0 {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatal("short membership key lease did not expire")
+}
+
 func TestUpdateIfDifferentIfLocked(t *testing.T) {
 	client, e := setupEtcdLockedSuite(t)
 
@@ -1625,4 +1659,93 @@ func TestUserManagement(t *testing.T) {
 	// But deleting it afterwards should succeed.
 	require.NoError(t, client.UserEnforceAbsence(t.Context(), "dolphin"))
 	assertUsers(t, "alpaca", "llama")
+}
+
+func TestLeaseTTLWriteHeadRejectsDelayedCommitAfterWithdrawalAndKeyRemoval(t *testing.T) {
+	backend, raw := setupEtcdLockedSuite(t)
+	wrapped, ok := backend.(*clientImpl)
+	require.True(t, ok)
+	native, ok := wrapped.BackendOperations.(*etcdClient)
+	require.True(t, ok)
+	writer, ok := LeaseTTLWriterFor(wrapped)
+	require.True(t, ok)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	key := t.TempDir() + "/membership"
+	lock, err := backend.LockPath(ctx, key+"/writer")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, lock.Unlock(context.Background())) }()
+	require.NoError(t, writer.UpdateWithLeaseTTLIfLocked(ctx, key, []byte("captured-1"), 30*time.Second, lock))
+	head, err := raw.Get(ctx, leaseTTLWriteHead(key))
+	require.NoError(t, err)
+	require.Len(t, head.Kvs, 1)
+	require.Zero(t, head.Kvs[0].Lease, "write head must not expire with source data")
+	oldRevision := head.Kvs[0].ModRevision
+	oldLease, err := raw.Grant(ctx, 30)
+	require.NoError(t, err)
+	owner, ok := lock.Comparator().(etcdAPI.Cmp)
+	require.True(t, ok)
+
+	// The old operation captured this head before its caller lost the RPC
+	// outcome. A later restrictive transaction has now completed successfully.
+	require.NoError(t, writer.UpdateWithLeaseTTLIfLocked(ctx, key, []byte("withdrawn-3"), 30*time.Second, lock))
+	err = native.commitLeaseTTLWrite(ctx, key, []byte("late-captured-2"), oldLease.ID, owner, oldRevision)
+	require.ErrorIs(t, err, ErrLeaseTTLWriteConflict)
+	got, err := raw.Get(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, got.Kvs, 1)
+	require.Equal(t, "withdrawn-3", string(got.Kvs[0].Value))
+
+	// Removing or expiring the leased source key must not recreate revision
+	// zero and admit the old transaction (the ordinary ModRevision(key) ABA).
+	_, err = raw.Revoke(ctx, etcdAPI.LeaseID(got.Kvs[0].Lease))
+	require.NoError(t, err)
+	err = native.commitLeaseTTLWrite(ctx, key, []byte("resurrected-old"), oldLease.ID, owner, oldRevision)
+	require.ErrorIs(t, err, ErrLeaseTTLWriteConflict)
+	got, err = raw.Get(ctx, key)
+	require.NoError(t, err)
+	require.Empty(t, got.Kvs)
+	head, err = raw.Get(ctx, leaseTTLWriteHead(key))
+	require.NoError(t, err)
+	require.Len(t, head.Kvs, 1)
+	require.Greater(t, head.Kvs[0].ModRevision, oldRevision)
+	require.Zero(t, head.Kvs[0].Lease)
+
+	// A fresh operation must be able to recover using the current head.
+	require.NoError(t, writer.UpdateWithLeaseTTLIfLocked(ctx, key, []byte("captured-4"), 30*time.Second, lock))
+	got, err = raw.Get(ctx, key)
+	require.NoError(t, err)
+	require.Len(t, got.Kvs, 1)
+	require.Equal(t, "captured-4", string(got.Kvs[0].Value))
+}
+
+func TestLeaseTTLWriteHeadRejectsOldOwnerAndExpiringHead(t *testing.T) {
+	backend, raw := setupEtcdLockedSuite(t)
+	wrapped, ok := backend.(*clientImpl)
+	require.True(t, ok)
+	native, ok := wrapped.BackendOperations.(*etcdClient)
+	require.True(t, ok)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	key := t.TempDir() + "/membership"
+	lock, err := backend.LockPath(ctx, key+"/writer")
+	require.NoError(t, err)
+	owner, ok := lock.Comparator().(etcdAPI.Cmp)
+	require.True(t, ok)
+	oldLease, err := raw.Grant(ctx, 30)
+	require.NoError(t, err)
+	require.NoError(t, lock.Unlock(ctx))
+
+	current, err := backend.LockPath(ctx, key+"/writer")
+	require.NoError(t, err)
+	defer func() { require.NoError(t, current.Unlock(context.Background())) }()
+	err = native.commitLeaseTTLWrite(ctx, key, []byte("old-owner"), oldLease.ID, owner, 0)
+	require.ErrorIs(t, err, ErrLeaseTTLWriteConflict)
+	_, err = raw.Put(ctx, leaseTTLWriteHead(key), "invalid-expiring-head", etcdAPI.WithLease(oldLease.ID))
+	require.NoError(t, err)
+	err = native.UpdateWithLeaseTTLIfLocked(ctx, key, []byte("must-not-publish"), 30*time.Second, current)
+	require.ErrorContains(t, err, "write head must be persistent")
+	got, err := raw.Get(ctx, key)
+	require.NoError(t, err)
+	require.Empty(t, got.Kvs)
 }

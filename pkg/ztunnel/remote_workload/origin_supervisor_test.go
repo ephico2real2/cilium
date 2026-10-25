@@ -467,7 +467,7 @@ func TestPinnedEtcdOriginPeerOpenerBindsLivePinnedCluster(t *testing.T) {
 			t.Errorf("factory received unexpected config path %q", path)
 		}
 		received = extra
-		remoteConfig, err := json.Marshal(cmtypes.CiliumClusterConfig{ID: 17})
+		remoteConfig, err := json.Marshal(requiredRemoteClusterConfig(17))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -523,6 +523,25 @@ func TestPinnedEtcdOriginPeerOpenerRejectsClusterMismatchAndReadyError(t *testin
 		}
 		if backend.closeCount.Load() != 1 {
 			t.Fatalf("mismatched backend closed %d times, want 1", backend.closeCount.Load())
+		}
+	})
+	t.Run("missing authenticated workload capabilities", func(t *testing.T) {
+		value, err := json.Marshal(cmtypes.CiliumClusterConfig{ID: 17})
+		if err != nil {
+			t.Fatal(err)
+		}
+		backend := &originTestBackend{value: value}
+		ready := make(chan error)
+		close(ready)
+		factory := common.RemoteClientFactoryFn(func(ctx context.Context, _ *slog.Logger, _ string, _ kvstore.ExtraOptions) (kvstore.BackendOperations, chan error) {
+			backend.clientCtx = ctx
+			return backend, ready
+		})
+		if _, err := (PinnedEtcdOriginPeerOpener{Factory: factory}).Open(context.Background(), slogDiscardLogger(), profile); err == nil || !strings.Contains(err.Error(), "required workload identity and membership formats") {
+			t.Fatalf("direct origin lacking authenticated workload capabilities was accepted: %v", err)
+		}
+		if backend.closeCount.Load() != 1 {
+			t.Fatalf("unsupported-capability backend closed %d times, want 1", backend.closeCount.Load())
 		}
 	})
 	t.Run("initial connection error", func(t *testing.T) {
@@ -689,7 +708,7 @@ func (o *fakeOriginOpener) Open(context.Context, *slog.Logger, OriginPeerConfig)
 	o.backends = append(o.backends, backend)
 	o.mu.Unlock()
 	o.opens.Add(1)
-	return &OriginPeerConnection{Backend: backend, Evidence: o.evidence, ProfileID: evidence.ProfileID(), IdentityEpoch: evidence.IdentityEpoch()}, nil
+	return &OriginPeerConnection{Backend: backend, Evidence: o.evidence, RemoteConfig: requiredRemoteClusterConfig(17), ProfileID: evidence.ProfileID(), IdentityEpoch: evidence.IdentityEpoch()}, nil
 }
 
 type blockingOriginWatch struct {
@@ -745,6 +764,16 @@ func (i *recordingOriginInvalidator) contains(needle string) bool {
 		}
 	}
 	return false
+}
+
+func requiredRemoteClusterConfig(id uint32) cmtypes.CiliumClusterConfig {
+	return cmtypes.CiliumClusterConfig{
+		ID: id,
+		Capabilities: cmtypes.CiliumClusterConfigCapabilities{
+			WorkloadIdentityV1:  true,
+			ZtunnelMembershipV1: true,
+		},
+	}
 }
 
 func validOriginProfile(fingerprint byte) OriginPeerConfig {
@@ -805,7 +834,7 @@ func (o *rotateDuringOpenOriginOpener) Open(ctx context.Context, _ *slog.Logger,
 	o.mu.Lock()
 	o.backends = append(o.backends, backend)
 	o.mu.Unlock()
-	return &OriginPeerConnection{Backend: backend, Evidence: o.evidence, ProfileID: evidence.ProfileID(), IdentityEpoch: evidence.IdentityEpoch()}, nil
+	return &OriginPeerConnection{Backend: backend, Evidence: o.evidence, RemoteConfig: requiredRemoteClusterConfig(17), ProfileID: evidence.ProfileID(), IdentityEpoch: evidence.IdentityEpoch()}, nil
 }
 
 func receiveWatchStart(t *testing.T, ch <-chan int, want int) {
@@ -993,12 +1022,18 @@ func TestValidateOriginPeerConnectionRequiresPinnedCurrentEvidence(t *testing.T)
 	connection := &OriginPeerConnection{
 		Backend:       &testOriginBackend{},
 		Evidence:      &fakePeerEvidenceProvider{evidence: validOriginEvidence(1)},
+		RemoteConfig:  requiredRemoteClusterConfig(17),
 		ProfileID:     [sha256.Size]byte{2},
 		IdentityEpoch: 1,
 	}
 	if err := validateOriginPeerConnection(profile, connection, time.Now()); err != nil {
 		t.Fatalf("matching pinned TLS evidence rejected: %v", err)
 	}
+	connection.RemoteConfig.Capabilities.ZtunnelMembershipV1 = false
+	if err := validateOriginPeerConnection(profile, connection, time.Now()); err == nil {
+		t.Fatal("direct origin without authenticated membership wire support was accepted")
+	}
+	connection.RemoteConfig = requiredRemoteClusterConfig(17)
 
 	wrongSPKI := validOriginEvidence(1)
 	wrongSPKI.spki[0]++
@@ -1130,4 +1165,4 @@ func TestOriginEndpointValidationRejectsMalformedPorts(t *testing.T) {
 
 var _ OriginPeerConfigLoader = FilesystemOriginPeerConfigLoader{}
 var _ OriginPeerConnectionOpener = PinnedEtcdOriginPeerOpener{}
-var _ OriginPeerWatchSession = IPIdentityOriginWatchSession{}
+var _ OriginPeerWatchSession = (*IPIdentityOriginWatchSession)(nil)

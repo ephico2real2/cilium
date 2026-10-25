@@ -560,9 +560,35 @@ type SourceSnapshot struct {
 	Entries  []SourceEntry
 }
 
+// PublishIfSourceSnapshotCurrent checks an immutable registry revision before
+// and after a bounded metadata write. No external I/O runs under the registry
+// lock. A successful return is recent inventory evidence, not a server-side
+// fence against a later local state change or a distributed authorization grant.
+func (r *Registry) PublishIfSourceSnapshotCurrent(snapshot SourceSnapshot, publish func() error) error {
+	if publish == nil {
+		return fmt.Errorf("source snapshot publisher callback is nil")
+	}
+	if !r.sourceSnapshotCurrent(snapshot) {
+		return ErrSourcePublicationStale
+	}
+	if err := publish(); err != nil {
+		return err
+	}
+	if !r.sourceSnapshotCurrent(snapshot) {
+		return ErrSourcePublicationStale
+	}
+	return nil
+}
+
+func (r *Registry) sourceSnapshotCurrent(snapshot SourceSnapshot) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return snapshot.Epoch == r.epoch && snapshot.Revision == r.nextPublicationRevision
+}
+
 // SourceSnapshot copies all current source evidence under one registry lock.
-// A future lease publisher must consume this snapshot, not independently read
-// endpoint atomics and concatenate states from different registry revisions.
+// Lease publishers consume this snapshot rather than independently reading
+// endpoint atomics and concatenating states from different revisions.
 func (r *Registry) SourceSnapshot() SourceSnapshot {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

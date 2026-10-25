@@ -61,3 +61,24 @@ func TestRequireMTLSConfiguration(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, enabled)
 }
+
+func TestRemoteWorkloadMembershipIsOptInAndRequiresStrictMTLS(t *testing.T) {
+	cfg := DefaultConfig
+	require.Equal(t, "ztunnel-origin-reader", cfg.RemoteOriginClientCommonName)
+	require.False(t, cfg.EnableRemoteWorkloadMembership)
+	cfg.EnableRemoteWorkloadMembership = true
+	require.ErrorContains(t, cfg.Validate(), "requires enabled ztunnel and strict mTLS")
+	cfg.EnableZTunnel = true
+	require.ErrorContains(t, cfg.Validate(), "requires enabled ztunnel and strict mTLS")
+	cfg.RequireMTLS = true
+	require.ErrorContains(t, cfg.Validate(), "requires ztunnel-remote-origin-config-dir")
+	cfg.RemoteOriginConfigDirectory = t.TempDir()
+	require.NoError(t, cfg.Validate())
+
+	flags := pflag.NewFlagSet("ztunnel", pflag.ContinueOnError)
+	DefaultConfig.Flags(flags)
+	require.NoError(t, flags.Parse(nil))
+	enabled, err := flags.GetBool("ztunnel-enable-remote-workload-membership")
+	require.NoError(t, err)
+	require.False(t, enabled)
+}

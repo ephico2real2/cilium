@@ -3,7 +3,11 @@
 
 package membership
 
-import "testing"
+import (
+	"errors"
+	"testing"
+	"time"
+)
 
 func TestPublicationSeparatesRequiredCapturedAndActive(t *testing.T) {
 	registry := NewRegistry(17)
@@ -592,5 +596,52 @@ func TestSourceSnapshotIsOneOrderedImmutableRegistryRevision(t *testing.T) {
 		if entry.Publication.Revision > after.Revision || entry.Publication.Epoch != after.Epoch {
 			t.Fatal("mixed registry snapshot order/epoch")
 		}
+	}
+}
+
+func TestPublishIfSourceSnapshotCurrentRejectsStaleWithoutBlockingMutation(t *testing.T) {
+	registry := NewRegistry(1)
+	ref := requireMembership(t, registry, "ns", "pod", 7, "/netns/pod")
+	establishCaptureAndZDS(t, registry, ref)
+	stale := registry.SourceSnapshot()
+	if _, ok := registry.BeginDrain(ref); !ok {
+		t.Fatal("BeginDrain failed")
+	}
+
+	called := false
+	err := registry.PublishIfSourceSnapshotCurrent(stale, func() error {
+		called = true
+		return nil
+	})
+	if !errors.Is(err, ErrSourcePublicationStale) || called {
+		t.Fatalf("stale source snapshot callback called=%v, err=%v", called, err)
+	}
+
+	current := registry.SourceSnapshot()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	writeDone := make(chan error, 1)
+	go func() {
+		writeDone <- registry.PublishIfSourceSnapshotCurrent(current, func() error {
+			close(started)
+			<-release
+			return nil
+		})
+	}()
+	<-started
+	mutationDone := make(chan struct{})
+	go func() {
+		_, _ = registry.Require("ns", "pod-b", 8, "/netns/pod-b")
+		close(mutationDone)
+	}()
+	select {
+	case <-mutationDone:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("external source write blocked native registry mutation")
+	}
+	close(release)
+	if err := <-writeDone; !errors.Is(err, ErrSourcePublicationStale) {
+		t.Fatalf("concurrent source change was not detected after write: %v", err)
 	}
 }
