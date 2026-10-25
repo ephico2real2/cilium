@@ -98,7 +98,7 @@ func realRecorderGateFixture(t *testing.T) (*gate, *durableRecorder, *endpoint.E
 	pod.Spec.ServiceAccountName = "server"
 	ep.SetPod(pod)
 	base := t.TempDir()
-	r := newRequiredRecorder(base, 17, func() string { return "node-a" }).(*durableRecorder)
+	r := newRequiredRecorder(base, 17, func() string { return "node-a" }, hivetest.Logger(t)).(*durableRecorder)
 	t.Cleanup(func() { _ = r.Close() })
 	g.recorder = r
 	g.validateNetns = validateNetworkNamespace
@@ -278,7 +278,7 @@ func TestRecorderLookupRejectsForeignOrCorruptJournal(t *testing.T) {
 	for _, which := range []string{"foreign-cluster", "foreign-node", "corrupt"} {
 		t.Run(which, func(t *testing.T) {
 			base := t.TempDir()
-			r := newRequiredRecorder(base, 17, func() string { return "node-a" }).(*durableRecorder)
+			r := newRequiredRecorder(base, 17, func() string { return "node-a" }, hivetest.Logger(t)).(*durableRecorder)
 			defer r.Close()
 			_, _, err := r.Lookup(t.Context(), "unused")
 			require.NoError(t, err)
@@ -302,7 +302,7 @@ func TestRecorderLookupRejectsForeignOrCorruptJournal(t *testing.T) {
 
 func TestRecorderConstructorAndClosedStatePerformNoFilesystemIO(t *testing.T) {
 	base := filepath.Join(t.TempDir(), "not-created")
-	r := newRequiredRecorder(base, 17, func() string { return "node-a" }).(*durableRecorder)
+	r := newRequiredRecorder(base, 17, func() string { return "node-a" }, hivetest.Logger(t)).(*durableRecorder)
 	_, err := os.Stat(base)
 	require.ErrorIs(t, err, os.ErrNotExist)
 	require.NoError(t, r.Close())
@@ -315,7 +315,7 @@ func TestRecorderConstructorAndClosedStatePerformNoFilesystemIO(t *testing.T) {
 
 func TestRecorderCanceledLookupDoesNotCreateJournal(t *testing.T) {
 	base := t.TempDir()
-	r := newRequiredRecorder(base, 17, func() string { return "node-a" }).(*durableRecorder)
+	r := newRequiredRecorder(base, 17, func() string { return "node-a" }, hivetest.Logger(t)).(*durableRecorder)
 	defer r.Close()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

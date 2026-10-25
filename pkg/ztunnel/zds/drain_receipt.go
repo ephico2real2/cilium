@@ -94,10 +94,10 @@ type EndpointDrainCleaner interface {
 
 func (zc *ztunnelConn) sendDrain(req *pb.DrainWorkload) error {
 	if err := validateBinding(req.Binding); err != nil {
-		return err
+		return rejectedBeforeWrite(err)
 	}
 	if req.DrainGeneration == 0 || len(req.Nonce) != 32 || !bytes.Equal(req.Binding.ProxyEpoch, zc.proxyEpoch) {
-		return fmt.Errorf("drain request does not belong to this proxy execution")
+		return rejectedBeforeWrite(fmt.Errorf("drain request does not belong to this proxy execution"))
 	}
 	if err := zc.conn.SetDeadline(time.Now().Add(defaultZDSAckTimeout)); err != nil {
 		return err

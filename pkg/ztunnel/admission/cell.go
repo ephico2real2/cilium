@@ -73,15 +73,13 @@ type params struct {
 
 type out struct {
 	cell.Out
-	Gate             endpointmanager.EndpointCreationGate `group:"endpoint-creation-gates"`
-	Revalidator      membership.EndpointRevalidator       `group:"ztunnel-endpoint-revalidators"`
-	PolicyTransition endpoint.ZtunnelPolicyTransitioner   `group:"ztunnel-policy-transitions"`
+	Gate        endpointmanager.EndpointCreationGate `group:"endpoint-creation-gates"`
+	Revalidator membership.EndpointRevalidator       `group:"ztunnel-endpoint-revalidators"`
 }
 
 type gate struct {
 	serverDisabledForExecution bool
-	policyOwnership            zds.PolicyOwnershipInspector
-	policyDrainer              zds.LivePolicyDrainCleaner
+	verifyCapture              func(*endpoint.Endpoint, membership.Reference, uint64) error
 	recorder                   requiredRecorder
 	enabled                    bool
 	core                       slimcore.CoreV1Interface
@@ -114,7 +112,6 @@ func newGate(p params) (out, error) {
 		membership:    p.Registry,
 	}
 	g.serverDisabledForExecution = !p.Config.EnableZTunnel && p.Server == nil
-	g.policyOwnership = p.Server // Also inspect retained ADDs when configuration is disabled.
 	if p.AgentConfig != nil {
 		g.agentNamespace = p.AgentConfig.K8sNamespace
 	}
@@ -124,8 +121,8 @@ func newGate(p params) (out, error) {
 		}
 		g.core = p.Clientset.Slim().CoreV1()
 		g.enroll = p.Server.EnrollEndpointForOwnerContext
-		g.policyDrainer = p.Server
-		g.recorder = newRequiredRecorder(p.AgentConfig.StateDir, p.ClusterInfo.ID, g.nodeName)
+		g.verifyCapture = p.Server.VerifyCapture
+		g.recorder = newRequiredRecorder(p.AgentConfig.StateDir, p.ClusterInfo.ID, g.nodeName, p.Logger)
 		p.Lifecycle.Append(cell.Hook{OnStop: func(cell.HookContext) error { return g.recorder.Close() }})
 		if p.Config.EnableRemoteWorkloadMembership {
 			if p.Endpoints == nil {
@@ -150,7 +147,7 @@ func newGate(p params) (out, error) {
 			}
 		}
 	}
-	return out{Gate: g, Revalidator: g, PolicyTransition: g}, nil
+	return out{Gate: g, Revalidator: g}, nil
 }
 
 // ShouldRevalidate selects namespace-enrolled endpoints and endpoints still
@@ -174,6 +171,19 @@ func (g *gate) ShouldRevalidate(ctx context.Context, ep *endpoint.Endpoint, name
 		return false, fmt.Errorf("reading durable Required intent for restored endpoint: %w", err)
 	}
 	return required, nil
+}
+
+// RestrictRestoredEndpoint runs before ztunnel's initial snapshot is seeded,
+// when no ZDS ADD can complete yet. For an endpoint that needs re-admission it
+// re-observes Required intent, which quarantines the endpoint at once, and
+// reports that the caller must re-admit it once ZDS can carry an ADD.
+func (g *gate) RestrictRestoredEndpoint(ctx context.Context, ep *endpoint.Endpoint, namespaceEnrolled bool) (bool, error) {
+	should, err := g.ShouldRevalidate(ctx, ep, namespaceEnrolled)
+	if err != nil || !should {
+		return should, err
+	}
+	ep.ObserveZtunnelRequired()
+	return true, nil
 }
 
 func (g *gate) RevalidateEndpoint(ctx context.Context, ep *endpoint.Endpoint) error {

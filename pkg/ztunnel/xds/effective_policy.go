@@ -5,6 +5,9 @@ package xds
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strings"
@@ -77,6 +80,10 @@ type effectivePolicyOwner struct {
 	generation uint64 // current ADS stream generation
 	acked      uint64 // Authorization cache version that stream's ztunnel ACKed
 	published  map[membership.Reference]publishedPolicy
+
+	// ineligible holds the last logged reason each Required workload is not an
+	// effective-policy destination. Only the reconcile goroutine uses it.
+	ineligible map[membership.Reference]string
 }
 
 type publishedPolicy struct {
@@ -86,13 +93,16 @@ type publishedPolicy struct {
 	policyVersion  uint64
 	cacheVersion   uint64
 	acknowledged   bool
+	// sources holds the subject digest of every local workload this plan was
+	// compiled with as a caller, by membership reference.
+	sources map[membership.Reference]string
 }
 
 func newEffectivePolicyOwner(log *slog.Logger, registry *membership.Registry, endpoints endpointLookup, policies *AuthorizationPolicies,
 	cluster cmtypes.ClusterInfo, trustDomain string, metrics *Metrics) *effectivePolicyOwner {
 	return &effectivePolicyOwner{log: log, registry: registry, endpoints: endpoints, policies: policies, cluster: cluster,
 		trustDomain: trustDomain, metrics: metrics, interval: time.Second, trigger: make(chan struct{}, 1),
-		published: make(map[membership.Reference]publishedPolicy)}
+		published: make(map[membership.Reference]publishedPolicy), ineligible: make(map[membership.Reference]string)}
 }
 
 // beginStream starts a new ADS generation for a new ztunnel stream. Every
@@ -154,24 +164,29 @@ type candidate struct {
 	subject  policy.ZtunnelPolicySubject
 }
 
-func (o *effectivePolicyOwner) candidates() []candidate {
+func (o *effectivePolicyOwner) candidates(reasons map[membership.Reference]string) []candidate {
 	var out []candidate
 	for ref, state := range o.registry.Snapshot() {
 		if !state.ReadyForAddress() {
+			reasons[ref] = "capture or ZDS acknowledgment is not current"
 			continue
 		}
 		ep := o.endpoints.lookup(state.EndpointID)
 		if ep == nil || ep.GetK8sPodUID() != ref.Key.PodUID {
+			reasons[ref] = "endpoint is not the registered incarnation"
 			continue
 		}
 		release, err := ep.SnapshotZtunnelReleaseCandidate()
 		if err != nil {
-			continue // policy not realized: neither a destination nor a source now
+			// Policy not realized: neither a destination nor a source now.
+			reasons[ref] = "native policy is not realized: " + err.Error()
+			continue
 		}
 		m := release.Membership
 		if !release.HasMembership || m.Epoch != ref.Epoch || m.Generation != state.ZDSGeneration ||
 			m.State != membership.PublicationCaptured || m.NamespaceUID != ref.Key.NamespaceUID {
-			continue // the endpoint has not published this exact captured incarnation
+			reasons[ref] = "endpoint has not published this exact captured incarnation"
+			continue
 		}
 		subject := release.Subject
 		subject.ClusterID, subject.ClusterName, subject.TrustDomain = o.cluster.ID, o.cluster.Name, o.trustDomain
@@ -188,15 +203,25 @@ func (o *effectivePolicyOwner) reconcile() {
 	if generation == 0 {
 		return
 	}
-	all := o.candidates()
+	reasons := make(map[membership.Reference]string)
+	defer o.logIneligible(reasons)
+	o.pruneRetired()
+	all := o.candidates(reasons)
+	// Publish every plan first, then release: a workload that is a caller in
+	// other plans is released only once those plans reflect it (see
+	// callerPlansCurrent).
+	var acknowledged []candidate
 	for i, dst := range all {
 		if dst.state.ADSGeneration != generation || !dst.state.AddressAcked {
-			continue // the workload Address must be acknowledged on this stream first
+			reasons[dst.ref] = "workload Address is not acknowledged on the current ADS stream"
+			continue
 		}
 		sources := make([]policy.ZtunnelPolicySubject, 0, len(all)-1)
+		sourceDigests := make(map[membership.Reference]string, len(all)-1)
 		for j, src := range all {
 			if j != i {
 				sources = append(sources, src.subject)
+				sourceDigests[src.ref] = subjectDigest(src.subject)
 			}
 		}
 		key, err := effectivePolicyKey(dst.subject.Namespace, dst.ref.Key.NamespaceUID, dst.ref.Key.PodUID)
@@ -207,17 +232,103 @@ func (o *effectivePolicyOwner) reconcile() {
 		if compileErr != nil {
 			// Unknown or unsupported policy: deny every caller.
 			deny, _ := quarantineAuthorization(dst.subject.Namespace, dst.ref.Key.NamespaceUID, dst.ref.Key.PodUID)
-			if _, err := o.policies.setEffective(key, deny); err == nil {
+			_, setErr := o.policies.setEffective(key, deny)
+			reason := "effective policy compilation failed: " + compileErr.Error()
+			if setErr == nil && o.ineligible[dst.ref] != reason {
 				o.event("compile_failed")
 				o.log.Warn("Effective ztunnel policy compilation failed; workload denies every caller",
 					logStage, "effective-policy", logfields.PodUID, dst.ref.Key.PodUID, logfields.Error, compileErr)
 			}
+			reasons[dst.ref] = reason
 			o.forget(dst.ref)
 			continue
 		}
 		allow := &security.Authorization{Name: strings.TrimPrefix(key, dst.subject.Namespace+"/"), Namespace: dst.subject.Namespace,
 			Scope: security.Scope_WORKLOAD_SELECTOR, Action: security.Action_ALLOW, Rules: plan.ReviewAuthorization.Rules}
-		o.publish(generation, acked, dst, key, allow, plan.Digest)
+		if published, ok := o.publish(generation, acked, dst, key, allow, plan.Digest, sourceDigests); ok && published.acknowledged {
+			acknowledged = append(acknowledged, dst)
+		}
+	}
+	for _, dst := range acknowledged {
+		if !o.callerPlansCurrent(dst) {
+			reasons[dst.ref] = "a released workload's plan does not yet reflect this workload as a caller"
+			continue
+		}
+		o.mu.Lock()
+		cacheVersion := o.published[dst.ref].cacheVersion
+		o.mu.Unlock()
+		o.release(dst, cacheVersion)
+	}
+}
+
+// callerPlansCurrent reports whether every plan that admits dst as a caller
+// was compiled with dst's current subject and acknowledged by ztunnel. A plan
+// of a quarantined destination admits nothing, so it never blocks. Without
+// this, a workload whose egress narrowed (or whose identity changed) could be
+// released while another destination still enforces the earlier ALLOW for it.
+func (o *effectivePolicyOwner) callerPlansCurrent(dst candidate) bool {
+	digest := subjectDigest(dst.subject)
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for ref, plan := range o.published {
+		listed, ok := plan.sources[dst.ref]
+		if ref == dst.ref || !ok || (listed == digest && plan.acknowledged) {
+			continue
+		}
+		state, ok := o.registry.Get(ref)
+		if !ok {
+			continue
+		}
+		if destination := o.endpoints.lookup(state.EndpointID); destination != nil && !destination.IsZtunnelQuarantined() {
+			return false
+		}
+	}
+	return true
+}
+
+// pruneRetired forgets plans of incarnations that no longer exist.
+func (o *effectivePolicyOwner) pruneRetired() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	for ref := range o.published {
+		if _, ok := o.registry.Get(ref); !ok {
+			delete(o.published, ref)
+		}
+	}
+}
+
+// subjectDigest binds the caller fields a plan was compiled from.
+func subjectDigest(s policy.ZtunnelPolicySubject) string {
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%d\x00%s\x00", s.ClusterID, s.ClusterName, s.TrustDomain,
+		s.Namespace, s.NamespaceUID, s.PodUID, s.ServiceAccount, s.NumericIdentity, s.EndpointID, s.Policy.ContentDigest())
+	for _, addr := range s.Addresses {
+		_, _ = fmt.Fprintf(h, "%s\x00", addr)
+	}
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// logIneligible logs each workload's reason for not being an effective-policy
+// destination once, when the reason changes, and when it becomes eligible.
+func (o *effectivePolicyOwner) logIneligible(reasons map[membership.Reference]string) {
+	for ref, reason := range reasons {
+		if o.ineligible[ref] != reason {
+			o.log.Info("Required workload is not an effective ztunnel policy destination",
+				logStage, "effective-policy",
+				logfields.PodUID, ref.Key.PodUID,
+				logfields.Reason, reason)
+			o.ineligible[ref] = reason
+		}
+	}
+	for ref := range o.ineligible {
+		if _, still := reasons[ref]; !still {
+			delete(o.ineligible, ref)
+			if _, ok := o.registry.Get(ref); ok {
+				o.log.Info("Required workload is now an effective ztunnel policy destination",
+					logStage, "effective-policy",
+					logfields.PodUID, ref.Key.PodUID)
+			}
+		}
 	}
 }
 
@@ -227,24 +338,29 @@ func (o *effectivePolicyOwner) forget(ref membership.Reference) {
 	o.mu.Unlock()
 }
 
-func (o *effectivePolicyOwner) publish(generation, acked uint64, dst candidate, key string, allow *security.Authorization, digest string) {
+func (o *effectivePolicyOwner) publish(generation, acked uint64, dst candidate, key string, allow *security.Authorization, digest string,
+	sources map[membership.Reference]string) (publishedPolicy, bool) {
 	o.mu.Lock()
 	prev, had := o.published[dst.ref]
 	o.mu.Unlock()
-	current := had && prev.generation == generation && prev.addressVersion == dst.state.AddressVersion && prev.digest == digest
+	// The registry's PolicyVersion is cleared when the endpoint's native policy
+	// changes; that revocation must force a new publication and acknowledgment
+	// even when the compiled digest is unchanged.
+	current := had && prev.generation == generation && prev.addressVersion == dst.state.AddressVersion && prev.digest == digest &&
+		dst.state.PolicyVersion == prev.policyVersion
 	if !current {
 		cacheVersion, err := o.policies.setEffective(key, allow)
 		if err != nil {
-			return // the stream has not bound the workload yet
+			return publishedPolicy{}, false // the stream has not bound the workload yet
 		}
 		policyVersion, ok := o.registry.PublishPolicy(dst.ref, generation, membership.PolicyEvidence{
 			WorkloadUID: dst.ref.Key.PodUID, AddressVersion: dst.state.AddressVersion, Revision: digest,
 			BoundToWorkload: true, RequiresAuthenticatedPeer: true, DenyByDefault: true})
 		if !ok {
-			return
+			return publishedPolicy{}, false
 		}
 		prev = publishedPolicy{generation: generation, addressVersion: dst.state.AddressVersion, digest: digest,
-			policyVersion: policyVersion, cacheVersion: cacheVersion}
+			policyVersion: policyVersion, cacheVersion: cacheVersion, sources: sources}
 		o.event("published")
 		o.log.Info("Published effective ztunnel policy",
 			logStage, "effective-policy", logfields.PodUID, dst.ref.Key.PodUID,
@@ -259,9 +375,7 @@ func (o *effectivePolicyOwner) publish(generation, acked uint64, dst candidate, 
 	o.mu.Lock()
 	o.published[dst.ref] = prev
 	o.mu.Unlock()
-	if prev.acknowledged {
-		o.release(dst, prev.cacheVersion)
-	}
+	return prev, true
 }
 
 // release frees the datapath quarantine of a workload whose membership,
@@ -274,7 +388,7 @@ func (o *effectivePolicyOwner) release(dst candidate, authorizationVersion uint6
 	}
 	receipt := endpoint.ZtunnelAdmissionReceipt{Binding: dst.release.Binding, Membership: dst.release.Membership,
 		PolicyRevision: dst.release.PolicyRevision, PolicyDigest: dst.release.PolicyDigest,
-		AuthorizationVersion: authorizationVersion}
+		Identity: dst.release.Subject.NumericIdentity, AuthorizationVersion: authorizationVersion}
 	if err := dst.endpoint.ReleaseZtunnelQuarantine(receipt); err != nil {
 		o.event("release_refused")
 		return

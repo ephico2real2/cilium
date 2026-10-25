@@ -6,13 +6,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"golang.org/x/sys/unix"
 
 	"github.com/cilium/cilium/pkg/endpoint"
 	slimv1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/netns"
+)
+
+const (
+	logPreviousEndpoint = "previousEndpoint"
+	logPreviousBoot     = "previousBoot"
 )
 
 type durableRecorder struct {
@@ -20,14 +27,15 @@ type durableRecorder struct {
 	stateDir  string
 	clusterID uint32
 	nodeName  func() string
+	logger    *slog.Logger
 	store     *IntentStore
 	closed    bool
 }
 
 // No IO occurs at construction. The real agent creates StateDir in initEnv
 // before Hive.Run, while Populate-only tests/subcommands need no filesystem.
-func newRequiredRecorder(stateDir string, clusterID uint32, nodeName func() string) requiredRecorder {
-	return &durableRecorder{stateDir: stateDir, clusterID: clusterID, nodeName: nodeName}
+func newRequiredRecorder(stateDir string, clusterID uint32, nodeName func() string, logger *slog.Logger) requiredRecorder {
+	return &durableRecorder{stateDir: stateDir, clusterID: clusterID, nodeName: nodeName, logger: logger}
 }
 func (r *durableRecorder) openLocked() error {
 	if r.closed {
@@ -37,6 +45,16 @@ func (r *durableRecorder) openLocked() error {
 		s, err := OpenIntentStore(r.stateDir)
 		if err != nil {
 			return err
+		}
+		s.onReplace = func(old, replacement RequiredIntent) {
+			r.logger.Info("Replaced durable Required intent of a sandbox that no longer exists",
+				logfields.K8sNamespace, replacement.Namespace,
+				logfields.Pod, replacement.PodName,
+				logfields.K8sUID, replacement.PodUID,
+				logPreviousEndpoint, old.EndpointID,
+				logfields.EndpointID, replacement.EndpointID,
+				logPreviousBoot, old.BootID,
+				logfields.BootID, replacement.BootID)
 		}
 		r.store = s
 	}

@@ -93,8 +93,9 @@ type sourceEndpointSnapshot struct {
 
 // SourceEndpointProvider is deliberately narrow so snapshot assembly and
 // ordering can be tested without pretending that a fake endpoint is live.
-// Revalidate must perform live Namespace/Pod UID checks, reassert capture, and
-// complete a fresh ZDS ACK before it returns nil.
+// Revalidate returns nil only when live Namespace/Pod identity, sandbox, and a
+// ZDS ADD acknowledged by the live ztunnel execution are current for the
+// captured membership, re-admitting the endpoint first when they are not.
 type SourceEndpointProvider interface {
 	Revalidate(context.Context, uint16) error
 	Read(uint16) (sourceEndpointSnapshot, error)
@@ -103,6 +104,7 @@ type SourceEndpointProvider interface {
 type ciliumSourceEndpointProvider struct {
 	endpoints    endpointmanager.EndpointsLookup
 	revalidators []EndpointRevalidator
+	logger       *slog.Logger
 }
 
 func (p ciliumSourceEndpointProvider) Revalidate(ctx context.Context, id uint16) error {
@@ -110,13 +112,29 @@ func (p ciliumSourceEndpointProvider) Revalidate(ctx context.Context, id uint16)
 	if ep == nil || !ep.IsAlive() {
 		return fmt.Errorf("required Cilium endpoint %d is unavailable", id)
 	}
-	if len(p.revalidators) == 0 {
+	return verifyOrReadmit(ctx, ep, p.revalidators, p.logger)
+}
+
+// verifyOrReadmit keeps a lease refresh from changing a current capture.
+// Re-admission quarantines the endpoint and starts a new capture generation,
+// so it runs only when the current evidence no longer verifies (for example
+// after a ztunnel or agent restart).
+func verifyOrReadmit(ctx context.Context, ep *endpoint.Endpoint, revalidators []EndpointRevalidator, logger *slog.Logger) error {
+	if len(revalidators) == 0 {
 		return fmt.Errorf("strict endpoint revalidator is unavailable")
 	}
-	for _, revalidator := range p.revalidators {
+	for _, revalidator := range revalidators {
 		if revalidator == nil {
 			return fmt.Errorf("strict endpoint revalidator is nil")
 		}
+		verifyErr := revalidator.VerifyEndpoint(ctx, ep)
+		if verifyErr == nil {
+			continue
+		}
+		logger.Info("Source membership evidence is not current; re-admitting endpoint",
+			logSourceStage, "source-verification",
+			logfields.EndpointID, ep.GetID16(),
+			logfields.Error, verifyErr)
 		if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
 			return err
 		}
@@ -233,7 +251,9 @@ func NewSourcePublisher(registry *Registry, endpoints endpointmanager.EndpointsL
 	if snapshot.Epoch == "" {
 		return nil, fmt.Errorf("membership registry has no process epoch")
 	}
-	publisher, err := newSourcePublisher(registry, ciliumSourceEndpointProvider{endpoints: endpoints, revalidators: revalidators}, sourceMembershipBackendAdapter{Client: backend}, logger, cfg, snapshot.Epoch)
+	provider := ciliumSourceEndpointProvider{endpoints: endpoints, revalidators: revalidators,
+		logger: logger.With(logfields.LogSubsys, "ztunnel-membership-source")}
+	publisher, err := newSourcePublisher(registry, provider, sourceMembershipBackendAdapter{Client: backend}, logger, cfg, snapshot.Epoch)
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +419,7 @@ func (p *SourcePublisher) refresh(ctx context.Context, locker kvstore.KVLocker) 
 	if initial.Epoch != p.epoch {
 		return fmt.Errorf("membership registry epoch changed; source publisher must restart")
 	}
-	if len(initial.Entries) > p.config.MaxWorkloads {
+	if capturedEntries(initial) > p.config.MaxWorkloads {
 		return p.publishInvalid(ctx, locker, initial, "workload_limit_exceeded")
 	}
 
@@ -419,7 +439,7 @@ func (p *SourcePublisher) refresh(ctx context.Context, locker kvstore.KVLocker) 
 	// snapshot. If admission added a new captured endpoint concurrently, re-run
 	// its live checks once before considering it for publication.
 	current := p.registry.SourceSnapshot()
-	if current.Epoch != p.epoch || len(current.Entries) > p.config.MaxWorkloads {
+	if current.Epoch != p.epoch || capturedEntries(current) > p.config.MaxWorkloads {
 		return p.publishInvalid(ctx, locker, current, "source_registry_changed")
 	}
 	for _, entry := range current.Entries {
@@ -586,6 +606,18 @@ func makeSourceEntry(entry SourceEntry, snapshot sourceEndpointSnapshot) (Source
 		MembershipRevision: snapshot.Membership.Revision, MembershipEpoch: snapshot.Membership.Epoch,
 		ZDSGeneration: snapshot.Membership.Generation,
 	}, nil
+}
+
+// capturedEntries counts the workloads a record would publish. Required and
+// Draining entries are never published, so they do not count toward the bound.
+func capturedEntries(snapshot SourceSnapshot) int {
+	n := 0
+	for _, entry := range snapshot.Entries {
+		if entry.Publication.State == PublicationCaptured {
+			n++
+		}
+	}
+	return n
 }
 
 func findSourceEntry(snapshot SourceSnapshot, ref Reference) (SourceEntry, bool) {

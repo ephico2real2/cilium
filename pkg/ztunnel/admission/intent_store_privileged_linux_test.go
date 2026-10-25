@@ -11,6 +11,28 @@ import (
 	"github.com/cilium/cilium/pkg/testutils"
 )
 
+// A live sandbox with the recorded cookie is not gone; the same path with a
+// different cookie (a namespace recreated at that path) is.
+func TestPrivilegedIntentRecordedSandboxGoneComparesNetnsCookie(t *testing.T) {
+	testutils.PrivilegedTest(t)
+	s, _ := openTestIntentStore(t)
+	live, err := pinSandbox("/proc/self/ns/net")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie := live.cookie
+	live.ns.Close()
+	alive := RequiredIntent{BootID: s.bootID, RequiredIdentity: RequiredIdentity{NetnsPath: "/proc/self/ns/net", NetnsCookie: cookie}}
+	if gone, err := s.recordedSandboxGone(alive); err != nil || gone {
+		t.Fatalf("a live recorded sandbox was treated as gone: gone=%v err=%v", gone, err)
+	}
+	replaced := alive
+	replaced.NetnsCookie = cookie + 1
+	if gone, err := s.recordedSandboxGone(replaced); err != nil || !gone {
+		t.Fatalf("a namespace with another cookie was not proven to replace the record: gone=%v err=%v", gone, err)
+	}
+}
+
 func TestPrivilegedIntentForeignOwnershipIsRejected(t *testing.T) {
 	testutils.PrivilegedTest(t)
 	// Run the qualifying suite in the existing ROOT Podman builder with

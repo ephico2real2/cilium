@@ -4,6 +4,7 @@
 package xds
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -417,4 +418,115 @@ func TestStreamEvidenceHooksAttributeAcknowledgments(t *testing.T) {
 	require.Zero(t, f.owner.acked)
 	sp.observeAuthorizationRequest(&v3.DeltaDiscoveryRequest{ResponseNonce: "a1"})
 	require.Equal(t, uint64(7), f.owner.acked)
+}
+
+// The endpoint fence quarantines a released workload whose enforced content
+// changed. The owner compiles the new content, publishes it, and releases the
+// same incarnation again once ztunnel acknowledges it.
+func TestEffectivePolicyContentChangeRepublishesAndReleasesTheSameIncarnation(t *testing.T) {
+	f := newOwnerFixture(t)
+	d := f.capture("api", 10, podD, "10.0.0.20", 300, l4Snapshot(t, entries(allowAll(ingress), allowAll(egress))...))
+	f.capture("web", 11, podS, "10.0.0.21", 301, l4Snapshot(t, entries(allowAll(ingress), allowAll(egress))...))
+	generation := f.owner.beginStream()
+	f.bindAndAcknowledgeAddress(generation, podD, podS)
+	f.owner.reconcile()
+	f.owner.observeAuthorizationAck(generation, f.cacheVersion())
+	f.owner.reconcile()
+	require.Len(t, d.receipts, 1)
+	released := f.cacheVersion()
+
+	// The destination now admits only 8080: the fence quarantined it.
+	narrowed := l4Snapshot(t, entries(one(l4Entry{dir: ingress, proto: tcp, prefix: 16, id: 1<<16 | 301, port: 8080}), allowAll(egress))...)
+	d.candidate.Subject.Policy, d.candidate.PolicyDigest = narrowed, narrowed.ContentDigest()
+	d.quarantined = true
+
+	f.owner.reconcile()
+	require.Equal(t, []uint32{8080}, f.effective(podD).Rules[0].Clauses[0].Matches[0].DestinationPorts)
+	require.Greater(t, f.cacheVersion(), released)
+	require.Len(t, d.receipts, 1, "no release before ztunnel acknowledges the new content")
+	f.owner.observeAuthorizationAck(generation, f.cacheVersion())
+	f.owner.reconcile()
+	require.Len(t, d.receipts, 2, "the same incarnation is released again")
+	require.Equal(t, narrowed.ContentDigest(), d.receipts[1].PolicyDigest)
+	require.False(t, d.quarantined)
+	require.Equal(t, f.refs[podD], mustCurrentRef(t, f, podD), "no new incarnation was needed")
+}
+
+// A caller whose egress narrowed is released only after every released
+// destination's plan reflects its new policy: ztunnel enforces caller policy
+// only at the destination.
+func TestEffectivePolicyCallerReleaseWaitsForDependentPlans(t *testing.T) {
+	f := newOwnerFixture(t)
+	caller := f.capture("api", 10, podD, "10.0.0.20", 300, l4Snapshot(t, entries(allowAll(ingress), allowAll(egress))...))
+	destination := f.capture("web", 11, podS, "10.0.0.21", 301, l4Snapshot(t, entries(allowAll(ingress), allowAll(egress))...))
+	generation := f.owner.beginStream()
+	f.bindAndAcknowledgeAddress(generation, podD, podS)
+	f.owner.reconcile()
+	f.owner.observeAuthorizationAck(generation, f.cacheVersion())
+	f.owner.reconcile()
+	require.Len(t, caller.receipts, 1)
+	require.Len(t, destination.receipts, 1)
+	before := f.cacheVersion()
+
+	// The caller may now reach the destination only on 8080: fenced.
+	narrowed := l4Snapshot(t, entries(allowAll(ingress), one(l4Entry{dir: egress, proto: tcp, prefix: 16, id: 1<<16 | 301, port: 8080}))...)
+	caller.candidate.Subject.Policy, caller.candidate.PolicyDigest = narrowed, narrowed.ContentDigest()
+	caller.quarantined = true
+
+	f.owner.reconcile()
+	require.Equal(t, []uint32{8080}, f.effective(podS).Rules[0].Clauses[0].Matches[0].DestinationPorts,
+		"the destination plan is recompiled with the caller's narrowed egress")
+	require.Greater(t, f.cacheVersion(), before)
+	state, _ := f.registry.Get(f.refs[podD])
+	require.True(t, state.Active(), "the caller's own plan is unchanged and stays acknowledged")
+	require.Len(t, caller.receipts, 1, "the destination still enforces the earlier ALLOW for the caller")
+	require.True(t, caller.quarantined)
+
+	f.owner.observeAuthorizationAck(generation, f.cacheVersion())
+	f.owner.reconcile()
+	require.Len(t, caller.receipts, 2, "released once the destination acknowledged the narrowed plan")
+	require.False(t, caller.quarantined)
+}
+
+func mustCurrentRef(t *testing.T, f *ownerFixture, podUID string) membership.Reference {
+	t.Helper()
+	ref, _, ok := f.registry.CurrentForPodUID(podUID)
+	require.True(t, ok)
+	return ref
+}
+
+type countingHandler struct {
+	slog.Handler
+	messages map[string]int
+}
+
+func (h *countingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.messages[r.Message]++
+	return nil
+}
+func (h *countingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *countingHandler) WithAttrs([]slog.Attr) slog.Handler       { return h }
+func (h *countingHandler) WithGroup(string) slog.Handler            { return h }
+
+// Why a Required workload is not an effective-policy destination is logged
+// when the reason changes, not on every reconcile.
+func TestEffectivePolicyLogsIneligibilityOncePerReason(t *testing.T) {
+	f := newOwnerFixture(t)
+	h := &countingHandler{messages: map[string]int{}}
+	f.owner.log = slog.New(h)
+	d := f.capture("api", 10, podD, "10.0.0.20", 300, l4Snapshot(t, entries(allowAll(ingress), allowAll(egress))...))
+	d.err = errors.New("endpoint native policy is not current and realized")
+	generation := f.owner.beginStream()
+	f.bindAndAcknowledgeAddress(generation, podD)
+	const ineligible = "Required workload is not an effective ztunnel policy destination"
+	f.owner.reconcile()
+	f.owner.reconcile()
+	f.owner.reconcile()
+	require.Equal(t, 1, h.messages[ineligible])
+	d.err = errors.New("native selector updates are pending")
+	f.owner.reconcile()
+	require.Equal(t, 2, h.messages[ineligible], "a new reason is logged")
+	d.err = nil
+	f.owner.reconcile()
+	require.Equal(t, 1, h.messages["Required workload is now an effective ztunnel policy destination"])
 }

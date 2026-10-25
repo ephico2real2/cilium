@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// Required intent is sticky: losing or downgrading the published membership
+// copy does not turn a Required endpoint back into an ordinary one.
 func TestPolicyBindingCarriesStickyRequiredWhenPublicationDisappears(t *testing.T) {
 	for _, name := range []string{"missing-copy", "unenrolled-copy"} {
 		t.Run(name, func(t *testing.T) {
@@ -18,20 +20,10 @@ func TestPolicyBindingCarriesStickyRequiredWhenPublicationDisappears(t *testing.
 			}
 			require.NoError(t, ep.lockAlive())
 			b := ep.ztunnelPolicyBindingLocked()
-			require.True(t, b.RequiredObserved)
-			err := ep.requireZtunnelPolicyDrainLocked()
 			ep.unlock()
-			require.ErrorContains(t, err, "no native policy transition authority")
+			require.True(t, b.RequiredObserved)
+			require.True(t, ep.IsZtunnelQuarantined())
+			require.True(t, ep.IsZtunnelMeshOnly())
 		})
 	}
-}
-func TestPolicyBindingIntentStrengthensWithoutChangingSandbox(t *testing.T) {
-	old := ZtunnelPolicyBinding{EndpointID: 9, PodUID: "pod", NamespaceUID: "ns", ContainerID: "container", NetNSPath: "/ns", NetNSCookie: 5}
-	current := old
-	current.RequiredObserved = true
-	require.True(t, sameZtunnelPolicyBinding(old, current))
-	require.False(t, sameZtunnelPolicyBinding(current, old))
-	changed := current
-	changed.PodUID = "replacement"
-	require.False(t, sameZtunnelPolicyBinding(current, changed))
 }

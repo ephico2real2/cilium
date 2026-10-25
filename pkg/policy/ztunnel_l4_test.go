@@ -46,7 +46,11 @@ func TestZtunnelNativeSnapshotImmutableAndRevisionFailures(t *testing.T) {
 	require.NoError(t, err)
 	require.False(t, next.permits(id, 8080, true))
 	require.NotEqual(t, snapshot.Digest(), next.Digest())
+	// A policy computed at revision 7 stays current when the realized revision
+	// advanced without selecting it; it is unavailable only for an older one.
 	_, err = p.SnapshotZtunnelL4(8)
+	require.NoError(t, err)
+	_, err = p.SnapshotZtunnelL4(6)
 	require.Error(t, err)
 	p.selectors.Revision = 0
 	_, err = p.SnapshotZtunnelL4(7)
@@ -184,4 +188,41 @@ func TestZtunnelNativeCompilerRejectsSnapshotFromAnotherCluster(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, plan.ReviewAuthorization.Rules, 1)
 	require.Empty(t, plan.ReviewAuthorization.Rules[0].Clauses[0].Matches[0].DestinationPorts)
+}
+
+// The content digest identifies what is enforced: it ignores the revisions a
+// policy was computed and realized at, and changes with any entry.
+func TestZtunnelContentDigestIgnoresRevisionsAndTracksEntries(t *testing.T) {
+	id := identity.NumericIdentity(1<<16 | 1000)
+	key := IngressKey().WithIdentity(id).WithTCPPort(8080)
+	p := ztunnelTestPolicy(t, map[Key]MapStateEntry{key: policyTypes.AllowEntry()})
+	atSeven, err := p.SnapshotZtunnelL4(7)
+	require.NoError(t, err)
+	atNine, err := p.SnapshotZtunnelL4(9)
+	require.NoError(t, err)
+	require.NotEqual(t, atSeven.Digest(), atNine.Digest(), "the attestation digest stays revision-bound")
+	require.Equal(t, atSeven.ContentDigest(), atNine.ContentDigest())
+	live, err := p.ZtunnelContentDigest()
+	require.NoError(t, err)
+	require.Equal(t, atSeven.ContentDigest(), live)
+
+	same := ztunnelTestPolicy(t, map[Key]MapStateEntry{key: policyTypes.AllowEntry()})
+	same.SelectorPolicy.Revision = 12
+	recomputed, err := same.ZtunnelContentDigest()
+	require.NoError(t, err)
+	require.Equal(t, live, recomputed, "a recomputed policy object with the same entries has the same content")
+
+	p.policyMapState.upsert(key, NewMapStateEntry(policyTypes.DenyEntry()))
+	changed, err := p.ZtunnelContentDigest()
+	require.NoError(t, err)
+	require.NotEqual(t, live, changed)
+
+	p.policyMapChanges.changes = append(p.policyMapChanges.changes, mapChange{})
+	queued, err := p.ZtunnelContentDigest()
+	require.NoError(t, err, "changes queued after the last consume are a later mutation")
+	require.Equal(t, changed, queued)
+
+	var unavailable *EndpointPolicy
+	_, err = unavailable.ZtunnelContentDigest()
+	require.Error(t, err)
 }

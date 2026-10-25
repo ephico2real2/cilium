@@ -11,6 +11,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
+	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/lxcmap"
 	"github.com/cilium/cilium/pkg/option"
@@ -46,9 +47,12 @@ type ZtunnelAdmissionReceipt struct {
 	Binding ZtunnelPolicyBinding
 	// Captured membership for that incarnation (ZDS ACK of this generation).
 	Membership ZtunnelMembership
-	// Realized native policy that the published authorization was compiled from.
+	// Realized native policy that the published authorization was compiled
+	// from: its revision-free content digest and security identity bind the
+	// release; the revision is kept for correlation only.
 	PolicyRevision uint64
 	PolicyDigest   string
+	Identity       identity.NumericIdentity
 	// Native authorization resource version delivered to the local ztunnel.
 	// Recorded for correlation; it is not an ACK-derived protection claim.
 	AuthorizationVersion uint64
@@ -86,7 +90,8 @@ func (e *Endpoint) ztunnelQuarantinedLocked() bool {
 		return true
 	}
 	r := e.ztunnelAdmission.Load()
-	return r != nil && r.Binding != e.ztunnelPolicyBindingLocked()
+	return r != nil && (r.Binding != e.ztunnelPolicyBindingLocked() ||
+		e.SecurityIdentity == nil || e.SecurityIdentity.ID != r.Identity)
 }
 
 // IsZtunnelQuarantined reports the separate datapath hold state. Required
@@ -181,26 +186,18 @@ func (e *Endpoint) verifyZtunnelReceiptLocked(r ZtunnelAdmissionReceipt) error {
 	if !ok || m != r.Membership || !validCapturedMembership(m, current.NamespaceUID) {
 		return fmt.Errorf("%w: membership is not the exact captured generation", ErrZtunnelAdmissionMismatch)
 	}
-	if e.ztunnelPolicyDrain != nil {
-		select {
-		case <-e.ztunnelPolicyDrain.drain.Done():
-			if e.ztunnelPolicyDrain.drain.Err() != nil {
-				return fmt.Errorf("%w: native policy drain failed", ErrZtunnelAdmissionMismatch)
-			}
-		default:
-			return fmt.Errorf("%w: native policy drain is pending", ErrZtunnelAdmissionMismatch)
-		}
+	if e.realizedPolicy == nil || e.realizedPolicy != e.desiredPolicy || e.policyRevision == 0 {
+		return fmt.Errorf("%w: native policy is not realized", ErrZtunnelAdmissionMismatch)
 	}
-	if e.realizedPolicy == nil || e.realizedPolicy != e.desiredPolicy || e.policyRevision == 0 ||
-		e.policyRevision != e.desiredPolicyRevision || e.policyRevision != r.PolicyRevision {
-		return fmt.Errorf("%w: native policy is not realized at the receipt revision", ErrZtunnelAdmissionMismatch)
+	if e.SecurityIdentity == nil || r.Identity == 0 || e.SecurityIdentity.ID != r.Identity {
+		return fmt.Errorf("%w: security identity differs", ErrZtunnelAdmissionMismatch)
 	}
 	snapshot, err := e.realizedPolicy.SnapshotZtunnelL4(e.policyRevision)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrZtunnelAdmissionMismatch, err)
 	}
-	if r.PolicyDigest == "" || snapshot.Digest() != r.PolicyDigest {
-		return fmt.Errorf("%w: native policy digest differs", ErrZtunnelAdmissionMismatch)
+	if r.PolicyDigest == "" || snapshot.ContentDigest() != r.PolicyDigest {
+		return fmt.Errorf("%w: enforced policy content differs", ErrZtunnelAdmissionMismatch)
 	}
 	if r.AuthorizationVersion == 0 {
 		return fmt.Errorf("%w: no native authorization version was delivered", ErrZtunnelAdmissionMismatch)

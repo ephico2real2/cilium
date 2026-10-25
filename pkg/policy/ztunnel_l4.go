@@ -9,6 +9,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/netip"
 	"slices"
 	"strings"
@@ -40,12 +41,20 @@ type ZtunnelL4Snapshot struct {
 	revision         uint64
 	selectorRevision policyTypes.SelectorRevision
 	digest           string
-	boundaries       []uint32
+	// contentDigest covers the enforced entries only, not the revisions they
+	// were computed at: identical content keeps the same contentDigest across
+	// policy revisions and regenerations.
+	contentDigest string
+	boundaries    []uint32
 }
 
 func (p *EndpointPolicy) SnapshotZtunnelL4(realizedRevision uint64) (*ZtunnelL4Snapshot, error) {
+	// A policy computed at SelectorPolicy.Revision stays current up to the
+	// realized revision (the computation advances CurrentAtRevision for
+	// identities an update did not select); it is unavailable only if it was
+	// computed at a revision newer than the one realized.
 	if p == nil || !p.IsValid() || p.SelectorPolicy == nil || realizedRevision == 0 ||
-		p.SelectorPolicy.Revision != realizedRevision || p.selectors.Revision == 0 {
+		p.SelectorPolicy.Revision > realizedRevision || p.selectors.Revision == 0 {
 		return nil, fmt.Errorf("native realized policy/revision is unavailable")
 	}
 	if p.SelectorPolicy.L4Policy.HasRedirect() {
@@ -59,6 +68,26 @@ func (p *EndpointPolicy) SnapshotZtunnelL4(realizedRevision uint64) (*ZtunnelL4S
 		return nil, fmt.Errorf("native selector updates are pending")
 	}
 	return cloneZtunnelL4Snapshot(p.policyMapState, realizedRevision, p.selectors.Revision)
+}
+
+// ZtunnelContentDigest is the revision-free digest of the ztunnel L4 input this
+// policy enforces now: its distilled map state, including incremental changes
+// already consumed. Changes queued after the last consume are not included;
+// consuming them is a new mutation. Caller MUST hold the endpoint lock.
+func (p *EndpointPolicy) ZtunnelContentDigest() (string, error) {
+	if p == nil || !p.IsValid() || p.SelectorPolicy == nil {
+		return "", fmt.Errorf("native policy is unavailable")
+	}
+	if p.SelectorPolicy.L4Policy.HasRedirect() {
+		return "", fmt.Errorf("ztunnel L4 compiler does not implement Envoy/L7 redirects")
+	}
+	p.policyMapChanges.mutex.Lock()
+	defer p.policyMapChanges.mutex.Unlock()
+	snapshot, err := cloneZtunnelL4Snapshot(p.policyMapState, p.SelectorPolicy.Revision, p.selectors.Revision)
+	if err != nil {
+		return "", err
+	}
+	return snapshot.contentDigest, nil
 }
 
 // One constructor is shared by native capture and the bounded wire decoder.
@@ -101,24 +130,22 @@ func cloneZtunnelL4Snapshot(source mapState, realizedRevision uint64, selectorRe
 		}
 		return 0
 	})
-	h := sha256.New()
+	h, content := sha256.New(), sha256.New()
 	var encoded [8]byte
-	append64 := func(v uint64) { binary.BigEndian.PutUint64(encoded[:], v); _, _ = h.Write(encoded[:]) }
-	append64(realizedRevision)
-	append64(uint64(selectorRevision))
+	appendTo := func(w io.Writer, v uint64) { binary.BigEndian.PutUint64(encoded[:], v); _, _ = w.Write(encoded[:]) }
+	appendTo(h, realizedRevision)
+	appendTo(h, uint64(selectorRevision))
 	for _, k := range keys {
 		v := source.entries[k]
-		append64(uint64(k.TrafficDirection()))
-		append64(uint64(k.Nexthdr))
-		append64(uint64(k.DestPort))
-		append64(uint64(k.PortPrefixLen()))
-		append64(uint64(k.Identity))
-		append64(uint64(v.Precedence))
-		append64(uint64(v.ProxyPort))
-		append64(uint64(v.Cookie))
+		for _, value := range []uint64{uint64(k.TrafficDirection()), uint64(k.Nexthdr), uint64(k.DestPort),
+			uint64(k.PortPrefixLen()), uint64(k.Identity), uint64(v.Precedence), uint64(v.ProxyPort), uint64(v.Cookie)} {
+			appendTo(h, value)
+			appendTo(content, value)
+		}
 	}
 	return &ZtunnelL4Snapshot{state: cloned, revision: realizedRevision,
-		selectorRevision: selectorRevision, digest: hex.EncodeToString(h.Sum(nil)), boundaries: cuts}, nil
+		selectorRevision: selectorRevision, digest: hex.EncodeToString(h.Sum(nil)),
+		contentDigest: hex.EncodeToString(content.Sum(nil)), boundaries: cuts}, nil
 }
 
 func (s *ZtunnelL4Snapshot) Revision() uint64 {
@@ -138,6 +165,14 @@ func (s *ZtunnelL4Snapshot) Digest() string {
 		return ""
 	}
 	return s.digest
+}
+
+// ContentDigest is the revision-free digest of the snapshot's entries.
+func (s *ZtunnelL4Snapshot) ContentDigest() string {
+	if s == nil {
+		return ""
+	}
+	return s.contentDigest
 }
 
 func (s *ZtunnelL4Snapshot) permits(id identity.NumericIdentity, port uint16, ingress bool) bool {
@@ -339,7 +374,7 @@ func CompileZtunnelTCP(info cmtypes.ClusterInfo, destination ZtunnelPolicySubjec
 	// incarnation. The review resource is deliberately not a live policy name.
 	h := sha256.New()
 	write := func(s ZtunnelPolicySubject) {
-		_, _ = fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00", s.ClusterID, s.ClusterName, s.TrustDomain, s.Namespace, s.NamespaceUID, s.PodUID, s.ServiceAccount, s.NumericIdentity, s.Policy.Digest())
+		_, _ = fmt.Fprintf(h, "%d\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%d\x00%s\x00", s.ClusterID, s.ClusterName, s.TrustDomain, s.Namespace, s.NamespaceUID, s.PodUID, s.ServiceAccount, s.NumericIdentity, s.Policy.ContentDigest())
 		_, _ = fmt.Fprintf(h, "%d\x00", s.EndpointID)
 		for _, ip := range exactZtunnelIPs(s.Addresses) {
 			_, _ = fmt.Fprintf(h, "%d:", len(ip.Address))

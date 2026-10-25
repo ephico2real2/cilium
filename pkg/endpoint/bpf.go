@@ -555,10 +555,6 @@ func (e *Endpoint) policyMapSync(policyMapDump policy.MapStateMap, stats *regene
 	stats.mapSync.Start()
 	// Nothing to do if the desired policy is already fully realized.
 	if e.realizedPolicy != e.desiredPolicy {
-		if err := e.requireZtunnelPolicyDrainLocked(); err != nil {
-			stats.mapSync.End(false)
-			return err
-		}
 		if len(policyMapDump) > 0 {
 			_, _, err = e.syncPolicyMapWith(policyMapDump, false)
 		} else {
@@ -647,10 +643,6 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (pr
 		if err != nil {
 			return newRegenerationError(regenerationFailureReasonPolicyRegenerationError, err)
 		}
-	}
-
-	if err := e.prepareZtunnelPolicyChange(regenContext.parentContext, datapathRegenCtxt.policyResult, false); err != nil {
-		return newRegenerationError(regenerationFailureReasonEndpointPolicyUpdateError, err)
 	}
 
 	// Once the policy has been calculated, we can update the standalone dns proxy as well.
@@ -1060,9 +1052,6 @@ func (e *Endpoint) ApplyPolicyMapChanges(proxyWaitGroup *completion.WaitGroup) (
 	if proxyWaitGroup == nil {
 		return fmt.Errorf("incremental policy update requires a completion context"), nil
 	}
-	if err = e.prepareZtunnelPolicyChange(proxyWaitGroup.Context(), nil, true); err != nil {
-		return err, nil
-	}
 	if err = e.lockAlive(); err != nil {
 		return err, nil
 	}
@@ -1121,11 +1110,12 @@ func (e *Endpoint) applyPolicyMapChangesLocked(regenContext *regenerationContext
 
 	// ConsumeMapChanges() applies the incremental updates to the desired policy and only
 	// returns changes that need to be applied to the Endpoint's bpf policy map.
-	closer, changes, err := e.desiredPolicy.ConsumeMapChangesGuarded(e.requireZtunnelPolicyDrainLocked)
-	if err != nil {
-		return err
-	}
+	closer, changes := e.desiredPolicy.ConsumeMapChanges()
 	defer closer()
+	// The desired policy now holds the content about to be written to the BPF
+	// policy map; a released Required endpoint is quarantined first if that
+	// content no longer matches its release.
+	e.fenceZtunnelPolicyChangeLocked()
 
 	e.updatePolicyMapPressureMetric(e.desiredPolicy.Len())
 

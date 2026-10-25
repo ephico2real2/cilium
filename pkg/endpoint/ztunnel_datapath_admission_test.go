@@ -15,6 +15,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/maps/lxcmap"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/policy"
 )
 
 // recordingLxcMap records the cilium_lxc flag bits that lxcmap.getBPFValue
@@ -87,7 +88,8 @@ func admissionEndpoint(t *testing.T) (*Endpoint, ZtunnelAdmissionReceipt) {
 	binding := ep.ztunnelPolicyBindingLocked()
 	ep.mutex.Unlock()
 	return ep, ZtunnelAdmissionReceipt{Binding: binding, Membership: capturedMembership(2, 1),
-		PolicyRevision: ep.policyRevision, PolicyDigest: snapshot.Digest(), AuthorizationVersion: 7}
+		PolicyRevision: ep.policyRevision, PolicyDigest: snapshot.ContentDigest(), Identity: ep.SecurityIdentity.ID,
+		AuthorizationVersion: 7}
 }
 
 func TestZtunnelRequiredEndpointIsQuarantinedAndMeshOnlyUntilRelease(t *testing.T) {
@@ -119,13 +121,13 @@ func TestZtunnelReleaseRequiresExactNativeReceipt(t *testing.T) {
 		{"different sandbox cookie", func(_ *Endpoint, r *ZtunnelAdmissionReceipt) { r.Binding.NetNSCookie++ }},
 		{"stale membership generation", func(_ *Endpoint, r *ZtunnelAdmissionReceipt) { r.Membership.Generation = 9 }},
 		{"membership not captured", func(_ *Endpoint, r *ZtunnelAdmissionReceipt) { r.Membership.State = ZtunnelMembershipRequired }},
-		{"stale policy revision", func(_ *Endpoint, r *ZtunnelAdmissionReceipt) { r.PolicyRevision++ }},
+		{"different security identity", func(_ *Endpoint, r *ZtunnelAdmissionReceipt) { r.Identity++ }},
 		{"different policy digest", func(_ *Endpoint, r *ZtunnelAdmissionReceipt) { r.PolicyDigest = "0000" }},
 		{"no authorization delivered", func(_ *Endpoint, r *ZtunnelAdmissionReceipt) { r.AuthorizationVersion = 0 }},
 		{"source IP verification disabled", func(ep *Endpoint, _ *ZtunnelAdmissionReceipt) {
 			ep.Options.SetBool(option.SourceIPVerification, false)
 		}},
-		{"desired policy not realized", func(ep *Endpoint, _ *ZtunnelAdmissionReceipt) { ep.desiredPolicyRevision++ }},
+		{"desired policy not realized", func(ep *Endpoint, _ *ZtunnelAdmissionReceipt) { ep.desiredPolicy = &policy.EndpointPolicy{} }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ep, receipt := admissionEndpoint(t)

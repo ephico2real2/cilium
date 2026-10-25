@@ -30,7 +30,8 @@ type ZtunnelReleaseCandidate struct {
 	HasMembership  bool
 	Subject        policy.ZtunnelPolicySubject
 	PolicyRevision uint64
-	PolicyDigest   string
+	// PolicyDigest is the revision-free content digest of the realized policy.
+	PolicyDigest string
 }
 
 // SnapshotZtunnelReleaseCandidate returns the native evidence for a release
@@ -47,12 +48,15 @@ func (e *Endpoint) SnapshotZtunnelReleaseCandidate() (ZtunnelReleaseCandidate, e
 	}
 	membership, ok := e.GetZtunnelMembership()
 	return ZtunnelReleaseCandidate{Binding: e.ztunnelPolicyBindingLocked(), Membership: membership, HasMembership: ok,
-		Subject: subject, PolicyRevision: e.policyRevision, PolicyDigest: subject.Policy.Digest()}, nil
+		Subject: subject, PolicyRevision: e.policyRevision, PolicyDigest: subject.Policy.ContentDigest()}, nil
 }
 
 func (e *Endpoint) snapshotZtunnelPolicyRLocked() (policy.ZtunnelPolicySubject, error) {
+	// Realized means the desired policy object is the realized one. Its
+	// revision bookkeeping may advance without a new object, which does not
+	// change what is enforced.
 	if e.state != StateReady || e.realizedPolicy == nil || e.realizedPolicy != e.desiredPolicy ||
-		e.policyRevision == 0 || e.desiredPolicyRevision != e.policyRevision || e.SecurityIdentity == nil {
+		e.policyRevision == 0 || e.SecurityIdentity == nil {
 		return policy.ZtunnelPolicySubject{}, fmt.Errorf("endpoint native policy is not current and realized")
 	}
 	nsUID := e.GetK8sNamespaceUID()

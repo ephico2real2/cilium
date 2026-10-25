@@ -6,6 +6,7 @@ package zds
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -77,6 +78,15 @@ func (zc *ztunnelConn) readMsg(msg proto.Message) error {
 	return proto.Unmarshal(buf[:n], msg)
 }
 
+// errZDSRequestRejected marks a request refused before any byte of it was
+// written. The connection is unaffected: only that request fails, and other
+// endpoints keep using the connection.
+var errZDSRequestRejected = errors.New("ZDS request rejected before transmission")
+
+func rejectedBeforeWrite(err error) error {
+	return fmt.Errorf("%w: %w", errZDSRequestRejected, err)
+}
+
 func (zc *ztunnelConn) sendMsg(req *pb.WorkloadRequest, ns *netns.NetNS) error {
 	var rights []byte
 	if ns != nil {
@@ -85,11 +95,11 @@ func (zc *ztunnelConn) sendMsg(req *pb.WorkloadRequest, ns *netns.NetNS) error {
 	}
 	data, err := proto.Marshal(req)
 	if err != nil {
-		return err
+		return rejectedBeforeWrite(err)
 	}
 
 	if len(data) > 1024 {
-		return fmt.Errorf("ZDS request exceeds native 1024-byte packet bound")
+		return rejectedBeforeWrite(fmt.Errorf("ZDS request exceeds native 1024-byte packet bound"))
 	}
 	n, oob, err := zc.conn.WriteMsgUnix(data, rights, nil)
 	if err != nil {
@@ -119,36 +129,36 @@ func (zc *ztunnelConn) sendAndWaitForAckBeforeWrite(req *pb.WorkloadRequest, net
 		var err error
 		ns, err = netns.OpenPinned(netnsPath)
 		if err != nil {
-			return fmt.Errorf("failed to open netns: %w", err)
+			return rejectedBeforeWrite(fmt.Errorf("failed to open netns: %w", err))
 		}
 		defer ns.Close()
 	}
 
 	if add := req.GetAdd(); add != nil && add.Binding != nil {
 		if ns == nil {
-			return fmt.Errorf("bound ADD has no sandbox FD")
+			return rejectedBeforeWrite(fmt.Errorf("bound ADD has no sandbox FD"))
 		}
 		var st unix.Stat_t
 		if err := unix.Fstat(ns.FD(), &st); err != nil {
-			return err
+			return rejectedBeforeWrite(err)
 		}
 		if add.Binding.NetnsDev != uint64(st.Dev) || add.Binding.NetnsIno != st.Ino {
-			return fmt.Errorf("sandbox changed between capture and actual ADD FD")
+			return rejectedBeforeWrite(fmt.Errorf("sandbox changed between capture and actual ADD FD"))
 		}
 		if len(add.Binding.ProxyEpoch) == 0 {
 			add.Binding.ProxyEpoch = append([]byte(nil), zc.proxyEpoch...)
 		}
 		if err := validateBinding(add.Binding); err != nil {
-			return err
+			return rejectedBeforeWrite(err)
 		}
 		if !bytes.Equal(add.Binding.ProxyEpoch, zc.proxyEpoch) {
-			return fmt.Errorf("ADD belongs to an earlier proxy execution; explicit recovery required")
+			return rejectedBeforeWrite(fmt.Errorf("ADD belongs to an earlier proxy execution; explicit recovery required"))
 		}
 	}
 
 	if beforeWrite != nil {
 		if err := beforeWrite(); err != nil {
-			return err
+			return rejectedBeforeWrite(err)
 		}
 	}
 	if err := zc.sendMsg(req, ns); err != nil {
@@ -228,9 +238,9 @@ type Server struct {
 	logger *slog.Logger
 
 	endpointCache map[uint16]*endpoint.Endpoint
-	// Writers take the exclusive lock. ObservePolicyOwnership only reads and
-	// takes the shared lock, so concurrent endpoint regenerations observing
-	// ownership never fail each other.
+	// Writers take the exclusive lock; read-only checks (capture
+	// verification, snapshot bindings) take the shared lock and never
+	// exclude each other.
 	endpointCacheMutex           lock.RWMutex
 	strictDeletedEndpointCleanup bool
 	drainBindings                map[endpointIncarnation]*pb.WorkloadBinding
@@ -238,6 +248,10 @@ type Server struct {
 	policyADDHistory             map[endpointIncarnation][]*pb.WorkloadBinding
 	policyADDPending             map[*pendingPolicyADD]struct{}
 	endpointOperationGate        chan struct{}
+	// liveProxyEpoch names the ztunnel execution whose connection delivered
+	// its initial snapshot and now consumes updates. Serve keeps at most one
+	// such connection. Guarded by endpointCacheMutex.
+	liveProxyEpoch []byte
 
 	updates               chan zdsUpdate // updates to send to ztunnel
 	initialSnapshotSeeded chan struct{}
@@ -427,6 +441,8 @@ func (s *Server) handleConn(ctx context.Context, zc *ztunnelConn) error {
 		return fmt.Errorf("failed to send initial snapshot: %w", err)
 	}
 	s.logger.Info("initial snapshot sent, processing updates")
+	s.setLiveProxyEpoch(zc.proxyEpoch)
+	defer s.clearLiveProxyEpoch(zc.proxyEpoch)
 
 	for {
 		select {
@@ -489,6 +505,10 @@ func (s *Server) processUpdate(ctx context.Context, zc *ztunnelConn, update zdsU
 		update.onAck()
 	}
 	complete(err)
+	if errors.Is(err, errZDSRequestRejected) {
+		// Nothing was written: the connection stays in a known state.
+		return nil
+	}
 	return err
 }
 
@@ -758,6 +778,34 @@ func (s *Server) SeedInitialSnapshot(eps ...*endpoint.Endpoint) {
 
 // sendInitialSnapshot sends the seeded initial snapshot to the given connection.
 // This is called by handleConn for each new connection.
+// snapshotBinding returns the retained ADD binding a strict endpoint can
+// replay into the ztunnel execution identified by epoch, or why it cannot.
+func (s *Server) snapshotBinding(ep *endpoint.Endpoint, epoch []byte) (*pb.WorkloadBinding, string) {
+	key, err := incarnation(ep)
+	if err != nil {
+		return nil, "it has no immutable incarnation"
+	}
+	s.endpointCacheMutex.RLock()
+	binding := s.drainBindings[key]
+	s.endpointCacheMutex.RUnlock()
+	switch {
+	case binding == nil:
+		return nil, "no acknowledged ADD is retained by this agent execution"
+	case !bytes.Equal(binding.ProxyEpoch, epoch):
+		return nil, "its ADD belongs to an earlier ztunnel execution"
+	}
+	return proto.Clone(binding).(*pb.WorkloadBinding), ""
+}
+
+func (s *Server) skipSnapshotEndpoint(ep *endpoint.Endpoint, reason string, err error) {
+	s.logger.Info("Leaving Required endpoint out of the initial snapshot until it is re-admitted",
+		logStage, "zds-initial-snapshot",
+		logfields.EndpointID, ep.GetID16(),
+		logfields.K8sUID, ep.K8sUID,
+		logfields.Reason, reason,
+		logfields.Error, err)
+}
+
 func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 	s.endpointCacheMutex.Lock()
 	endpoints := make([]*endpoint.Endpoint, 0, len(s.endpointCache))
@@ -771,9 +819,28 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 		if !s.strictSnapshotStillDesired(ep) {
 			continue
 		}
+		// A strict endpoint's ADD can be replayed only into the ztunnel
+		// execution that acknowledged it; decide that before touching its
+		// sandbox. Any per-endpoint failure leaves that endpoint out instead of
+		// failing the snapshot: a failed snapshot fails every reconnect, while
+		// admission needs this connection to re-capture the endpoint. A left-out
+		// endpoint stays quarantined until admission sends a fresh ADD.
+		var binding *pb.WorkloadBinding
+		if s.strictDeletedEndpointCleanup {
+			var reason string
+			binding, reason = s.snapshotBinding(ep, zc.proxyEpoch)
+			if reason != "" {
+				s.skipSnapshotEndpoint(ep, reason, nil)
+				continue
+			}
+		}
 		ns, err := netns.OpenPinned(ep.GetContainerNetnsPath())
 		if err != nil {
 			if !s.strictSnapshotStillDesired(ep) {
+				continue
+			}
+			if s.strictDeletedEndpointCleanup {
+				s.skipSnapshotEndpoint(ep, "its network namespace cannot be opened", err)
 				continue
 			}
 			s.logger.Error("failed to open netns file",
@@ -791,6 +858,10 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 			return iptables.CreateInPodRules(s.logger, option.Config.EnableIPv4, option.Config.EnableIPv6)
 		}); err != nil {
 			ns.Close()
+			if s.strictDeletedEndpointCleanup {
+				s.skipSnapshotEndpoint(ep, "its capture rules cannot be installed", err)
+				continue
+			}
 			return fmt.Errorf("unable to setup iptable rules for ztunnel inpod mode: %w", err)
 		}
 		ns.Close()
@@ -800,25 +871,17 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 
 		workload, err := endpointToWorkload(ep)
 		if err != nil {
+			if s.strictDeletedEndpointCleanup {
+				s.skipSnapshotEndpoint(ep, "it cannot be converted to a workload", err)
+				continue
+			}
 			s.logger.Error("failed to convert endpoint to workload",
 				logfields.EndpointID, ep.GetID16(),
 				logfields.Error, err,
 			)
 			return err
 		}
-
-		if s.strictDeletedEndpointCleanup {
-			s.endpointCacheMutex.Lock()
-			key, _ := incarnation(ep)
-			binding := s.drainBindings[key]
-			if binding != nil {
-				workload.Binding = proto.Clone(binding).(*pb.WorkloadBinding)
-			}
-			s.endpointCacheMutex.Unlock()
-			if workload.Binding == nil {
-				return fmt.Errorf("restored Required intent has no original live proxy ADD binding; explicit recovery required")
-			}
-		}
+		workload.Binding = binding
 
 		req := &pb.WorkloadRequest{
 			Payload: &pb.WorkloadRequest_Add{
@@ -830,6 +893,10 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 			continue
 		}
 		if err := zc.sendAndWaitForAck(req, ep.GetContainerNetnsPath()); err != nil {
+			if errors.Is(err, errZDSRequestRejected) {
+				s.skipSnapshotEndpoint(ep, "its request was rejected before transmission", err)
+				continue
+			}
 			return fmt.Errorf("failed to send endpoint message: %w", err)
 		}
 	}

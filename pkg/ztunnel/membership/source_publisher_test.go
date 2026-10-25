@@ -357,8 +357,13 @@ func TestSourcePublisherPublishesOnlyEmptyRecordForRequiredMembership(t *testing
 
 func TestSourcePublisherWithdrawsAllWorkloadsWhenBoundExceeded(t *testing.T) {
 	publisher, backend, _, _ := newSourcePublisherTest(t)
-	if _, err := publisher.registry.Require("namespace-uid-b", "pod-uid-b", 43, "/var/run/netns/cilium/pod-43"); err != nil {
+	second, err := publisher.registry.Require("namespace-uid-b", "pod-uid-b", 43, "/var/run/netns/cilium/pod-43")
+	if err != nil {
 		t.Fatal(err)
+	}
+	generation, ok := publisher.registry.BeginZDS(second)
+	if !ok || !publisher.registry.MarkCaptured(second, generation) || !publisher.registry.AcknowledgeZDS(second, generation) {
+		t.Fatal("second workload was not captured")
 	}
 	cfg := publisher.config
 	cfg.MaxWorkloads = 1
@@ -373,6 +378,29 @@ func TestSourcePublisherWithdrawsAllWorkloadsWhenBoundExceeded(t *testing.T) {
 	record := readSourceRecord(t, backend, limited.key)
 	if record.Valid || record.Reason != "workload_limit_exceeded" || len(record.Workloads) != 0 {
 		t.Fatalf("bound-exceeded refresh did not withdraw the whole snapshot: %+v", record)
+	}
+}
+
+// The bound limits the workloads a record publishes and revalidates. Required
+// or Draining entries are neither, so they cannot withdraw a node's record.
+func TestSourcePublisherBoundCountsOnlyCapturedWorkloads(t *testing.T) {
+	publisher, backend, _, _ := newSourcePublisherTest(t)
+	if _, err := publisher.registry.Require("namespace-uid-b", "pod-uid-b", 43, "/var/run/netns/cilium/pod-43"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := publisher.config
+	cfg.MaxWorkloads = 1
+	limited, err := newSourcePublisher(publisher.registry, publisher.endpoints, publisher.backend, publisher.logger, cfg, publisher.epoch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locker := lockSourceTestBackend(t, backend)
+	if err := limited.refresh(context.Background(), locker); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	record := readSourceRecord(t, backend, limited.key)
+	if !record.Valid || len(record.Workloads) != 1 {
+		t.Fatalf("a Required-only entry withdrew the captured workload: %+v", record)
 	}
 }
 

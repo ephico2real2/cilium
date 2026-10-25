@@ -292,7 +292,7 @@ func (r *Registry) BeginADSGeneration() uint64 {
 		state.PolicyBoundToWorkload = false
 		state.PolicyRequiresAuthenticatedPeer = false
 		state.PolicyDenyByDefault = false
-		r.storeStateLocked(ref, state)
+		r.storeEvidenceLocked(ref, state)
 	}
 	return r.nextADSGeneration
 }
@@ -316,7 +316,7 @@ func (r *Registry) PublishAddress(ref Reference, generation uint64) (uint64, boo
 	state.PolicyBoundToWorkload = false
 	state.PolicyRequiresAuthenticatedPeer = false
 	state.PolicyDenyByDefault = false
-	r.storeStateLocked(ref, state)
+	r.storeEvidenceLocked(ref, state)
 	return state.AddressVersion, true
 }
 
@@ -329,7 +329,7 @@ func (r *Registry) AcknowledgeAddress(ref Reference, generation, version uint64)
 		return false
 	}
 	state.AddressAcked = true
-	r.storeStateLocked(ref, state)
+	r.storeEvidenceLocked(ref, state)
 	return true
 }
 
@@ -367,7 +367,7 @@ func (r *Registry) PublishPolicy(ref Reference, generation uint64, evidence Poli
 	state.PolicyBoundToWorkload = evidence.BoundToWorkload
 	state.PolicyRequiresAuthenticatedPeer = evidence.RequiresAuthenticatedPeer
 	state.PolicyDenyByDefault = evidence.DenyByDefault
-	r.storeStateLocked(ref, state)
+	r.storeEvidenceLocked(ref, state)
 	return state.PolicyVersion, true
 }
 
@@ -382,7 +382,7 @@ func (r *Registry) AcknowledgePolicy(ref Reference, generation, version uint64) 
 		return false
 	}
 	state.PolicyAcked = true
-	r.storeStateLocked(ref, state)
+	r.storeEvidenceLocked(ref, state)
 	return true
 }
 
@@ -515,6 +515,19 @@ func (r *Registry) storeStateLocked(ref Reference, state State) {
 		state = closedPublicationState(state)
 	}
 	state.PublicationRevision = r.nextPublicationRevision
+	r.states[ref] = state
+}
+
+// storeEvidenceLocked records ADS Address and effective-policy evidence. That
+// evidence is not part of a Publication or SourceSnapshot, so it advances
+// neither the incarnation's publication revision nor the source snapshot
+// revision: an ADS acknowledgment must not make the endpoint's published
+// membership copy, or a source membership record, appear stale. Callers hold
+// r.mu exclusively.
+func (r *Registry) storeEvidenceLocked(ref Reference, state State) {
+	if r.publicationPoisoned {
+		state = closedPublicationState(state)
+	}
 	r.states[ref] = state
 }
 

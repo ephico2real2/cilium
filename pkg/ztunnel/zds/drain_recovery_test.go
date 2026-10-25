@@ -144,9 +144,11 @@ func TestNativeDrainProtocolMismatchAndRestartCannotUseOlderCandidate(t *testing
 			if name == "proxy-restart" {
 				conn, peer := zdsSocketPair(t)
 				conn.proxyEpoch = bytes.Repeat([]byte{8}, 32)
-				require.ErrorContains(t, s.processUpdate(ctx, conn, update), "proxy execution")
+				// A drain for an earlier execution is rejected before any
+				// write: that request fails, the shared connection survives.
+				require.NoError(t, s.processUpdate(ctx, conn, update))
 				require.NoError(t, peer.SetReadDeadline(time.Now().Add(10*time.Millisecond)))
-				require.Error(t, (&ztunnelConn{conn: peer}).readMsg(&pb.WorkloadRequest{}))
+				require.Error(t, (&ztunnelConn{conn: peer}).readMsg(&pb.WorkloadRequest{}), "nothing reaches the newer execution")
 			} else {
 				_, err := exchangeRecoveryDrain(t, s, update, bytes.Repeat([]byte{3}, 32), func(request *pb.DrainWorkload) *pb.WorkloadResponse {
 					if name == "generic-ack" {
@@ -168,6 +170,9 @@ func TestNativeDrainProtocolMismatchAndRestartCannotUseOlderCandidate(t *testing
 			}
 			result := <-done
 			require.Error(t, result.err)
+			if name == "proxy-restart" {
+				require.ErrorContains(t, result.err, "proxy execution")
+			}
 			require.Nil(t, result.receipt)
 			require.Empty(t, s.updates, "protocol errors cannot select another candidate")
 			state, ok := r.Get(ref)

@@ -5,9 +5,11 @@ package reconciler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
+	"sync"
 
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointmanager"
@@ -69,6 +71,14 @@ type EnrollmentReconciler struct {
 	ciliumEndpointSliceResource resource.Resource[*v2alpha1.CiliumEndpointSlice]
 	endpointRevalidators        []membership.EndpointRevalidator
 	membership                  *membership.Registry
+
+	// Re-admission of restored Required endpoints runs after the initial ZDS
+	// snapshot is seeded and stops with the reconciler.
+	restoreCancel context.CancelFunc
+	restoreWG     sync.WaitGroup
+	// restoreBackoff is the first retry delay (restoredReadmissionInitialBackoff
+	// when zero); it doubles up to restoredReadmissionMaxBackoff.
+	restoreBackoff time.Duration
 }
 
 func NewEnrollmentReconciler(cfg params) (reconciler.Operations[*table.EnrolledNamespace], error) {
@@ -154,13 +164,17 @@ func (ops *EnrollmentReconciler) emitEndpointEvents(ctx context.Context, namespa
 func (ops *EnrollmentReconciler) Update(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, ns *table.EnrolledNamespace) error {
 	// Enroll all endpoints in this namespace
 	endpoints := ops.endpointManager.GetEndpointsByNamespace(ns.Name)
+	var strictErrs []error
 	for _, ep := range endpoints {
 		if ep.GetK8sPodUID() == "" || ep.GetContainerNetnsPath() == "" || isZtunnelPod(ep) {
 			continue
 		}
 		if ops.strictCreationAdmission {
-			if err := ops.revalidateEndpoint(ctx, ep, true); err != nil {
-				return fmt.Errorf("revalidating enrolled endpoint %s/%s: %w", ep.GetK8sNamespace(), ep.GetK8sPodName(), err)
+			// One endpoint that cannot be admitted stays quarantined; it does
+			// not stop the others, and a retry re-admits only endpoints whose
+			// admission no longer verifies.
+			if err := ops.verifyOrRevalidateEndpoint(ctx, ep); err != nil {
+				strictErrs = append(strictErrs, fmt.Errorf("revalidating enrolled endpoint %s/%s: %w", ep.GetK8sNamespace(), ep.GetK8sPodName(), err))
 			}
 			continue
 		}
@@ -173,6 +187,9 @@ func (ops *EnrollmentReconciler) Update(ctx context.Context, txn statedb.ReadTxn
 			)
 			return err
 		}
+	}
+	if err := errors.Join(strictErrs...); err != nil {
+		return err
 	}
 	// Do not publish local xDS workload state until strict admission has
 	// revalidated the endpoint and completed fresh capture plus ZDS ACK.
@@ -272,6 +289,7 @@ func (ops *EnrollmentReconciler) Start(ctx cell.HookContext) error {
 	// Get endpoints for initial snapshot
 	endpoints := ops.endpointManager.GetEndpoints()
 	endpointsToEnroll := make([]*endpoint.Endpoint, 0, len(endpoints))
+	var restoredRequired []*endpoint.Endpoint
 	for _, ep := range endpoints {
 		epNamespace := ep.GetK8sNamespace()
 		// If namespace is not enrolled or endpoint has no netns path or is ztunnel itself, skip
@@ -282,14 +300,17 @@ func (ops *EnrollmentReconciler) Start(ctx cell.HookContext) error {
 		txn := ops.db.ReadTxn()
 		_, _, found := ops.enrolledNamespaceTable.Get(txn, table.EnrolledNamespaceByName(epNamespace))
 		if ops.strictCreationAdmission {
-			if err := ops.revalidateEndpoint(ctx, ep, found); err != nil {
-				return fmt.Errorf("revalidating restored endpoint %s/%s: %w", ep.GetK8sNamespace(), ep.GetK8sPodName(), err)
+			// Re-admission sends a ZDS ADD, and the ZDS consumer only starts
+			// after the snapshot below is seeded. Quarantine now; re-admit after
+			// seeding. A restored Required endpoint is never seeded: its earlier
+			// ADD belongs to no live execution of this agent.
+			needed, err := ops.restrictRestoredEndpoint(ctx, ep, found)
+			if err != nil {
+				return fmt.Errorf("restricting restored endpoint %s/%s: %w", ep.GetK8sNamespace(), ep.GetK8sPodName(), err)
 			}
-			_, state, ready := ops.membership.CurrentForPodUID(ep.GetK8sPodUID())
-			if !ready || !state.ReadyForAddress() || state.EndpointID != ep.GetID16() {
-				continue
+			if needed {
+				restoredRequired = append(restoredRequired, ep)
 			}
-			endpointsToEnroll = append(endpointsToEnroll, ep)
 			continue
 		}
 		if !found {
@@ -302,13 +323,102 @@ func (ops *EnrollmentReconciler) Start(ctx cell.HookContext) error {
 		endpointsToEnroll = append(endpointsToEnroll, ep)
 	}
 	ops.endpointEnroller.SeedInitialSnapshot(endpointsToEnroll...)
+	ops.readmitRestoredRequired(restoredRequired)
 	ops.logger.Info("Enrollment reconciler initialized")
 	return nil
 }
 
 func (ops *EnrollmentReconciler) Stop(cell.HookContext) error {
 	ops.endpointManager.Unsubscribe(ops)
+	if ops.restoreCancel != nil {
+		ops.restoreCancel()
+	}
+	ops.restoreWG.Wait()
 	ops.logger.Info("Stopping reconciler")
+	return nil
+}
+
+func (ops *EnrollmentReconciler) restrictRestoredEndpoint(ctx context.Context, ep *endpoint.Endpoint, namespaceEnrolled bool) (bool, error) {
+	needed := false
+	for _, revalidator := range ops.endpointRevalidators {
+		if revalidator == nil {
+			return false, fmt.Errorf("endpoint revalidator is nil")
+		}
+		restricted, err := revalidator.RestrictRestoredEndpoint(ctx, ep, namespaceEnrolled)
+		if err != nil {
+			return false, err
+		}
+		needed = needed || restricted
+	}
+	return needed, nil
+}
+
+const (
+	restoredReadmissionInitialBackoff = time.Second
+	restoredReadmissionMaxBackoff     = 30 * time.Second
+)
+
+// readmitRestoredRequired re-admits each restored Required endpoint through
+// the live ZDS connection. Each endpoint retries independently, so one that
+// cannot be admitted never delays another; it stays quarantined until it is.
+func (ops *EnrollmentReconciler) readmitRestoredRequired(endpoints []*endpoint.Endpoint) {
+	if len(endpoints) == 0 {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	ops.restoreCancel = cancel
+	for _, ep := range endpoints {
+		ops.restoreWG.Go(func() { ops.readmitRestored(ctx, ep) })
+	}
+}
+
+func (ops *EnrollmentReconciler) readmitRestored(ctx context.Context, ep *endpoint.Endpoint) {
+	started := time.Now()
+	backoff := ops.restoreBackoff
+	if backoff == 0 {
+		backoff = restoredReadmissionInitialBackoff
+	}
+	for attempt := 1; ; attempt++ {
+		if ctx.Err() != nil || !ep.IsAlive() {
+			return
+		}
+		err := ops.readmitOnce(ctx, ep)
+		if err == nil {
+			ops.logger.Info("Re-admitted restored Required endpoint",
+				logTransitionStage, "restored-readmission",
+				logfields.EndpointID, ep.GetID16(),
+				logfields.K8sNamespace, ep.GetK8sNamespace(),
+				logfields.Pod, ep.GetK8sPodName(),
+				logfields.Attempt, attempt,
+				logfields.ElapsedDuration, time.Since(started))
+			return
+		}
+		ops.logger.Warn("Restored Required endpoint re-admission failed; endpoint stays quarantined",
+			logTransitionStage, "restored-readmission",
+			logfields.EndpointID, ep.GetID16(),
+			logfields.K8sNamespace, ep.GetK8sNamespace(),
+			logfields.Pod, ep.GetK8sPodName(),
+			logfields.Attempt, attempt,
+			logfields.ElapsedDuration, time.Since(started),
+			logfields.Backoff, backoff,
+			logfields.Error, err)
+		timer := time.NewTimer(backoff)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		backoff = min(2*backoff, restoredReadmissionMaxBackoff)
+	}
+}
+
+func (ops *EnrollmentReconciler) readmitOnce(ctx context.Context, ep *endpoint.Endpoint) error {
+	for _, revalidator := range ops.endpointRevalidators {
+		if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -443,6 +553,28 @@ func (ops *EnrollmentReconciler) revalidateEndpoint(ctx context.Context, ep *end
 			if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
 				return err
 			}
+		}
+	}
+	return nil
+}
+
+// verifyOrRevalidateEndpoint re-admits an endpoint only when its current
+// admission no longer verifies: re-admission quarantines it and starts a new
+// capture generation.
+func (ops *EnrollmentReconciler) verifyOrRevalidateEndpoint(ctx context.Context, ep *endpoint.Endpoint) error {
+	for _, revalidator := range ops.endpointRevalidators {
+		if revalidator == nil {
+			return fmt.Errorf("endpoint revalidator is nil")
+		}
+		should, err := revalidator.ShouldRevalidate(ctx, ep, true)
+		if err != nil {
+			return err
+		}
+		if !should || revalidator.VerifyEndpoint(ctx, ep) == nil {
+			continue
+		}
+		if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
+			return err
 		}
 	}
 	return nil

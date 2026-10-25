@@ -408,12 +408,6 @@ func (e *Endpoint) setDesiredPolicy(datapathRegenCtxt *datapathRegenerationConte
 		return fmt.Errorf("endpoint %d SecurityIdentity revision changed during policy regeneration", e.ID)
 	}
 
-	if res.endpointPolicy != e.desiredPolicy || res.policyRevision != e.desiredPolicyRevision {
-		if err := e.requireZtunnelPolicyDrainLocked(); err != nil {
-			return err
-		}
-	}
-
 	oldDesiredPolicyRevision := e.desiredPolicyRevision
 	// Set the revision of this endpoint to the current revision of the policy
 	// repository.
@@ -1079,11 +1073,6 @@ func (e *Endpoint) ComputeInitialPolicy(regenContext *regenerationContext) (erro
 		return nil, func() {}
 	}
 
-	if err := e.prepareZtunnelPolicyChange(regenContext.parentContext, datapathRegenCtxt.policyResult, false); err != nil {
-		datapathRegenCtxt.policyResult.release(e.getLogger())
-		return err, func() {}
-	}
-
 	err = e.lockAlive()
 	if err != nil {
 		datapathRegenCtxt.policyResult.release(e.getLogger())
@@ -1359,6 +1348,10 @@ func (e *Endpoint) SetIdentity(identity *identityPkg.Identity) (identityToReleas
 	}
 	e.identitySet = true
 	e.SecurityIdentity = identity
+	// A ztunnel release is bound to the identity its policy was compiled for.
+	if r := e.ztunnelAdmission.Load(); r != nil && r.Identity != identity.ID {
+		e.WithdrawZtunnelAdmission("security identity changed")
+	}
 	e.replaceIdentityLabels(labels.LabelSourceAny, identity.Labels)
 
 	// Sets endpoint state to ready if was waiting for identity

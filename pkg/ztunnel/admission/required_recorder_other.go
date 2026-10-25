@@ -7,6 +7,7 @@ package admission
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"github.com/cilium/cilium/pkg/endpoint"
 	slimv1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
@@ -16,7 +17,7 @@ var errRecorderUnsupported = errors.New("durable required admission requires Lin
 
 type unsupportedRecorder struct{}
 
-func newRequiredRecorder(string, uint32, func() string) requiredRecorder {
+func newRequiredRecorder(string, uint32, func() string, *slog.Logger) requiredRecorder {
 	return unsupportedRecorder{}
 }
 func (unsupportedRecorder) Lookup(context.Context, string) (string, bool, error) {

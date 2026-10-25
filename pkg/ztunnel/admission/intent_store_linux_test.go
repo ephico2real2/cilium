@@ -93,7 +93,7 @@ func TestIntentContainsOnlyIntentAndSandboxBinding(t *testing.T) {
 		t.Fatal(err)
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{"schemaVersion", "clusterID", "nodeName", "namespace", "namespaceUID", "podName", "podUID", "serviceAccount", "endpointID", "containerID", "netnsPath", "netnsDevice", "netnsInode", "netnsCookie", "incarnation"} {
+	for _, key := range []string{"schemaVersion", "clusterID", "nodeName", "namespace", "namespaceUID", "podName", "podUID", "serviceAccount", "endpointID", "containerID", "netnsPath", "netnsDevice", "netnsInode", "netnsCookie", "incarnation", "bootID"} {
 		allowed[key] = true
 	}
 	if len(object) != len(allowed) {
@@ -121,6 +121,8 @@ func TestIntentSamePodCannotInheritChangedSandbox(t *testing.T) {
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
 			s, _ := openTestIntentStore(t)
+			// The recorded sandbox may still exist: replacement is a conflict.
+			s.ops.sandboxGone = func(RequiredIntent) (bool, error) { return false, nil }
 			original := testRequiredIdentity()
 			old := persistTestIntent(t, s, original)
 			next := original
@@ -133,6 +135,89 @@ func TestIntentSamePodCannotInheritChangedSandbox(t *testing.T) {
 				t.Fatalf("replacement damaged old intent: %v err=%v", records, err)
 			}
 		})
+	}
+}
+
+// A node reboot or sandbox recreation brings the same Pod back in a new
+// sandbox. The record is replaced only when the old sandbox is provably gone;
+// unknown state keeps the conflict, and no workload field may change.
+func TestIntentRetiredSandboxIsReplacedOnlyWhenProvablyGone(t *testing.T) {
+	sandboxChange := func(i *RequiredIdentity) {
+		i.EndpointID++
+		i.ContainerID = "cri-sandbox-b"
+		i.NetnsPath = "/var/run/netns/sandbox-b"
+		i.NetnsInode++
+		i.NetnsCookie++
+	}
+	t.Run("gone", func(t *testing.T) {
+		s, _ := openTestIntentStore(t)
+		s.ops.sandboxGone = func(RequiredIntent) (bool, error) { return true, nil }
+		var replacedOld, replacedNew RequiredIntent
+		s.onReplace = func(old, replacement RequiredIntent) { replacedOld, replacedNew = old, replacement }
+		old := persistTestIntent(t, s, testRequiredIdentity())
+		next := testRequiredIdentity()
+		sandboxChange(&next)
+		got, err := s.PersistRequired(next)
+		if err != nil {
+			t.Fatalf("a provably retired sandbox blocked its Pod forever: %v", err)
+		}
+		if got.RequiredIdentity != next || got.Incarnation == old.Incarnation || got.SchemaVersion != requiredIntentSchema {
+			t.Fatalf("replacement did not record the new sandbox as a new incarnation: %+v", got)
+		}
+		if replacedOld != old || replacedNew != got {
+			t.Fatalf("replacement was not observed: old=%+v new=%+v", replacedOld, replacedNew)
+		}
+		records, err := s.List()
+		if err != nil || len(records) != 1 || records[0] != got {
+			t.Fatalf("store does not hold exactly the replacement: %v err=%v", records, err)
+		}
+	})
+	t.Run("unknown", func(t *testing.T) {
+		s, _ := openTestIntentStore(t)
+		s.ops.sandboxGone = func(RequiredIntent) (bool, error) { return false, os.ErrPermission }
+		old := persistTestIntent(t, s, testRequiredIdentity())
+		next := testRequiredIdentity()
+		sandboxChange(&next)
+		if _, err := s.PersistRequired(next); !isRequiredConflict(err) {
+			t.Fatalf("unknown sandbox state did not keep the conflict: %v", err)
+		}
+		if records, err := s.List(); err != nil || len(records) != 1 || records[0] != old {
+			t.Fatalf("unknown sandbox state damaged the record: %v err=%v", records, err)
+		}
+	})
+	t.Run("workload-field", func(t *testing.T) {
+		s, _ := openTestIntentStore(t)
+		s.ops.sandboxGone = func(RequiredIntent) (bool, error) { return true, nil }
+		persistTestIntent(t, s, testRequiredIdentity())
+		next := testRequiredIdentity()
+		sandboxChange(&next)
+		next.ServiceAccount = "other"
+		if _, err := s.PersistRequired(next); !isRequiredConflict(err) {
+			t.Fatalf("a changed immutable workload field replaced the record: %v", err)
+		}
+	})
+}
+
+// Boot IDs and netns cookies prove absence without wall-clock time.
+func TestIntentRecordedSandboxGoneUsesBootAndCookieNotTime(t *testing.T) {
+	s, _ := openTestIntentStore(t)
+	s.bootID = "11111111-1111-4111-8111-111111111111"
+	earlierBoot := RequiredIntent{BootID: "22222222-2222-4222-8222-222222222222",
+		RequiredIdentity: RequiredIdentity{NetnsPath: "/proc/self/ns/net", NetnsCookie: 1}}
+	if gone, err := s.recordedSandboxGone(earlierBoot); err != nil || !gone {
+		t.Fatalf("a sandbox from an earlier boot was not proven gone: gone=%v err=%v", gone, err)
+	}
+	missing := RequiredIntent{BootID: s.bootID, RequiredIdentity: RequiredIdentity{NetnsPath: filepath.Join(t.TempDir(), "removed-netns")}}
+	if gone, err := s.recordedSandboxGone(missing); err != nil || !gone {
+		t.Fatalf("a removed netns path was not proven gone: gone=%v err=%v", gone, err)
+	}
+	notNamespace := filepath.Join(t.TempDir(), "plain-file")
+	if err := os.WriteFile(notNamespace, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	plain := RequiredIntent{BootID: s.bootID, RequiredIdentity: RequiredIdentity{NetnsPath: notNamespace}}
+	if gone, err := s.recordedSandboxGone(plain); err != nil || !gone {
+		t.Fatalf("a path that no longer names a namespace was not proven gone: gone=%v err=%v", gone, err)
 	}
 }
 
@@ -261,7 +346,7 @@ func TestIntentCorruptAndUnsupportedRecordsBlockRecovery(t *testing.T) {
 		"schema": func(raw []byte) []byte {
 			var m map[string]any
 			json.Unmarshal(raw, &m)
-			m["schemaVersion"] = 2
+			m["schemaVersion"] = 3
 			b, _ := json.Marshal(m)
 			return b
 		},

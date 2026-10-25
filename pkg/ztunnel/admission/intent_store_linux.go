@@ -53,13 +53,25 @@ type RequiredIntent struct {
 	SchemaVersion int `json:"schemaVersion"`
 	RequiredIdentity
 	Incarnation string `json:"incarnation"`
+	// BootID is the kernel boot that created the recorded sandbox (schema 2).
+	// A different boot proves every namespace of that boot is gone.
+	BootID string `json:"bootID,omitempty"`
 }
+
+// requiredIntentSchema is written; schema 1 records (no BootID) remain readable.
+const requiredIntentSchema = 2
+
+// bootIDPath is global, not namespaced: containers on one kernel share it.
+const bootIDPath = "/proc/sys/kernel/random/boot_id"
 
 type intentOperations struct {
 	writeFile func(*os.File, []byte) error
 	syncFile  func(*os.File) error
 	rename    func(string, string) error
 	syncDir   func() error
+	// sandboxGone reports whether the sandbox of a recorded intent provably
+	// no longer exists. An error means it cannot be proven.
+	sandboxGone func(RequiredIntent) (bool, error)
 }
 
 // IntentStore has one exclusive owner. Every operation is relative to held
@@ -74,6 +86,10 @@ type IntentStore struct {
 	ops       intentOperations
 	poisoned  error
 	closed    bool
+	// bootID is the current kernel boot; empty when it cannot be read.
+	bootID string
+	// onReplace, when set, observes a record replaced for a new sandbox.
+	onReplace func(old, replacement RequiredIntent)
 }
 
 const intentDirectory = "ztunnel-required"
@@ -106,7 +122,7 @@ func OpenIntentStore(stateDir string) (*IntentStore, error) {
 		return nil, fmt.Errorf("opening required intent directory: %w", err)
 	}
 	directory := os.NewFile(uintptr(dirfd), intentDirectory)
-	s := &IntentStore{parent: parent, directory: directory}
+	s := &IntentStore{parent: parent, directory: directory, bootID: readBootID()}
 	cleanup := func() { directory.Close(); parent.Close() }
 	if err = s.validateDirectory(); err != nil {
 		cleanup()
@@ -138,11 +154,53 @@ func OpenIntentStore(stateDir string) (*IntentStore, error) {
 			}
 			return e
 		},
-		syncFile: func(f *os.File) error { return f.Sync() },
-		rename:   func(oldName, newName string) error { return unix.Renameat(dirfd, oldName, dirfd, newName) },
-		syncDir:  directory.Sync,
+		syncFile:    func(f *os.File) error { return f.Sync() },
+		rename:      func(oldName, newName string) error { return unix.Renameat(dirfd, oldName, dirfd, newName) },
+		syncDir:     directory.Sync,
+		sandboxGone: s.recordedSandboxGone,
 	}
 	return s, nil
+}
+
+func sameRequiredWorkload(a, b RequiredIdentity) bool {
+	return a.ClusterID == b.ClusterID && a.NodeName == b.NodeName && a.Namespace == b.Namespace &&
+		a.NamespaceUID == b.NamespaceUID && a.PodName == b.PodName && a.PodUID == b.PodUID &&
+		a.ServiceAccount == b.ServiceAccount
+}
+
+func readBootID() string {
+	data, err := os.ReadFile(bootIDPath)
+	if err != nil {
+		return ""
+	}
+	id, err := uuid.Parse(strings.TrimSpace(string(data)))
+	if err != nil || id == uuid.Nil {
+		return ""
+	}
+	return id.String()
+}
+
+// recordedSandboxGone proves that a recorded sandbox no longer exists. It does
+// not use wall-clock time. A record from another kernel boot is gone: every
+// namespace of that boot is. Within one boot (or for a record without a boot
+// ID), the recorded netns path must no longer name a network namespace with
+// the recorded cookie; netns cookies are never reused within a boot. Any
+// other observation cannot prove absence, and the caller keeps the conflict.
+func (s *IntentStore) recordedSandboxGone(old RequiredIntent) (bool, error) {
+	if old.BootID != "" && s.bootID != "" && old.BootID != s.bootID {
+		return true, nil
+	}
+	current, err := pinSandbox(old.NetnsPath)
+	switch {
+	case err == nil:
+		defer current.ns.Close()
+		return current.cookie != old.NetnsCookie, nil
+	case errors.Is(err, os.ErrNotExist), errors.Is(err, unix.ENOTTY), errors.Is(err, errRequiredInvalid):
+		// The path is gone, or it no longer names a network namespace.
+		return true, nil
+	default:
+		return false, err
+	}
 }
 
 func (s *IntentStore) Close() error {
@@ -234,8 +292,11 @@ func (s *IntentStore) read(name string) (RequiredIntent, error) {
 	if err = decoder.Decode(&extra); !errors.Is(err, io.EOF) {
 		return RequiredIntent{}, fmt.Errorf("%w: trailing record data", errRequiredInvalid)
 	}
-	if value.SchemaVersion != 1 {
+	if value.SchemaVersion != 1 && value.SchemaVersion != requiredIntentSchema {
 		return RequiredIntent{}, fmt.Errorf("%w: unsupported schema", errRequiredInvalid)
+	}
+	if value.SchemaVersion == 1 && value.BootID != "" {
+		return RequiredIntent{}, fmt.Errorf("%w: schema 1 record carries a boot ID", errRequiredInvalid)
 	}
 	id, err := uuid.Parse(value.Incarnation)
 	if err != nil || id == uuid.Nil {
@@ -253,6 +314,9 @@ func (s *IntentStore) read(name string) (RequiredIntent, error) {
 // PersistRequired succeeds only after file contents and the rename are durable.
 // A failure after rename poisons this owner: an uncertain commit cannot ACK CNI.
 // Repeated calls are idempotent only for the exact validated sandbox identity.
+// A different sandbox for the same Pod (after a node reboot or a sandbox
+// recreation) replaces the record only when the recorded sandbox is provably
+// gone; while it may still exist the conflict stands.
 func (s *IntentStore) PersistRequired(identity RequiredIdentity) (RequiredIntent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -263,15 +327,29 @@ func (s *IntentStore) PersistRequired(identity RequiredIdentity) (RequiredIntent
 		return RequiredIntent{}, err
 	}
 	name := intentFilename(identity)
+	var replaced *RequiredIntent
 	if old, err := s.read(name); err == nil {
-		if old.RequiredIdentity != identity {
+		if old.RequiredIdentity == identity {
+			return old, nil
+		}
+		// Only the sandbox may differ. The Pod's namespace, name, UID and
+		// service account are immutable for one Pod UID, so a difference there
+		// is never a sandbox replacement.
+		if !sameRequiredWorkload(old.RequiredIdentity, identity) {
 			return RequiredIntent{}, errRequiredConflict
 		}
-		return old, nil
+		gone, err := s.ops.sandboxGone(old)
+		if err != nil {
+			return RequiredIntent{}, fmt.Errorf("%w: recorded sandbox state is unknown: %w", errRequiredConflict, err)
+		}
+		if !gone {
+			return RequiredIntent{}, errRequiredConflict
+		}
+		replaced = &old
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return RequiredIntent{}, fmt.Errorf("reading required intent: %w", err)
 	}
-	value := RequiredIntent{SchemaVersion: 1, RequiredIdentity: identity, Incarnation: uuid.NewString()}
+	value := RequiredIntent{SchemaVersion: requiredIntentSchema, RequiredIdentity: identity, Incarnation: uuid.NewString(), BootID: s.bootID}
 	data, err := json.Marshal(value)
 	if err != nil {
 		return RequiredIntent{}, err
@@ -299,6 +377,9 @@ func (s *IntentStore) PersistRequired(identity RequiredIdentity) (RequiredIntent
 	if err = s.ops.syncDir(); err != nil {
 		s.poisoned = fmt.Errorf("%w: %w", errRequiredIndeterminate, err)
 		return RequiredIntent{}, s.poisoned
+	}
+	if replaced != nil && s.onReplace != nil {
+		s.onReplace(*replaced, value)
 	}
 	return value, nil
 }
