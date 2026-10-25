@@ -243,7 +243,17 @@ func requireRootProxyPeer(zc *ztunnelConn) error {
 	if socketErr != nil {
 		return socketErr
 	}
-	if peer == nil || peer.Uid != 0 || peer.Pid <= 0 {
+	return authorizeProxyPeer(peer)
+}
+
+// authorizeProxyPeer accepts a ZDS peer whose kernel credentials are root in
+// the agent's user namespace; only root can reach the socket at all. The PID
+// is not authority: the kernel reports it as seen from the agent's PID
+// namespace, so it is 0 for a proxy in its own Pod unless the agent shares
+// the node's PID namespace, and with a shared namespace it is nonzero for
+// every process. Requiring it only forced hostPID on the agent.
+func authorizeProxyPeer(peer *unix.Ucred) error {
+	if peer == nil || peer.Uid != 0 {
 		return fmt.Errorf("strict ZDS drain requires a root-owned local proxy process")
 	}
 	return nil
