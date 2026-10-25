@@ -272,3 +272,7 @@
 {{- if and .Values.encryption.ztunnel.requireMtls (or (not .Values.encryption.enabled) (ne .Values.encryption.type "ztunnel")) }}
   {{- fail "encryption.ztunnel.requireMtls requires encryption.enabled=true and encryption.type=ztunnel" }}
 {{- end }}
+
+{{- if and .Values.encryption.ztunnel.ca.externalExactRegistrar (or (not .Values.encryption.enabled) (ne .Values.encryption.type "ztunnel") (ne .Values.encryption.ztunnel.ca.type "spire")) }}
+  {{- fail "encryption.ztunnel.ca.externalExactRegistrar requires enabled ztunnel encryption with SPIRE CA" }}
+{{- end }}
