@@ -421,6 +421,28 @@ func TestSourceMembershipKeyRejectsUnknownTrailingAndMismatchedFields(t *testing
 	}
 }
 
+// One byte string has one meaning: a member name in any other case is not
+// the field, so it can neither override nor stand in for it.
+func TestSourceMembershipKeyMatchesMemberNamesExactly(t *testing.T) {
+	record := validSourceMembershipRecord(1)
+	record.Valid, record.Workloads = false, nil
+	data, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, variant := range []string{`"valid":false,"Valid":true`, `"valid":false,"VALID":true`, `"vaLid":true`} {
+		var key SourceMembershipKey
+		probe := strings.Replace(string(data), `"valid":false`, variant, 1)
+		if err := key.Unmarshal("node-a", []byte(probe)); err == nil {
+			t.Fatalf("%s was accepted (valid=%v)", variant, key.Record.Valid)
+		}
+	}
+	var key SourceMembershipKey
+	if err := key.Unmarshal("node-a", []byte(string(data)+"\n")); err != nil {
+		t.Fatalf("trailing whitespace refused: %v", err)
+	}
+}
+
 func TestSourceMembershipMaximumTTLIsClampedToReaderPolicy(t *testing.T) {
 	j, sink, now := newSourceJoinerTest(t)
 	record := validSourceMembershipRecord(1)

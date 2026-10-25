@@ -4,12 +4,11 @@
 package remote_workload
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	jsonv2 "encoding/json/v2"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/netip"
 	"reflect"
@@ -59,88 +58,18 @@ func (k *SourceMembershipKey) Unmarshal(key string, data []byte) error {
 	if len(data) == 0 || len(data) > membership.MaxSourceMembershipRecordBytes {
 		return fmt.Errorf("source membership record size is invalid")
 	}
-	if err := rejectDuplicateJSONKeys(data); err != nil {
-		return err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
+	// encoding/json/v2 matches member names exactly and refuses duplicate
+	// names, invalid UTF-8 and trailing values. v1 folds case, so it would
+	// read {"valid":false,"Valid":true} as valid, past any exact-name check.
 	var record membership.SourceMembershipRecord
-	if err := decoder.Decode(&record); err != nil {
+	if err := jsonv2.Unmarshal(data, &record, jsonv2.RejectUnknownMembers(true)); err != nil {
 		return fmt.Errorf("decode source membership record: %w", err)
-	}
-	var trailing any
-	if err := decoder.Decode(&trailing); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("source membership record has trailing JSON")
-		}
-		return fmt.Errorf("decode trailing source membership data: %w", err)
 	}
 	if err := validateSourceMembershipRecord(key, record); err != nil {
 		return err
 	}
 	k.NodeName = key
 	k.Record = record
-	return nil
-}
-
-func rejectDuplicateJSONKeys(data []byte) error {
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	var readValue func() error
-	readValue = func() error {
-		token, err := decoder.Token()
-		if err != nil {
-			return fmt.Errorf("decode source membership JSON token: %w", err)
-		}
-		delimiter, isDelimiter := token.(json.Delim)
-		if !isDelimiter {
-			return nil
-		}
-		switch delimiter {
-		case '{':
-			seen := make(map[string]struct{})
-			for decoder.More() {
-				keyToken, err := decoder.Token()
-				if err != nil {
-					return fmt.Errorf("decode source membership JSON object key: %w", err)
-				}
-				key, ok := keyToken.(string)
-				if !ok {
-					return fmt.Errorf("source membership JSON object contains a non-string key")
-				}
-				if _, exists := seen[key]; exists {
-					return fmt.Errorf("source membership JSON contains duplicate field %q", key)
-				}
-				seen[key] = struct{}{}
-				if err := readValue(); err != nil {
-					return err
-				}
-			}
-			if _, err := decoder.Token(); err != nil {
-				return fmt.Errorf("finish source membership JSON object: %w", err)
-			}
-		case '[':
-			for decoder.More() {
-				if err := readValue(); err != nil {
-					return err
-				}
-			}
-			if _, err := decoder.Token(); err != nil {
-				return fmt.Errorf("finish source membership JSON array: %w", err)
-			}
-		default:
-			return fmt.Errorf("source membership JSON has an unexpected delimiter")
-		}
-		return nil
-	}
-	if err := readValue(); err != nil {
-		return err
-	}
-	if _, err := decoder.Token(); err != io.EOF {
-		if err == nil {
-			return fmt.Errorf("source membership record has trailing JSON")
-		}
-		return fmt.Errorf("decode trailing source membership data: %w", err)
-	}
 	return nil
 }
 
