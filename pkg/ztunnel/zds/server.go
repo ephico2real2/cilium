@@ -87,6 +87,11 @@ func rejectedBeforeWrite(err error) error {
 	return fmt.Errorf("%w: %w", errZDSRequestRejected, err)
 }
 
+// errZDSNACK marks a request ztunnel parsed and refused with an ACK error. For
+// a bound ADD the refusal is definitive: ztunnel installs the owner only when
+// the ADD succeeds.
+var errZDSNACK = errors.New("ztunnel responded with an ack error")
+
 func (zc *ztunnelConn) sendMsg(req *pb.WorkloadRequest, ns *netns.NetNS) error {
 	var rights []byte
 	if ns != nil {
@@ -175,7 +180,7 @@ func (zc *ztunnelConn) sendAndWaitForAckBeforeWrite(req *pb.WorkloadRequest, net
 		return fmt.Errorf("ztunnel response did not contain an acknowledgment")
 	}
 	if ack.GetError() != "" {
-		return fmt.Errorf("ztunnel responded with an ack error: %s", ack.GetError())
+		return fmt.Errorf("%w: %s", errZDSNACK, ack.GetError())
 	}
 
 	return nil
@@ -488,6 +493,11 @@ func (s *Server) processUpdate(ctx context.Context, zc *ztunnelConn, update zdsU
 		err = zc.sendDrain(drain)
 	} else {
 		err = zc.sendAndWaitForAckBeforeWrite(update.request, update.netnsPath, defaultZDSAckTimeout, func() error { return s.recordPolicyADDAttempt(update.request, update.netnsPath) })
+		if errors.Is(err, errZDSNACK) {
+			// ztunnel's whole response was read: the refused binding was not
+			// installed, whatever happens to this caller's context next.
+			s.forgetRefusedADD(update.request, update.netnsPath)
+		}
 	}
 	// Stop (or join) cancellation before publishing success: the caller
 	// normally cancels its context as soon as it receives the result.

@@ -141,6 +141,37 @@ func (s *Server) originalDrainCandidatesLocked(key endpointIncarnation, ref memb
 	return candidates, nil
 }
 
+// forgetRefusedADD removes a bound ADD that ztunnel refused from the ADD
+// uncertainty history. ztunnel installs an owner only when the ADD succeeds, so
+// a refused binding is not installed and is no owner to drain. Kept, refusals
+// alone would fill the history and block every later ADD of the endpoint. The
+// acknowledged owner marker is never removed here.
+func (s *Server) forgetRefusedADD(req *pb.WorkloadRequest, path string) {
+	add := req.GetAdd()
+	if add == nil || add.Binding == nil || path == "" {
+		return
+	}
+	refused := add.Binding
+	key := endpointIncarnation{id: uint16(refused.EndpointId), uid: refused.PodUid, netnsPath: path}
+	s.endpointCacheMutex.Lock()
+	defer s.endpointCacheMutex.Unlock()
+	if proto.Equal(s.drainBindings[key], refused) {
+		return
+	}
+	kept := slices.DeleteFunc(slices.Clone(s.policyADDHistory[key]), func(b *pb.WorkloadBinding) bool { return proto.Equal(b, refused) })
+	if len(kept) == 0 {
+		delete(s.policyADDHistory, key)
+	} else {
+		s.policyADDHistory[key] = kept
+	}
+	if proto.Equal(s.policyADDAttempts[key], refused) {
+		delete(s.policyADDAttempts, key)
+		if len(kept) != 0 {
+			s.policyADDAttempts[key] = proto.Clone(kept[len(kept)-1]).(*pb.WorkloadBinding)
+		}
+	}
+}
+
 // Called only by a correlated typed receipt's retirement closure. Selection is
 // frozen before drain. Exact comparison preserves ACKs and send attempts added
 // after selection, including a successor using the same endpoint/Pod/path slot.
