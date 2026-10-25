@@ -111,6 +111,16 @@ type SourceEgressPolicy struct {
 	Wire             []byte `json:"wire"`
 }
 
+// Clone returns a copy that shares no memory with p.
+func (p *SourceEgressPolicy) Clone() *SourceEgressPolicy {
+	if p == nil {
+		return nil
+	}
+	clone := *p
+	clone.Wire = append([]byte(nil), p.Wire...)
+	return &clone
+}
+
 // Validate checks the envelope's shape and that its digest is the wire's own.
 // policy.DecodeNativeZtunnelL4 verifies the content when the policy is used.
 func (p *SourceEgressPolicy) Validate() error {

@@ -670,3 +670,39 @@ func TestCloneSourceRecordCopiesEgressPolicy(t *testing.T) {
 		t.Fatal("cloned record shares its egress policy with the original")
 	}
 }
+
+// Both join paths take the source endpoint and egress policy from the lease,
+// as a copy: the published snapshot shares no memory with the joiner.
+func TestJoinedWorkloadCarriesItsSourceEgressPolicy(t *testing.T) {
+	for name, ipSnapshot := range map[string]func(time.Time) Snapshot{
+		"annotated": validIPSnapshotAt,
+		"native":    nativeIPSnapshotAt,
+	} {
+		j, sink, _ := newSourceJoinerTest(t)
+		record := validSourceMembershipRecord(1)
+		record.Workloads[0].EgressPolicy = testEgressPolicy()
+		j.Begin(context.Background())
+		j.OnUpdate(sourceKey(record))
+		j.ListDone(context.Background())
+		j.PublishRemoteWorkloadSnapshot(ipSnapshot(j.now()))
+		got := latestJoined(t, sink)
+		if !got.Valid || len(got.Workloads) != 1 {
+			t.Fatalf("%s: workload did not join: %+v", name, got)
+		}
+		w := got.Workloads[0]
+		if w.EndpointID != 42 || w.EgressPolicy == nil || w.EgressPolicy.Digest != record.Workloads[0].EgressPolicy.Digest {
+			t.Fatalf("%s: joined workload lacks its source endpoint or egress policy: %+v", name, w)
+		}
+		w.EgressPolicy.Wire[0] ^= 1
+		j.OnUpdate(sourceKey(record)) // an identical lease republishes from the joiner's copy
+		if again := latestJoined(t, sink).Workloads[0]; again.EgressPolicy == nil || again.EgressPolicy.Validate() != nil {
+			t.Fatalf("%s: a published snapshot shares its egress policy", name)
+		}
+
+		record = validSourceMembershipRecord(2)
+		j.OnUpdate(sourceKey(record))
+		if w := latestJoined(t, sink).Workloads[0]; w.EgressPolicy != nil {
+			t.Fatalf("%s: egress policy survived a lease without one", name)
+		}
+	}
+}

@@ -5,7 +5,6 @@ package remote_workload
 
 import (
 	"context"
-	"net/netip"
 	"sync/atomic"
 )
 
@@ -65,8 +64,7 @@ func cloneSnapshot(snapshot Snapshot) Snapshot {
 	copy := snapshot
 	copy.Workloads = make([]Workload, len(snapshot.Workloads))
 	for i := range snapshot.Workloads {
-		copy.Workloads[i] = snapshot.Workloads[i]
-		copy.Workloads[i].Addresses = append([]netip.Addr(nil), snapshot.Workloads[i].Addresses...)
+		copy.Workloads[i] = cloneWorkload(snapshot.Workloads[i])
 	}
 	return copy
 }

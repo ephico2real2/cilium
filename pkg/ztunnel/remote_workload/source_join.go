@@ -633,7 +633,7 @@ func (j *SourceMembershipJoiner) publishJoinedLocked() func() {
 		if !exists || !sourceMatchesIPWorkload(j.clusterID, source, ipWorkload) {
 			continue
 		}
-		workloads = append(workloads, cloneWorkload(ipWorkload))
+		workloads = append(workloads, withSourceLease(cloneWorkload(ipWorkload), source))
 	}
 	sort.Slice(workloads, func(i, k int) bool {
 		if workloads[i].Key.NamespaceUID != workloads[k].Key.NamespaceUID {
@@ -860,6 +860,14 @@ func joinNativeIPWorkload(source membership.SourceMembershipEntry, ip Workload) 
 	joined.MembershipEpoch = source.MembershipEpoch
 	joined.MembershipGeneration = source.ZDSGeneration
 	joined.MembershipState = "captured"
+	return withSourceLease(joined, source)
+}
+
+// withSourceLease adds what only the source lease carries: the source
+// endpoint and its realized egress policy.
+func withSourceLease(joined Workload, source membership.SourceMembershipEntry) Workload {
+	joined.EndpointID = source.EndpointID
+	joined.EgressPolicy = source.EgressPolicy.Clone()
 	return joined
 }
 
@@ -869,11 +877,7 @@ func cloneSourceRecord(record membership.SourceMembershipRecord) membership.Sour
 	for i := range record.Workloads {
 		clone.Workloads[i] = record.Workloads[i]
 		clone.Workloads[i].Addresses = append([]string(nil), record.Workloads[i].Addresses...)
-		if egress := record.Workloads[i].EgressPolicy; egress != nil {
-			copied := *egress
-			copied.Wire = append([]byte(nil), egress.Wire...)
-			clone.Workloads[i].EgressPolicy = &copied
-		}
+		clone.Workloads[i].EgressPolicy = record.Workloads[i].EgressPolicy.Clone()
 	}
 	return clone
 }
@@ -889,5 +893,6 @@ func digestSourceMembershipRecord(record membership.SourceMembershipRecord) ([sh
 func cloneWorkload(workload Workload) Workload {
 	clone := workload
 	clone.Addresses = append([]netip.Addr(nil), workload.Addresses...)
+	clone.EgressPolicy = workload.EgressPolicy.Clone()
 	return clone
 }

@@ -21,6 +21,7 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/time"
+	"github.com/cilium/cilium/pkg/ztunnel/membership"
 )
 
 // WorkloadKey fences namespace and Pod name reuse. ClusterID is supplied from
@@ -50,6 +51,11 @@ type Workload struct {
 	MembershipGeneration uint64
 	MembershipState      string
 	Addresses            []netip.Addr
+	// EndpointID and EgressPolicy come from the source lease, never from an
+	// IP record. EgressPolicy is nil while the source's policy is not
+	// realized; the workload is then a destination and no source.
+	EndpointID   uint16
+	EgressPolicy *membership.SourceEgressPolicy
 }
 
 // Snapshot is a complete replacement view. Invalid=true withdraws the prior
