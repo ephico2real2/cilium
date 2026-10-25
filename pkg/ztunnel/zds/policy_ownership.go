@@ -23,16 +23,19 @@ type PolicyOwnershipInspector interface {
 
 // ObservePolicyOwnership is called with the endpoint mutex held. The cache
 // contains callbacks that may need that mutex, so NEVER block taking its lock.
-// An unavailable observation fails this update closed and can be retried.
-// No endpoint method, filesystem/network operation or FD retention occurs here.
+// The observation only reads, so it takes the shared lock: concurrent
+// observers do not exclude each other, and only an in-progress writer makes it
+// unavailable. An unavailable observation fails this update closed and can be
+// retried. No endpoint method, filesystem/network operation or FD retention
+// occurs here.
 func (s *Server) ObservePolicyOwnership(id uint16, uid, path string) (PolicyOwnership, error) {
 	if s == nil {
 		return 0, fmt.Errorf("native ZDS owner is unavailable")
 	}
-	if !s.endpointCacheMutex.TryLock() {
+	if !s.endpointCacheMutex.TryRLock() {
 		return 0, fmt.Errorf("native ZDS ownership is busy")
 	}
-	defer s.endpointCacheMutex.UnlockIgnoreTime()
+	defer s.endpointCacheMutex.RUnlock()
 	matches := func(candidateID uint16, candidateUID, candidatePath string) bool {
 		return (id != 0 && id == candidateID) || (uid != "" && uid == candidateUID) || (path != "" && path == candidatePath)
 	}

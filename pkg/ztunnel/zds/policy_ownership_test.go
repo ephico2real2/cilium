@@ -73,6 +73,26 @@ func TestPolicyOwnershipBusyFailsBoundedlyAndThenRecovers(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, PolicyOwnershipAbsent, observed)
 }
+
+// Concurrent regenerations observe ownership at the same time. A reader must
+// not make another reader fail; only an exclusive writer makes it busy.
+func TestPolicyOwnershipConcurrentObserversDoNotExcludeEachOther(t *testing.T) {
+	s := strictCleanupServer(t)
+	s.drainBindings = map[endpointIncarnation]*pb.WorkloadBinding{
+		{id: 9, uid: "pod", netnsPath: "/ns"}: {EndpointId: 9, PodUid: "pod"},
+	}
+	s.endpointCacheMutex.RLock()
+	observed, err := s.ObservePolicyOwnership(9, "pod", "/ns")
+	s.endpointCacheMutex.RUnlock()
+	require.NoError(t, err, "an observation in progress must not make a concurrent observation busy")
+	require.Equal(t, PolicyOwnershipRetained, observed)
+
+	s.endpointCacheMutex.Lock()
+	observed, err = s.ObservePolicyOwnership(9, "pod", "/ns")
+	s.endpointCacheMutex.Unlock()
+	require.ErrorContains(t, err, "busy", "an exclusive writer still makes the observation unavailable")
+	require.Zero(t, observed)
+}
 func TestStrictADDRecordsRestrictionEvenWhenCanceledBeforeIO(t *testing.T) {
 	s := strictCleanupServer(t)
 	owner := liveManagedEndpoint(t, 9, "pod", "/absent/ns")

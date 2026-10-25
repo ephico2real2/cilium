@@ -227,8 +227,11 @@ type Server struct {
 	l      *net.UnixListener
 	logger *slog.Logger
 
-	endpointCache                map[uint16]*endpoint.Endpoint
-	endpointCacheMutex           lock.Mutex
+	endpointCache map[uint16]*endpoint.Endpoint
+	// Writers take the exclusive lock. ObservePolicyOwnership only reads and
+	// takes the shared lock, so concurrent endpoint regenerations observing
+	// ownership never fail each other.
+	endpointCacheMutex           lock.RWMutex
 	strictDeletedEndpointCleanup bool
 	drainBindings                map[endpointIncarnation]*pb.WorkloadBinding
 	policyADDAttempts            map[endpointIncarnation]*pb.WorkloadBinding
