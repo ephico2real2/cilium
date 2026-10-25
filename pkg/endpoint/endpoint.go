@@ -336,6 +336,23 @@ type Endpoint struct {
 	// ztunnelLxcFrontend is the endpoint-map frontend last written by a
 	// regeneration, so a withdrawal can rewrite it without the endpoint lock.
 	ztunnelLxcFrontend atomic.Pointer[lxcmap.EndpointFrontend]
+	// ztunnelDatapathWriteMu serializes the release/withdrawal state with
+	// every cilium_lxc publication of this endpoint (withdrawal, recovery,
+	// both regeneration writes) and with the deletion of its entries. A
+	// publication samples the flags and updates the kernel in one critical
+	// section, so a delayed older write cannot overwrite a completed
+	// withdrawal. Lock order: endpoint mutex (if held) -> this mutex; never
+	// take the endpoint mutex while holding it.
+	ztunnelDatapathWriteMu lock.Mutex
+	// ztunnelLxcRetired is set under ztunnelDatapathWriteMu when this
+	// endpoint's entries are deleted; no later publication writes them.
+	ztunnelLxcRetired bool
+	// ztunnelReleaseSeq counts verified releases. ztunnelQuarantineAckedSeq is
+	// the release interval whose withdrawal cilium_lxc accepted: while they
+	// differ after a withdrawal, a program released in that interval may still
+	// forward TCP/15008, so withdrawals retry and a recovery controller runs.
+	ztunnelReleaseSeq         atomic.Uint64
+	ztunnelQuarantineAckedSeq atomic.Uint64
 
 	// Protected by mutex; never serialized or restored as security evidence.
 	ztunnelPolicyTransitions []ZtunnelPolicyTransitioner

@@ -5,6 +5,9 @@ package endpoint
 
 import (
 	"errors"
+	"net/netip"
+	"slices"
+	"sync"
 	"testing"
 
 	"github.com/cilium/hive/hivetest"
@@ -14,30 +17,49 @@ import (
 	"github.com/cilium/cilium/pkg/option"
 )
 
-// recordingLxcMap captures the admission flags of each endpoint-map write. It
-// embeds the production interface so only WriteEndpoint is implemented.
+// recordingLxcMap records the cilium_lxc flag bits that lxcmap.getBPFValue
+// derives from each written frontend, and injects write failures. It embeds
+// the production interface so only WriteEndpoint is implemented. It is a Go
+// double; the BPF programs reading these bits are covered by bpf/tests.
 type recordingLxcMap struct {
 	lxcmap.Map
-	writes []admissionFlags
-	fail   error
+	mu        sync.Mutex
+	attempts  int
+	fail      error
+	committed []uint32
 }
 
-type admissionFlags struct{ quarantined, meshOnly bool }
-
 func (m *recordingLxcMap) WriteEndpoint(f lxcmap.EndpointFrontend) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.attempts++
 	if m.fail != nil {
 		return m.fail
 	}
-	var flags admissionFlags
-	if q, ok := f.(interface{ IsZtunnelQuarantined() bool }); ok {
-		flags.quarantined = q.IsZtunnelQuarantined()
+	var flags uint32
+	if q, ok := f.(interface{ IsZtunnelQuarantined() bool }); ok && q.IsZtunnelQuarantined() {
+		flags |= lxcmap.EndpointFlagZtunnelQuarantined
 	}
-	if mo, ok := f.(interface{ IsZtunnelMeshOnly() bool }); ok {
-		flags.meshOnly = mo.IsZtunnelMeshOnly()
+	if mo, ok := f.(interface{ IsZtunnelMeshOnly() bool }); ok && mo.IsZtunnelMeshOnly() {
+		flags |= lxcmap.EndpointFlagZtunnelMeshOnly
 	}
-	m.writes = append(m.writes, flags)
+	m.committed = append(m.committed, flags)
 	return nil
 }
+
+func (m *recordingLxcMap) setFail(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fail = err
+}
+
+func (m *recordingLxcMap) state() (int, []uint32) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.attempts, slices.Clone(m.committed)
+}
+
+const quarantinedMeshOnly uint32 = lxcmap.EndpointFlagZtunnelQuarantined | lxcmap.EndpointFlagZtunnelMeshOnly
 
 const admissionNamespaceUID = "11111111-1111-4111-8111-111111111111"
 
@@ -151,8 +173,10 @@ func TestZtunnelWithdrawalRewritesEndpointMapAndCannotRevive(t *testing.T) {
 
 	// A new captured generation (re-enrollment) withdraws admission at once.
 	require.True(t, ep.SetZtunnelMembership(capturedMembership(3, 2)))
-	require.Equal(t, []admissionFlags{{quarantined: true, meshOnly: true}}, recorder.writes,
+	_, committed := recorder.state()
+	require.Equal(t, []uint32{quarantinedMeshOnly}, committed,
 		"withdrawal rewrites the endpoint map without waiting for regeneration")
+	require.True(t, ep.ztunnelQuarantineAcked())
 	require.True(t, ep.IsZtunnelQuarantined())
 	require.True(t, cache.IsZtunnelQuarantined(), "a stale released cache merges the live quarantine")
 	require.Nil(t, ep.ztunnelAdmission.Load())
@@ -161,9 +185,11 @@ func TestZtunnelWithdrawalRewritesEndpointMapAndCannotRevive(t *testing.T) {
 	require.ErrorIs(t, ep.ReleaseZtunnelQuarantine(receipt), ErrZtunnelAdmissionMismatch)
 	require.True(t, ep.IsZtunnelQuarantined())
 
-	// A second withdrawal is idempotent and writes nothing new.
+	// A second withdrawal of an acknowledged interval writes nothing new.
 	ep.WithdrawZtunnelAdmission("repeat")
-	require.Len(t, recorder.writes, 1)
+	attempts, committed := recorder.state()
+	require.Equal(t, 1, attempts)
+	require.Len(t, committed, 1)
 
 	// A fresh receipt for the new generation releases again.
 	receipt.Membership = capturedMembership(3, 2)
@@ -182,14 +208,36 @@ func TestZtunnelIncarnationChangeQuarantinesUnderLockAndMapFailureStaysClosed(t 
 	ep.mutex.Unlock()
 	require.True(t, cache.IsZtunnelQuarantined())
 
-	// A failed endpoint-map write is logged; the state remains quarantined.
-	ep2, receipt2 := admissionEndpoint(t)
-	close(ep2.hasBPFProgram)
-	ep2.lxcMap = &recordingLxcMap{fail: errors.New("map write failed")}
+	// A failed endpoint-map write leaves the released kernel entry in place:
+	// the withdrawal is not acknowledged (recovery is covered in
+	// ztunnel_quarantine_recovery_test.go).
+	ep2, receipt2, recorder, _ := recoveryEndpoint(t)
+	recorder.setFail(errors.New("map write failed"))
 	require.NoError(t, ep2.ReleaseZtunnelQuarantine(receipt2))
 	ep2.mutex.Lock()
 	ep2.recordZtunnelLxcFrontend(ep2.createEpInfoCache("", ""))
 	ep2.mutex.Unlock()
 	ep2.WithdrawZtunnelAdmission("test map failure")
 	require.True(t, ep2.IsZtunnelQuarantined())
+	_, committed := recorder.state()
+	require.Empty(t, committed, "no quarantine bit reached cilium_lxc")
+	require.False(t, ep2.ztunnelQuarantineAcked())
+}
+
+func TestZtunnelReleaseRejectsZeroAddressesThenAcceptsOneFamily(t *testing.T) {
+	ep, receipt := admissionEndpoint(t)
+	close(ep.hasBPFProgram)
+	ep.IPv4 = netip.IPv4Unspecified()
+	ep.IPv6 = netip.IPv6Unspecified()
+	require.ErrorIs(t, ep.ReleaseZtunnelQuarantine(receipt), ErrZtunnelAdmissionMismatch)
+	require.True(t, ep.IsZtunnelQuarantined())
+	require.Nil(t, ep.ztunnelAdmission.Load())
+
+	ep.IPv4 = netip.Addr{}
+	require.ErrorIs(t, ep.ReleaseZtunnelQuarantine(receipt), ErrZtunnelAdmissionMismatch, "no address at all")
+
+	ep.IPv6 = netip.MustParseAddr("fd00::10")
+	require.NoError(t, ep.ReleaseZtunnelQuarantine(receipt), "one configured family suffices")
+	require.False(t, ep.IsZtunnelQuarantined())
+	require.True(t, ep.IsZtunnelMeshOnly())
 }

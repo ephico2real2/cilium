@@ -13,10 +13,14 @@ import (
 func Endpoint(ep endpoint.Config, lnc *Config) any {
 	cfg := NewBPFLXC(NodeConfig(lnc))
 
-	if ep.IPv4Address().IsValid() {
+	// An unspecified address is not an endpoint address; it compiles to the
+	// same bits as no address.
+	ipv4Configured := ep.IPv4Address().IsValid() && !ep.IPv4Address().IsUnspecified()
+	ipv6Configured := ep.IPv6Address().IsValid() && !ep.IPv6Address().IsUnspecified()
+	if ipv4Configured {
 		cfg.EndpointIPv4.Addr = ep.IPv4Address().As4()
 	}
-	if ep.IPv6Address().IsValid() {
+	if ipv6Configured {
 		cfg.EndpointIPv6.Addr = ep.IPv6Address().As16()
 	}
 
@@ -58,6 +62,12 @@ func Endpoint(ep endpoint.Config, lnc *Config) any {
 	}
 	if required, ok := ep.(endpoint.ZtunnelMeshOnlyProvider); ok {
 		cfg.ZtunnelRequired = required.IsZtunnelMeshOnly()
+	}
+	// A Required program without any endpoint address has no own
+	// endpoint-map entry that could admit it: compile it quarantined. The
+	// datapath independently refuses to treat such a program as complete.
+	if cfg.ZtunnelRequired && !ipv4Configured && !ipv6Configured {
+		cfg.ZtunnelQuarantined = true
 	}
 	cfg.EnableLRP = lnc.EnableLocalRedirectPolicy
 

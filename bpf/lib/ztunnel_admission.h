@@ -97,16 +97,20 @@ ztunnel_hbone_reply_verdict(const struct __ctx_buff *ctx, __u8 nexthdr, int l4_o
 }
 
 /* Collect the endpoint's own admission inputs. Every configured family must
- * have an entry owned by this program's endpoint ID.
+ * have an entry owned by this program's endpoint ID, and at least one family
+ * must be configured: a program compiled without any endpoint address has no
+ * own entry to check, so it is never complete.
  */
 static __always_inline enum ztunnel_mode ztunnel_own_mode(void)
 {
 	const struct endpoint_info *ep __maybe_unused;
+	bool configured = false;
 	bool complete = true;
 	__u32 flags = 0;
 
 #ifdef ENABLE_IPV4
 	if (CONFIG(endpoint_ipv4).be32) {
+		configured = true;
 		ep = __lookup_ip4_endpoint(CONFIG(endpoint_ipv4).be32);
 		if (ep && ep->lxc_id == LXC_ID)
 			flags |= ep->flags;
@@ -119,6 +123,7 @@ static __always_inline enum ztunnel_mode ztunnel_own_mode(void)
 		union v6addr own = CONFIG(endpoint_ipv6);
 
 		if (own.d1 || own.d2) {
+			configured = true;
 			ep = __lookup_ip6_endpoint(&own);
 			if (ep && ep->lxc_id == LXC_ID)
 				flags |= ep->flags;
@@ -128,6 +133,6 @@ static __always_inline enum ztunnel_mode ztunnel_own_mode(void)
 	}
 #endif
 	return ztunnel_mode_decide(CONFIG(ztunnel_required), CONFIG(ztunnel_quarantined),
-				   complete, flags);
+				   configured && complete, flags);
 }
 #endif /* IS_BPF_LXC */

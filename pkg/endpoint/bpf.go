@@ -447,12 +447,11 @@ func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint
 		// ARP, and IPv6 ND are delivered to the host stack in all datapath configurations.
 		if e.IsProperty(endpointtypes.PropertyAtHostNS) {
 			stats.mapSync.Start()
-			err = e.lxcMap.WriteEndpoint(datapathRegenCtxt.epInfoCache)
+			err = e.writeZtunnelLxcFrontend(datapathRegenCtxt.epInfoCache)
 			stats.mapSync.End(err == nil)
 			if err != nil {
 				return 0, newRegenerationErrorf(regenerationFailureReasonBPFError, "exposing endpoint in endpoints BPF map failed: %w", err)
 			}
-			e.recordZtunnelLxcFrontend(datapathRegenCtxt.epInfoCache)
 		}
 
 		// Allow another builder to start while we wait for the proxy
@@ -491,12 +490,11 @@ func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint
 	if !datapathRegenCtxt.epInfoCache.IsHost() || option.Config.EnableHostFirewall {
 		// Hook the endpoint into the endpoint and endpoint to policy tables then expose it
 		stats.mapSync.Start()
-		err = e.lxcMap.WriteEndpoint(datapathRegenCtxt.epInfoCache)
+		err = e.writeZtunnelLxcFrontend(datapathRegenCtxt.epInfoCache)
 		stats.mapSync.End(err == nil)
 		if err != nil {
 			return 0, newRegenerationErrorf(regenerationFailureReasonBPFError, "exposing endpoint in endpoints BPF map failed: %w", err)
 		}
-		e.recordZtunnelLxcFrontend(datapathRegenCtxt.epInfoCache)
 	}
 
 	// Signal that BPF program has been generated.
@@ -874,7 +872,7 @@ func (e *Endpoint) deleteMaps() []error {
 	// Remove the endpoint from cilium_lxc. After this point, ip->epID lookups
 	// will fail, causing packets to/from the Pod to be dropped in many cases,
 	// stopping packet evaluation.
-	if err := e.lxcMap.DeleteElement(e.getLogger(), e); err != nil {
+	if err := e.deleteZtunnelLxcEntries(); err != nil {
 		errors = append(errors, err...)
 	}
 

@@ -4,13 +4,17 @@
 package endpoint
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 
+	"github.com/cilium/cilium/pkg/controller"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/lxcmap"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/time"
 )
 
 // Datapath admission for a Required endpoint has exactly two modes:
@@ -108,12 +112,18 @@ func (e *Endpoint) ReleaseZtunnelQuarantine(receipt ZtunnelAdmissionReceipt) err
 	if err := e.lockAlive(); err != nil {
 		return err
 	}
+	// A release never interleaves with a withdrawal's flag sampling, kernel
+	// update and acknowledgement.
+	e.ztunnelDatapathWriteMu.Lock()
 	err := e.verifyZtunnelReceiptLocked(receipt)
 	if err == nil {
 		copy := receipt
 		e.ztunnelAdmission.Store(&copy)
+		// A new release interval: its withdrawal needs its own map write.
+		e.ztunnelReleaseSeq.Add(1)
 		e.ztunnelDatapathQuarantined.Store(false)
 	}
+	e.ztunnelDatapathWriteMu.Unlock()
 	e.unlock()
 	if err != nil {
 		e.getLogger().Warn("Refusing ztunnel quarantine release",
@@ -146,6 +156,11 @@ func ZtunnelReleaseRegeneration() *regeneration.ExternalRegenerationMetadata {
 func (e *Endpoint) verifyZtunnelReceiptLocked(r ZtunnelAdmissionReceipt) error {
 	if !e.ztunnelRequiresSourceIPLocked() {
 		return ErrZtunnelNotRequired
+	}
+	// The datapath admits a Required program only through its own
+	// endpoint-map entry, which needs a configured endpoint address.
+	if !ztunnelAddressConfigured(e.IPv4) && !ztunnelAddressConfigured(e.IPv6) {
+		return fmt.Errorf("%w: endpoint has no configured address", ErrZtunnelAdmissionMismatch)
 	}
 	if e.Options == nil || !e.Options.IsEnabled(option.SourceIPVerification) {
 		return fmt.Errorf("%w: source IP verification is disabled", ErrZtunnelAdmissionMismatch)
@@ -193,43 +208,205 @@ func (e *Endpoint) verifyZtunnelReceiptLocked(r ZtunnelAdmissionReceipt) error {
 	return nil
 }
 
-// WithdrawZtunnelAdmission quarantines the endpoint immediately. It is safe to
-// call while holding another subsystem's mutex: it uses atomics and one
-// cilium_lxc write of the last realized frontend.
-func (e *Endpoint) WithdrawZtunnelAdmission(reason string) {
-	e.ztunnelAdmission.Store(nil)
-	if e.ztunnelDatapathQuarantined.Swap(true) {
-		return
-	}
-	e.rewriteZtunnelDatapathFlags(reason)
+// ztunnelAddressConfigured reports a usable endpoint address: an unspecified
+// address compiles to the same bits as no address.
+func ztunnelAddressConfigured(addr netip.Addr) bool {
+	return addr.IsValid() && !addr.IsUnspecified()
 }
 
-// rewriteZtunnelDatapathFlags writes the last realized endpoint entry again.
-// Its quarantine predicate reads the live state, so it can only become stricter
-// than the cached value.
-func (e *Endpoint) rewriteZtunnelDatapathFlags(reason string) {
-	frontend := e.ztunnelLxcFrontend.Load()
-	if frontend == nil || e.lxcMap == nil {
+var ztunnelQuarantineRecoveryControllerGroup = controller.NewGroup("ztunnel-quarantine-recovery")
+
+func ztunnelQuarantineRecoveryControllerName(id uint16) string {
+	return fmt.Sprintf("ztunnel-quarantine-recovery (%d)", id)
+}
+
+// ztunnelQuarantineAcked reports that no entry released by this agent process
+// is outstanding: cilium_lxc accepted the withdrawal of the current release
+// interval (or nothing was ever released).
+func (e *Endpoint) ztunnelQuarantineAcked() bool {
+	return e.ztunnelQuarantineAckedSeq.Load() == e.ztunnelReleaseSeq.Load()
+}
+
+// WithdrawZtunnelAdmission quarantines the endpoint. It is safe to call while
+// holding the endpoint mutex or another subsystem's mutex: it uses atomics and
+// one cilium_lxc write of the last realized frontend, which carries the
+// quarantine bit because its flags read the live state.
+//
+// Protection boundary: a program released earlier keeps forwarding TCP/15008
+// until cilium_lxc accepts this write or a regeneration loads a program
+// compiled with ztunnel_quarantined=true. If the write fails, a recovery
+// controller (no caller locks) queues that regeneration once and retries the
+// write with bounded backoff, and every repeated withdrawal retries it too. If
+// every kernel write keeps failing, the released program keeps forwarding:
+// that failure mode is not fail-closed.
+func (e *Endpoint) WithdrawZtunnelAdmission(reason string) {
+	e.ztunnelDatapathWriteMu.Lock()
+	e.ztunnelAdmission.Store(nil)
+	if e.ztunnelDatapathQuarantined.Swap(true) && e.ztunnelQuarantineAcked() {
+		e.ztunnelDatapathWriteMu.Unlock()
 		return
 	}
+	written := e.writeZtunnelQuarantine(reason)
+	e.ztunnelDatapathWriteMu.Unlock()
+	if !written {
+		// After unlocking: the controller manager is never entered with the
+		// publication mutex held.
+		e.startZtunnelQuarantineRecovery(reason)
+	}
+}
+
+// writeZtunnelQuarantine writes the last realized endpoint entry again and
+// reports whether no released entry of the current interval remains.
+// ztunnelDatapathWriteMu must be held through the write and acknowledgement.
+func (e *Endpoint) writeZtunnelQuarantine(reason string) bool {
+	seq := e.ztunnelReleaseSeq.Load()
+	if e.ztunnelLxcRetired {
+		// The entries were deleted; a Required program without its own
+		// entry is quarantined, and the deleted entry is never rewritten.
+		e.ztunnelQuarantineAckedSeq.Store(seq)
+		return true
+	}
+	frontend := e.ztunnelLxcFrontend.Load()
+	if frontend == nil || e.lxcMap == nil {
+		// This agent process realized no entry; the next regeneration writes
+		// a quarantined entry and compiles the quarantine default.
+		e.ztunnelQuarantineAckedSeq.Store(seq)
+		return true
+	}
 	if err := e.lxcMap.WriteEndpoint(*frontend); err != nil {
-		// The load-time default and next regeneration remain quarantined; this
-		// failure must not be read as a release.
 		e.getLogger().Error("Failed to write ztunnel quarantine to endpoint map",
 			logfields.Event, "ztunnel-datapath-admission",
 			logZtunnelStage, "quarantine-withdraw",
 			logfields.Reason, reason,
 			logfields.Error, err)
-		return
+		return false
 	}
+	// Releases are excluded while the publication mutex is held, so the
+	// state and sequence sampled above are still current.
+	e.ztunnelQuarantineAckedSeq.Store(seq)
 	e.getLogger().Info("Quarantined ztunnel endpoint",
 		logfields.Event, "ztunnel-datapath-admission",
 		logZtunnelStage, "quarantine-withdraw",
 		logfields.Reason, reason)
+	return true
+}
+
+// ztunnelQuarantineRegeneration recompiles the datapath with the quarantine
+// default, independently of the failed endpoint-map write.
+func ztunnelQuarantineRegeneration(reason string) *regeneration.ExternalRegenerationMetadata {
+	return &regeneration.ExternalRegenerationMetadata{
+		Reason:            regeneration.ReasonEndpointUpdate,
+		Message:           "ztunnel quarantine endpoint-map write failed: " + reason,
+		RegenerationLevel: regeneration.RegenerateWithDatapath,
+	}
+}
+
+// startZtunnelQuarantineRecovery starts (or restarts) the endpoint's recovery
+// controller. Only the controller manager mutex is taken here; the controller
+// runs on its own goroutine, is bound to the endpoint's alive context and is
+// removed with the endpoint's other controllers.
+func (e *Endpoint) startZtunnelQuarantineRecovery(reason string) {
+	if e.controllers == nil {
+		e.getLogger().Error("Cannot start ztunnel quarantine recovery without an endpoint controller manager",
+			logfields.Event, "ztunnel-datapath-admission",
+			logZtunnelStage, "quarantine-recovery",
+			logfields.Reason, reason)
+		return
+	}
+	regenerationQueued := false
+	e.UpdateController(ztunnelQuarantineRecoveryControllerName(e.GetID16()), controller.ControllerParams{
+		Group:                  ztunnelQuarantineRecoveryControllerGroup,
+		ErrorRetryBaseDuration: 200 * time.Millisecond,
+		MaxRetryInterval:       5 * time.Second,
+		DoFunc: func(ctx context.Context) error {
+			return e.recoverZtunnelQuarantine(ctx, reason, &regenerationQueued)
+		},
+	})
+}
+
+// recoverZtunnelQuarantine is one recovery attempt. It queues one datapath
+// regeneration, then retries the endpoint-map write under the endpoint lock,
+// so a deleted endpoint's entry is never rewritten and an entry recorded for
+// another incarnation is never written. An error makes the controller retry.
+func (e *Endpoint) recoverZtunnelQuarantine(ctx context.Context, reason string, regenerationQueued *bool) error {
+	if !e.ztunnelDatapathQuarantined.Load() || e.ztunnelQuarantineAcked() {
+		return nil
+	}
+	if !*regenerationQueued {
+		e.getLogger().Warn("Queueing ztunnel quarantine datapath regeneration",
+			logfields.Event, "ztunnel-datapath-admission",
+			logZtunnelStage, "quarantine-recovery",
+			logfields.Reason, reason)
+		e.RegenerateIfAlive(ztunnelQuarantineRegeneration(reason))
+		*regenerationQueued = true
+	}
+	if err := e.lockAlive(); err != nil {
+		return controller.NewExitReason("endpoint is being deleted")
+	}
+	defer e.unlock()
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	e.ztunnelDatapathWriteMu.Lock()
+	defer e.ztunnelDatapathWriteMu.Unlock()
+	// Release, withdrawal and every map publication are excluded here.
+	if !e.ztunnelDatapathQuarantined.Load() || e.ztunnelQuarantineAcked() {
+		return nil
+	}
+	frontend := e.ztunnelLxcFrontend.Load()
+	if frontend != nil {
+		if cache, ok := (*frontend).(*epInfoCache); ok &&
+			(cache.id != uint64(e.ID) || cache.netNsCookie != e.NetNsCookie || cache.k8sPodUID != e.GetK8sPodUID()) {
+			return fmt.Errorf("realized endpoint entry belongs to another incarnation; waiting for regeneration")
+		}
+	}
+	if !e.writeZtunnelQuarantine(reason) {
+		return fmt.Errorf("ztunnel quarantine endpoint-map write failed")
+	}
+	if e.ztunnelDatapathQuarantined.Load() {
+		e.getLogger().Info("Recovered ztunnel quarantine in endpoint map",
+			logfields.Event, "ztunnel-datapath-admission",
+			logZtunnelStage, "quarantine-recovery",
+			logfields.Reason, reason)
+	}
+	return nil
 }
 
 // recordZtunnelLxcFrontend retains the frontend last written to cilium_lxc so a
-// withdrawal can rewrite it without the endpoint lock.
+// withdrawal can rewrite it without the endpoint lock. Production callers hold
+// ztunnelDatapathWriteMu (writeZtunnelLxcFrontend).
 func (e *Endpoint) recordZtunnelLxcFrontend(f lxcmap.EndpointFrontend) {
 	e.ztunnelLxcFrontend.Store(&f)
+}
+
+// writeZtunnelLxcFrontend is the regeneration publication of the endpoint's
+// cilium_lxc entries. The flag sampling inside WriteEndpoint, the kernel
+// update and recording the frontend share the withdrawal critical section:
+// either the withdrawal follows this write, or this write samples the
+// withdrawal's quarantine. After deletion it writes nothing.
+func (e *Endpoint) writeZtunnelLxcFrontend(f lxcmap.EndpointFrontend) error {
+	e.ztunnelDatapathWriteMu.Lock()
+	defer e.ztunnelDatapathWriteMu.Unlock()
+	if e.ztunnelLxcRetired {
+		return ErrNotAlive
+	}
+	if err := e.lxcMap.WriteEndpoint(f); err != nil {
+		return err
+	}
+	e.recordZtunnelLxcFrontend(f)
+	if e.ztunnelDatapathQuarantined.Load() {
+		// Sampled under this mutex: the written entry carries the quarantine.
+		e.ztunnelQuarantineAckedSeq.Store(e.ztunnelReleaseSeq.Load())
+	}
+	return nil
+}
+
+// deleteZtunnelLxcEntries deletes the endpoint's cilium_lxc entries and
+// retires its publications, so no delayed withdrawal or regeneration of this
+// endpoint object writes them again. Called with the endpoint mutex held.
+func (e *Endpoint) deleteZtunnelLxcEntries() []error {
+	e.ztunnelDatapathWriteMu.Lock()
+	defer e.ztunnelDatapathWriteMu.Unlock()
+	e.ztunnelLxcRetired = true
+	return e.lxcMap.DeleteElement(e.getLogger(), e)
 }
