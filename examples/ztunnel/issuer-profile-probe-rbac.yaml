@@ -1,0 +1,26 @@
+# Opt in only after setting exact source/output names for this installation.
+# This Role grants PUBLIC ConfigMap GETs. It grants no Secret or write access.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: cmtc-system
+  name: cilium-issuer-profile-probe
+rules:
+  - apiGroups: [""]
+    resources: [configmaps]
+    resourceNames: [issuer-approval, issuer-publication]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  namespace: cmtc-system
+  name: cilium-issuer-profile-probe
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cilium-issuer-profile-probe
+subjects:
+  - kind: ServiceAccount
+    name: cilium
+    namespace: kube-system

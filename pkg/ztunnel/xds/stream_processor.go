@@ -50,8 +50,9 @@ type StreamProcessorParams struct {
 	Authorizations            *AuthorizationPolicies
 	TrustDomain               string
 	// ClusterName is the canonical local name expected by ztunnel's cluster inventory.
-	ClusterName string
-	RequireMTLS bool
+	ClusterName   string
+	RequireMTLS   bool
+	IssuerProfile *issuerProfileSource
 }
 
 // StreamProcessor implements the logic for handling xDS streams to zTunnel.
@@ -72,6 +73,7 @@ type StreamProcessor struct {
 	trustDomain            string
 	clusterName            string
 	requireMTLS            bool
+	issuerProfile          *issuerProfileSource
 }
 
 // CiliumEndpointsWatcher defines the interface for watching CiliumEndpoints and CiliumEndpointSlices.
@@ -135,6 +137,7 @@ func NewStreamProcessor(params *StreamProcessorParams) *StreamProcessor {
 		trustDomain:            params.TrustDomain,
 		clusterName:            params.ClusterName,
 		requireMTLS:            params.RequireMTLS,
+		issuerProfile:          params.IssuerProfile,
 	}
 	sp.endpointSource = NewEndpointSource(params.K8sCiliumEndpointsWatcher, sp)
 	return sp
@@ -790,6 +793,8 @@ func (sp *StreamProcessor) Start() error {
 		}
 	}()
 
+	var profileRequests chan *v3.DeltaDiscoveryRequest
+	var profileError chan error
 	var node *corev3.Node
 	var authorizationRequests chan *v3.DeltaDiscoveryRequest
 	var authorizationError chan error
@@ -804,6 +809,8 @@ func (sp *StreamProcessor) Start() error {
 			return err
 		case err := <-authorizationError:
 			return err
+		case err := <-profileError:
+			return err
 		case req, ok := <-sp.streamRecv:
 			if !ok || req == nil {
 				return wrapValidationError(errInvalidDiscoveryState, "xDS request channel closed or nil request")
@@ -815,6 +822,30 @@ func (sp *StreamProcessor) Start() error {
 				if node == nil {
 					node = proto.Clone(req.Node).(*corev3.Node)
 				}
+			}
+			if req.TypeUrl == xdsTypeURLIssuerProfile {
+				if sp.issuerProfile == nil {
+					return wrapValidationError(errInvalidDiscoveryState, "issuer-profile probe is not configured")
+				}
+				if req.Node == nil && node != nil {
+					req = proto.Clone(req).(*v3.DeltaDiscoveryRequest)
+					req.Node = node
+				}
+				if profileRequests == nil {
+					profileRequests = make(chan *v3.DeltaDiscoveryRequest)
+					profileError = make(chan error, 1)
+					go func() {
+						profileError <- sp.issuerProfile.run(ctx, profileRequests, stream, sp.issuerProfile.protocolTiming())
+					}()
+				}
+				select {
+				case profileRequests <- req:
+				case err := <-profileError:
+					return err
+				case <-ctx.Done():
+					return ctx.Err()
+				}
+				continue
 			}
 			if req.TypeUrl == xdsTypeURLAuthorization {
 				if req.Node == nil && node != nil {

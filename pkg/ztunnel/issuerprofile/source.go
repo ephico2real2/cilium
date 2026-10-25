@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -235,7 +236,18 @@ func certificates(value string) ([]*x509.Certificate, error) {
 func canonical(cert *x509.Certificate) string {
 	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}))
 }
-func caCurrent(cert *x509.Certificate, now time.Time) error {
+func exactDomainSAN(encoded []byte, domain string) bool {
+	var sequence asn1.RawValue
+	rest, err := asn1.Unmarshal(encoded, &sequence)
+	if err != nil || len(rest) != 0 || sequence.Class != 0 || sequence.Tag != 16 || !sequence.IsCompound {
+		return false
+	}
+	var uri asn1.RawValue
+	rest, err = asn1.Unmarshal(sequence.Bytes, &uri)
+	return err == nil && len(rest) == 0 && uri.Class == 2 && uri.Tag == 6 && !uri.IsCompound && string(uri.Bytes) == "spiffe://"+domain
+}
+func caCurrent(cert *x509.Certificate, now time.Time) error { return caCurrentForDomain(cert, now, "") }
+func caCurrentForDomain(cert *x509.Certificate, now time.Time, domain string) error {
 	if !cert.IsCA || !cert.BasicConstraintsValid || cert.KeyUsage&x509.KeyUsageCertSign == 0 {
 		return errors.New("certificate is not an explicit signing CA")
 	}
@@ -244,6 +256,12 @@ func caCurrent(cert *x509.Certificate, now time.Time) error {
 	}
 	for _, ext := range cert.Extensions {
 		oid := ext.Id.String()
+		if oid == "2.5.29.17" && domain != "" {
+			if !exactDomainSAN(ext.Value, domain) || len(cert.DNSNames) != 0 || len(cert.EmailAddresses) != 0 || len(cert.IPAddresses) != 0 || len(cert.URIs) != 1 || cert.URIs[0].String() != "spiffe://"+domain {
+				return errors.New("SPIRE CA SAN must be the single exact approved trust-domain URI")
+			}
+			continue
+		}
 		if oid != "2.5.29.19" && oid != "2.5.29.15" && oid != "2.5.29.14" && oid != "2.5.29.35" {
 			return errors.New("CA extension outside current direct-issuer verifier profile")
 		}
@@ -256,6 +274,19 @@ func caCurrent(cert *x509.Certificate, now time.Time) error {
 	}
 	return nil
 }
+
+// caDepthAllows includes every CA below this certificate in the eventual
+// SVID path. x509.Verify(targetCA) does not itself count that target as the
+// intermediate it will be when it signs a workload leaf.
+func caDepthAllows(cert *x509.Certificate, below int) bool {
+	if cert.MaxPathLenZero {
+		return below == 0
+	}
+	return cert.MaxPathLen < 0 || cert.MaxPathLen >= below
+}
+
+type approvedParent struct{ cluster, certificate string }
+
 func minimum(a, b time.Time) time.Time {
 	if a.Before(b) {
 		return a
@@ -317,6 +348,7 @@ func Validate(data []byte, rootPins []string, localCluster string, now time.Time
 		a.Roots[i].CertificatePEM = canonical(cert)
 	}
 	clusters, domains, keys := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	parents := map[string]approvedParent{}
 	local := false
 	for ci, c := range a.Clusters {
 		if !ClusterValid(c.ClusterID) || clusters[c.ClusterID] || len(validation.IsDNS1123Subdomain(c.TrustDomain)) != 0 || domains[c.TrustDomain] || len(c.Issuers) == 0 || len(c.Issuers) > 2 {
@@ -332,44 +364,67 @@ func Validate(data []byte, rootPins []string, localCluster string, now time.Time
 			}
 			root := roots[pin.RootSHA256]
 			key := SHA(cert.RawSubjectPublicKeyInfo)
-			if root == nil || !PinValid(pin.SPKISHA256) || pin.SPKISHA256 != key || keys[key] || rootKeys[key] {
+			if root == nil || !PinValid(pin.SPKISHA256) || pin.SPKISHA256 != key || keys[key] || rootKeys[key] || parents[key].cluster != "" {
 				return nil, invalid("SourceInvalid", errors.New("unapproved root or reused/mismatched direct issuer key"))
 			}
-			if e := caCurrent(cert, now); e != nil {
+			if e := caCurrentForDomain(cert, now, c.TrustDomain); e != nil {
 				return nil, invalid("SourceInvalid", e)
 			}
-			intermediatePool := x509.NewCertPool()
-			var chainPEM strings.Builder
-			chainHashes := map[string]bool{}
-			if pin.ChainPEM != "" {
-				return nil, invalid("SourceInvalid", errors.New("current profile requires direct organizational-root signature, no intermediate chain"))
-			}
-			if !bytes.Equal(cert.RawIssuer, root.RawSubject) || cert.CheckSignatureFrom(root) != nil {
-				return nil, invalid("SourceInvalid", errors.New("issuer is not directly signed by approved root"))
-			}
 
+			intermediatePool := x509.NewCertPool()
+			chainPEM := ""
+			expectedChain := []*x509.Certificate{cert}
+			signer := root
+			if pin.ChainPEM != "" {
+				// Approval carries exactly one cluster CA, excluding the root.
+				// Do not discover ancestors from a remote trust bundle.
+				parent, err := oneCertificate(pin.ChainPEM)
+				if err != nil {
+					return nil, invalid("SourceInvalid", err)
+				}
+				if err = caCurrent(parent, now); err != nil {
+					return nil, invalid("SourceInvalid", err)
+				}
+				parentKey := SHA(parent.RawSubjectPublicKeyInfo)
+				old := parents[parentKey]
+				if rootKeys[parentKey] || keys[parentKey] || parentKey == key || old.cluster != "" && (old.cluster != c.ClusterID || old.certificate != SHA(parent.Raw)) {
+					return nil, invalid("SourceInvalid", errors.New("cluster CA key reused across roles, clusters or certificate incarnations"))
+				}
+				if !caDepthAllows(root, 2) || !caDepthAllows(parent, 1) || !bytes.Equal(parent.RawIssuer, root.RawSubject) || parent.CheckSignatureFrom(root) != nil {
+					return nil, invalid("SourceInvalid", errors.New("cluster CA lacks approved root lineage or SVID path depth"))
+				}
+				parents[parentKey] = approvedParent{cluster: c.ClusterID, certificate: SHA(parent.Raw)}
+				intermediatePool.AddCert(parent)
+				chainPEM = canonical(parent)
+				expectedChain = append(expectedChain, parent)
+				signer = parent
+				until = minimum(until, parent.NotAfter)
+			} else if !caDepthAllows(root, 1) {
+				return nil, invalid("SourceInvalid", errors.New("organizational root excludes direct issuer depth"))
+			}
+			if !bytes.Equal(cert.RawIssuer, signer.RawSubject) || cert.CheckSignatureFrom(signer) != nil {
+				return nil, invalid("SourceInvalid", errors.New("SPIRE issuer lacks exact approved direct parent signature"))
+			}
+			expectedChain = append(expectedChain, root)
 			rootPool := x509.NewCertPool()
 			rootPool.AddCert(root)
-			chains, e := cert.Verify(x509.VerifyOptions{Roots: rootPool, Intermediates: intermediatePool, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
-			if e != nil {
-				return nil, invalid("SourceInvalid", fmt.Errorf("direct issuer root lineage verification: %w", e))
+			chains, err := cert.Verify(x509.VerifyOptions{Roots: rootPool, Intermediates: intermediatePool, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}})
+			if err != nil {
+				return nil, invalid("SourceInvalid", fmt.Errorf("verify approved issuer lineage: %w", err))
 			}
-			if len(chains) != 1 {
-				return nil, invalid("SourceInvalid", errors.New("direct issuer must have exactly one verified root lineage"))
+			if len(chains) != 1 || len(chains[0]) != len(expectedChain) {
+				return nil, invalid("SourceInvalid", errors.New("unused or ambiguous approved CA lineage"))
 			}
-			if len(chains[0]) != len(chainHashes)+2 {
-				return nil, invalid("SourceInvalid", errors.New("unused or missing intermediate certificate"))
-			}
-			for _, ancestor := range chains[0][1 : len(chains[0])-1] {
-				if !chainHashes[SHA(ancestor.Raw)] {
-					return nil, invalid("SourceInvalid", errors.New("unapproved intermediate certificate"))
+			for i, ancestor := range chains[0] {
+				if !bytes.Equal(ancestor.Raw, expectedChain[i].Raw) {
+					return nil, invalid("SourceInvalid", errors.New("CA lineage differs from explicit approval order"))
 				}
-				chainPEM.WriteString(canonical(ancestor))
 			}
+
 			keys[key] = true
 			until = minimum(until, cert.NotAfter)
 			a.Clusters[ci].Issuers[ii].CertificatePEM = canonical(cert)
-			a.Clusters[ci].Issuers[ii].ChainPEM = chainPEM.String()
+			a.Clusters[ci].Issuers[ii].ChainPEM = chainPEM
 		}
 		sort.Slice(a.Clusters[ci].Issuers, func(i, j int) bool {
 			return a.Clusters[ci].Issuers[i].SPKISHA256 < a.Clusters[ci].Issuers[j].SPKISHA256

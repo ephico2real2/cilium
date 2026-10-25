@@ -33,3 +33,7 @@ all:
 		--go-json_out=orig_name=true,paths=source_relative:. \
   		$(ZTUNNEL_PROTO_SOURCES)
 	$(QUIET)python3 security/normalize-docs.py
+
+.PHONY: issuer-profile
+issuer-profile:
+	bash trust/generate.sh

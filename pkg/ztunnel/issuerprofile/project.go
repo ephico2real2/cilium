@@ -29,8 +29,9 @@ type Install struct {
 }
 
 type DERIssuer struct {
-	CertificateDER []byte `json:"certificateDER"`
-	SPKISHA256     string `json:"spkiSHA256"`
+	CertificateDER []byte   `json:"certificateDER"`
+	SPKISHA256     string   `json:"spkiSHA256"`
+	LineageDER     [][]byte `json:"lineageDER,omitempty"`
 }
 type DERCluster struct {
 	ClusterID   string      `json:"clusterID"`
@@ -253,7 +254,18 @@ func project(p *Publication, e Install) ([]byte, error) {
 				if len(cert.Raw) > 24576 {
 					return nil, errors.New("issuer DER exceeds wire certificate bound")
 				}
-				item.Issuers = append(item.Issuers, DERIssuer{bytes.Clone(cert.Raw), SHA(cert.RawSubjectPublicKeyInfo)})
+				projected := DERIssuer{CertificateDER: bytes.Clone(cert.Raw), SPKISHA256: SHA(cert.RawSubjectPublicKeyInfo)}
+				if issuer.ChainPEM != "" {
+					parent, err := oneCertificate(issuer.ChainPEM)
+					if err != nil {
+						return nil, err
+					}
+					if len(parent.Raw) > 24576 {
+						return nil, errors.New("cluster CA DER exceeds wire certificate bound")
+					}
+					projected.LineageDER = [][]byte{bytes.Clone(parent.Raw)}
+				}
+				item.Issuers = append(item.Issuers, projected)
 			}
 			result.Clusters = append(result.Clusters, item)
 		}

@@ -61,6 +61,7 @@ type Server struct {
 	trustDomain       string
 	clusterName       string
 	requireMTLS       bool
+	issuerProfile     *issuerProfileSource
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -214,6 +215,7 @@ func (x *Server) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_D
 		TrustDomain:               x.trustDomain,
 		ClusterName:               x.clusterName,
 		RequireMTLS:               x.requireMTLS,
+		IssuerProfile:             x.issuerProfile,
 	}
 
 	x.log.Debug("begin processing DeltaAggregatedResources stream")

@@ -20,6 +20,8 @@ import (
 var Cell = cell.Module(
 	"ztunnel-xds",
 	"ztunnel certificate authority and control plane",
+	cell.Config(IssuerProfileProbeConfig{}),
+	cell.Provide(newIssuerProfileSource),
 	cell.Provide(NewServer),
 	cell.Provide(func(x *Server) *AuthorizationPolicies {
 		if x == nil {
@@ -50,6 +52,7 @@ type xdsServerParams struct {
 	ClusterInfo            cmtypes.ClusterInfo
 	EnrolledNamespaceTable statedb.RWTable[*table.EnrolledNamespace]
 	Metrics                *Metrics
+	IssuerProfile          *issuerProfileSource
 }
 
 func NewServer(params xdsServerParams) *Server {
@@ -72,6 +75,7 @@ func NewServer(params xdsServerParams) *Server {
 	server.trustDomain = params.Config.SpiffeTrustDomain
 	server.clusterName = params.ClusterInfo.Name
 	server.requireMTLS = params.Config.RequireMTLS
+	server.issuerProfile = params.IssuerProfile
 
 	params.Lifecycle.Append(cell.Hook{
 		OnStart: func(_ cell.HookContext) error {
