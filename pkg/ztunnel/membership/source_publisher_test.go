@@ -122,6 +122,11 @@ type sourceTestEndpoints struct {
 	readHook       func()
 	revalidations  int
 	reads          int
+	egress         *SourceEgressPolicy
+	egressErr      error
+	// egressPending blocks EgressPolicy until its context ends, as a pending
+	// regeneration does.
+	egressPending bool
 }
 
 func (p *sourceTestEndpoints) Revalidate(ctx context.Context, id uint16) error {
@@ -151,6 +156,23 @@ func (p *sourceTestEndpoints) Read(id uint16) (sourceEndpointSnapshot, error) {
 		p.readHook()
 	}
 	return p.snapshot, nil
+}
+
+func (p *sourceTestEndpoints) EgressPolicy(ctx context.Context, snapshot sourceEndpointSnapshot) (*SourceEgressPolicy, error) {
+	p.mu.Lock()
+	pending, egress, err := p.egressPending, p.egress, p.egressErr
+	p.mu.Unlock()
+	if snapshot.EndpointID != p.snapshot.EndpointID {
+		return nil, errors.New("unexpected endpoint ID")
+	}
+	if pending {
+		<-ctx.Done()
+		return nil, errors.New("endpoint native policy is not current and realized")
+	}
+	if egress == nil && err == nil {
+		err = errors.New("test endpoint has no realized policy")
+	}
+	return egress, err
 }
 
 func newSourcePublisherTest(t *testing.T) (*SourcePublisher, *sourceTestBackend, *sourceTestEndpoints, Reference) {

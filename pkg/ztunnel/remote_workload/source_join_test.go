@@ -5,6 +5,8 @@ package remote_workload
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -620,5 +622,51 @@ func TestInvalidIPSnapshotReasonIsLogged(t *testing.T) {
 	j.PublishRemoteWorkloadSnapshot(Snapshot{ClusterName: "cluster-beta", ClusterID: 17, Reason: "workload record lacks ztunnel membership wire version 1"})
 	if !strings.Contains(logged.String(), "Remote IP identity snapshot is invalid") || !strings.Contains(logged.String(), "lacks ztunnel membership wire version 1") {
 		t.Fatalf("invalid IP snapshot reason was not logged: %q", logged.String())
+	}
+}
+
+func testEgressPolicy() *membership.SourceEgressPolicy {
+	body := make([]byte, 70)
+	sum := sha256.Sum256(body)
+	return &membership.SourceEgressPolicy{Version: membership.SourceEgressPolicyVersion, PolicyRevision: 7, SelectorRevision: 3,
+		Digest: hex.EncodeToString(sum[:]), Wire: append(body, sum[:]...)}
+}
+
+func TestSourceMembershipKeyValidatesEgressPolicy(t *testing.T) {
+	record := validSourceMembershipRecord(1)
+	record.Workloads[0].EgressPolicy = testEgressPolicy()
+	valid, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var key SourceMembershipKey
+	if err := key.Unmarshal("node-a", valid); err != nil {
+		t.Fatalf("record with a valid egress policy rejected: %v", err)
+	}
+	if got := key.Record.Workloads[0].EgressPolicy; got == nil || got.Digest != record.Workloads[0].EgressPolicy.Digest {
+		t.Fatal("egress policy was not decoded")
+	}
+	record.Workloads[0].EgressPolicy.Digest = strings.Repeat("0", 64)
+	invalid, err := json.Marshal(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := key.Unmarshal("node-a", invalid); err == nil {
+		t.Fatal("egress policy whose digest does not match its wire was accepted")
+	}
+	unknown := strings.Replace(string(valid), `"egressPolicy":{`, `"egressPolicy":{"futureField":true,`, 1)
+	if err := key.Unmarshal("node-a", []byte(unknown)); err == nil {
+		t.Fatal("unknown egress policy field was accepted")
+	}
+}
+
+func TestCloneSourceRecordCopiesEgressPolicy(t *testing.T) {
+	record := validSourceMembershipRecord(1)
+	record.Workloads[0].EgressPolicy = testEgressPolicy()
+	clone := cloneSourceRecord(record)
+	record.Workloads[0].EgressPolicy.Wire[0] ^= 1
+	record.Workloads[0].EgressPolicy.Digest = "changed"
+	if clone.Workloads[0].EgressPolicy.Wire[0] != 0 || clone.Workloads[0].EgressPolicy.Validate() != nil {
+		t.Fatal("cloned record shares its egress policy with the original")
 	}
 }

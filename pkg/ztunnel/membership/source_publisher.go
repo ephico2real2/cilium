@@ -5,12 +5,15 @@ package membership
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
 	"reflect"
+	"slices"
 	"sort"
 
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -22,6 +25,7 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/time"
 )
 
@@ -32,12 +36,25 @@ const (
 	DefaultSourceRefreshInterval = 5 * time.Second
 	DefaultSourceLeaseTTL        = 30 * time.Second
 	DefaultSourceMaxWorkloads    = 8
-	logSourceStage               = "stage"
-	logSourceWorkloads           = "workloads"
-	logSourceRegistryRevision    = "registryRevision"
+	// MaxSourceMembershipRecordBytes is the largest record a reader accepts and
+	// a writer publishes. Eight workloads with a full egress policy each fit
+	// (TestSourceMembershipRecordWorstCaseFitsReaderBound).
+	MaxSourceMembershipRecordBytes = 1 << 20
+	SourceEgressPolicyVersion      = 1
+	// sourcePolicyRealizationWait bounds, per refresh, how long publication
+	// waits for regenerating endpoints to realize their policy. On the lab
+	// agents, 692 of 725 measured regenerations finished within 0.25 s.
+	sourcePolicyRealizationWait = time.Second
+	sourcePolicyRealizationPoll = 50 * time.Millisecond
+	logSourceStage              = "stage"
+	logSourceWorkloads          = "workloads"
+	logSourceRegistryRevision   = "registryRevision"
 )
 
-var ErrSourcePublicationStale = errors.New("source membership changed during snapshot publication")
+var (
+	ErrSourcePublicationStale = errors.New("source membership changed during snapshot publication")
+	ErrSourceRecordTooLarge   = errors.New("source membership record exceeds the reader bound")
+)
 
 // SourceMembershipRecord is a complete per-node replacement view. Its
 // LeaseTTLSeconds and IssuedAt fields are diagnostic only: a consumer must
@@ -76,6 +93,35 @@ type SourceMembershipEntry struct {
 	MembershipRevision  uint64   `json:"membershipRevision"`
 	MembershipEpoch     string   `json:"membershipEpoch"`
 	ZDSGeneration       uint64   `json:"zdsGeneration"`
+	// EgressPolicy is absent while the workload's policy is not realized. The
+	// workload is then still a destination, but no destination admits it as
+	// a source.
+	EgressPolicy *SourceEgressPolicy `json:"egressPolicy,omitempty"`
+}
+
+// SourceEgressPolicy is the realized native egress map of one published
+// workload, in the policy package's native wire format. Its digest binds the
+// wire content only; the receiver supplies the owner cluster when decoding,
+// and the record's lease and membership remain the authority for the source.
+type SourceEgressPolicy struct {
+	Version          uint8  `json:"version"`
+	PolicyRevision   uint64 `json:"policyRevision"`
+	SelectorRevision uint64 `json:"selectorRevision"`
+	Digest           string `json:"digest"`
+	Wire             []byte `json:"wire"`
+}
+
+// Validate checks the envelope's shape and that its digest is the wire's own.
+// policy.DecodeNativeZtunnelL4 verifies the content when the policy is used.
+func (p *SourceEgressPolicy) Validate() error {
+	if p == nil || p.Version != SourceEgressPolicyVersion || p.PolicyRevision == 0 || p.SelectorRevision == 0 ||
+		len(p.Wire) <= sha256.Size || len(p.Wire) > policy.MaxNativeZtunnelL4WireBytes {
+		return fmt.Errorf("source egress policy has an invalid version, revision or size")
+	}
+	if p.Digest != hex.EncodeToString(p.Wire[len(p.Wire)-sha256.Size:]) {
+		return fmt.Errorf("source egress policy digest does not match its wire")
+	}
+	return nil
 }
 
 type sourceEndpointSnapshot struct {
@@ -96,9 +142,12 @@ type sourceEndpointSnapshot struct {
 // Revalidate returns nil only when live Namespace/Pod identity, sandbox, and a
 // ZDS ADD acknowledged by the live ztunnel execution are current for the
 // captured membership, re-admitting the endpoint first when they are not.
+// EgressPolicy returns the realized egress policy of the workload a snapshot
+// describes, waiting until the context ends while a regeneration is pending.
 type SourceEndpointProvider interface {
 	Revalidate(context.Context, uint16) error
 	Read(uint16) (sourceEndpointSnapshot, error)
+	EgressPolicy(context.Context, sourceEndpointSnapshot) (*SourceEgressPolicy, error)
 }
 
 type ciliumSourceEndpointProvider struct {
@@ -178,6 +227,55 @@ func (p ciliumSourceEndpointProvider) Read(id uint16) (sourceEndpointSnapshot, e
 	}, nil
 }
 
+func (p ciliumSourceEndpointProvider) EgressPolicy(ctx context.Context, snapshot sourceEndpointSnapshot) (*SourceEgressPolicy, error) {
+	for {
+		ep := p.endpoints.LookupCiliumID(snapshot.EndpointID)
+		if ep == nil || !ep.IsAlive() {
+			return nil, fmt.Errorf("required Cilium endpoint %d is unavailable", snapshot.EndpointID)
+		}
+		release, err := ep.SnapshotZtunnelReleaseCandidate()
+		if err == nil {
+			return sourceEgressPolicy(release, snapshot)
+		}
+		if !sleepContext(ctx, sourcePolicyRealizationPoll) {
+			return nil, err
+		}
+	}
+}
+
+// sourceEgressPolicy exports a release candidate's egress map only when the
+// candidate, read under one endpoint lock, is the workload incarnation the
+// published entry describes: the same capture publication, Pod, identity and
+// addresses.
+func sourceEgressPolicy(release endpoint.ZtunnelReleaseCandidate, snapshot sourceEndpointSnapshot) (*SourceEgressPolicy, error) {
+	subject := release.Subject
+	addresses := make([]string, 0, len(subject.Addresses))
+	for _, addr := range subject.Addresses {
+		addresses = append(addresses, addr.Unmap().String())
+	}
+	sort.Strings(addresses)
+	if !release.HasMembership || release.Membership != snapshot.Membership || subject.EndpointID != snapshot.EndpointID ||
+		subject.NamespaceUID != snapshot.NamespaceUID || subject.PodUID != snapshot.PodUID ||
+		subject.ServiceAccount != snapshot.ServiceAccount || subject.NumericIdentity != snapshot.Identity ||
+		!slices.Equal(addresses, snapshot.Addresses) {
+		return nil, fmt.Errorf("realized policy belongs to another workload incarnation")
+	}
+	egress, err := subject.Policy.Egress()
+	if err != nil {
+		return nil, err
+	}
+	wire, digest, err := egress.MarshalNative()
+	if err != nil {
+		return nil, err
+	}
+	exported := &SourceEgressPolicy{Version: SourceEgressPolicyVersion, PolicyRevision: egress.Revision(),
+		SelectorRevision: egress.SelectorRevision(), Digest: digest, Wire: wire}
+	if err := exported.Validate(); err != nil {
+		return nil, err
+	}
+	return exported, nil
+}
+
 type sourceMembershipBackend interface {
 	LockPath(context.Context, string) (kvstore.KVLocker, error)
 	DeleteIfLocked(context.Context, string, kvstore.KVLocker) error
@@ -223,6 +321,10 @@ type SourcePublisher struct {
 
 	mu         lock.Mutex
 	generation uint64
+
+	// egressAbsent is the reason each workload was last published without
+	// its egress policy. Only the publishing goroutine uses it.
+	egressAbsent map[Reference]string
 }
 
 func NewSourcePublisher(registry *Registry, endpoints endpointmanager.EndpointsLookup, revalidators []EndpointRevalidator, backend kvstore.Client, logger *slog.Logger, cfg SourcePublisherConfig) (*SourcePublisher, error) {
@@ -299,6 +401,7 @@ func newSourcePublisher(registry *Registry, endpoints SourceEndpointProvider, ba
 		logger:    logger.With(logfields.LogSubsys, "ztunnel-membership-source"), config: cfg,
 		key:     kvstore.JoinKey(SourceMembershipPrefix, cfg.NodeName),
 		lockKey: kvstore.JoinKey(SourceMembershipLockPrefix, cfg.NodeName, "writer"), epoch: epoch,
+		egressAbsent: make(map[Reference]string),
 	}, nil
 }
 
@@ -459,6 +562,11 @@ func (p *SourcePublisher) refresh(ctx context.Context, locker kvstore.KVLocker) 
 
 	record := SourceMembershipRecord{Valid: true, Workloads: make([]SourceMembershipEntry, 0, len(current.Entries))}
 	endpointSnapshots := make(map[Reference]sourceEndpointSnapshot, len(current.Entries))
+	// One wait budget for the whole record: a regenerating endpoint delays
+	// this refresh by at most sourcePolicyRealizationWait.
+	egressCtx, cancelEgress := context.WithTimeout(revalidationCtx, sourcePolicyRealizationWait)
+	defer cancelEgress()
+	absent := make(map[Reference]string)
 	for _, entry := range current.Entries {
 		if entry.Publication.State != PublicationCaptured {
 			continue
@@ -474,9 +582,15 @@ func (p *SourcePublisher) refresh(ctx context.Context, locker kvstore.KVLocker) 
 		if err != nil {
 			return p.publishInvalid(ctx, locker, current, "endpoint_record_invalid")
 		}
+		egress, err := p.endpoints.EgressPolicy(egressCtx, snapshot)
+		if err != nil {
+			absent[entry.Reference] = err.Error()
+		}
+		entryWire.EgressPolicy = egress
 		endpointSnapshots[entry.Reference] = snapshot
 		record.Workloads = append(record.Workloads, entryWire)
 	}
+	p.logEgressAbsence(absent)
 	sort.Slice(record.Workloads, func(i, j int) bool {
 		x, y := record.Workloads[i], record.Workloads[j]
 		if x.NamespaceUID != y.NamespaceUID {
@@ -502,10 +616,34 @@ func (p *SourcePublisher) refresh(ctx context.Context, locker kvstore.KVLocker) 
 		}
 	}
 	err := p.publishRecord(ctx, locker, record, current)
-	if errors.Is(err, ErrSourcePublicationStale) {
+	switch {
+	case errors.Is(err, ErrSourcePublicationStale):
 		return p.publishInvalid(ctx, locker, p.registry.SourceSnapshot(), "source_snapshot_changed_before_write")
+	case errors.Is(err, ErrSourceRecordTooLarge):
+		return p.publishInvalid(ctx, locker, current, "record_too_large")
 	}
 	return err
+}
+
+// logEgressAbsence logs when a workload starts or stops being published
+// without its egress policy, not on every refresh.
+func (p *SourcePublisher) logEgressAbsence(absent map[Reference]string) {
+	for ref, reason := range absent {
+		if p.egressAbsent[ref] != reason {
+			p.logger.Info("Publishing source workload without its egress policy; no destination admits it as a source",
+				logSourceStage, "source-egress",
+				logfields.PodUID, ref.Key.PodUID,
+				logfields.Reason, reason)
+		}
+	}
+	for ref := range p.egressAbsent {
+		if _, ok := absent[ref]; !ok {
+			p.logger.Info("Publishing source workload egress policy again",
+				logSourceStage, "source-egress",
+				logfields.PodUID, ref.Key.PodUID)
+		}
+	}
+	p.egressAbsent = absent
 }
 
 func (p *SourcePublisher) publishInvalid(ctx context.Context, locker kvstore.KVLocker, snapshot SourceSnapshot, reason string) error {
@@ -542,6 +680,9 @@ func (p *SourcePublisher) publishRecord(ctx context.Context, locker kvstore.KVLo
 	data, err := json.Marshal(record)
 	if err != nil {
 		return fmt.Errorf("marshal source membership record: %w", err)
+	}
+	if len(data) > MaxSourceMembershipRecordBytes {
+		return fmt.Errorf("%w: %d bytes", ErrSourceRecordTooLarge, len(data))
 	}
 	writeCtx, cancel := context.WithTimeout(ctx, p.config.WriteTimeout)
 	defer cancel()

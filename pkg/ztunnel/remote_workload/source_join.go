@@ -29,14 +29,13 @@ import (
 )
 
 const (
-	maxSourceMembershipRecordBytes = 1 << 20
-	maxSourceMembershipWorkloads   = 8
-	maxSourceMembershipAddresses   = 2
-	maxSourceMembershipNodes       = 1024
-	maxSourceAgentEpochsPerNode    = 32
-	logSourceJoinStage             = "stage"
-	defaultReaderLeaseTTL          = 30 * time.Second
-	maxReaderLeaseTTL              = time.Minute
+	maxSourceMembershipWorkloads = 8
+	maxSourceMembershipAddresses = 2
+	maxSourceMembershipNodes     = 1024
+	maxSourceAgentEpochsPerNode  = 32
+	logSourceJoinStage           = "stage"
+	defaultReaderLeaseTTL        = 30 * time.Second
+	maxReaderLeaseTTL            = time.Minute
 )
 
 // SourceMembershipKey decodes one complete per-node source record. Its key is
@@ -57,7 +56,7 @@ func (k *SourceMembershipKey) Unmarshal(key string, data []byte) error {
 	if problems := validation.IsDNS1123Subdomain(key); len(problems) != 0 {
 		return fmt.Errorf("invalid source membership node key")
 	}
-	if len(data) == 0 || len(data) > maxSourceMembershipRecordBytes {
+	if len(data) == 0 || len(data) > membership.MaxSourceMembershipRecordBytes {
 		return fmt.Errorf("source membership record size is invalid")
 	}
 	if err := rejectDuplicateJSONKeys(data); err != nil {
@@ -194,6 +193,11 @@ func validateSourceMembershipRecord(key string, record membership.SourceMembersh
 				return fmt.Errorf("source membership record contains a duplicate address")
 			}
 			seenAddresses[address] = struct{}{}
+		}
+		if workload.EgressPolicy != nil {
+			if err := workload.EgressPolicy.Validate(); err != nil {
+				return fmt.Errorf("source membership record contains an invalid egress policy: %w", err)
+			}
 		}
 	}
 	return nil
@@ -865,6 +869,11 @@ func cloneSourceRecord(record membership.SourceMembershipRecord) membership.Sour
 	for i := range record.Workloads {
 		clone.Workloads[i] = record.Workloads[i]
 		clone.Workloads[i].Addresses = append([]string(nil), record.Workloads[i].Addresses...)
+		if egress := record.Workloads[i].EgressPolicy; egress != nil {
+			copied := *egress
+			copied.Wire = append([]byte(nil), egress.Wire...)
+			clone.Workloads[i].EgressPolicy = &copied
+		}
 	}
 	return clone
 }
