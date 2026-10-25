@@ -524,3 +524,101 @@ func TestSourceLiveEpochChangeRequiresNewCompleteList(t *testing.T) {
 		t.Fatalf("valid new full-list epoch did not recover: %+v", got)
 	}
 }
+
+// nativeIPSnapshotAt is validIPSnapshotAt as the inventory reports a native
+// record: no namespace UID, node or capture membership.
+func nativeIPSnapshotAt(now time.Time) Snapshot {
+	snapshot := validIPSnapshotAt(now)
+	w := &snapshot.Workloads[0]
+	w.Key.NamespaceUID, w.NodeName = "", ""
+	w.MembershipEpoch, w.MembershipGeneration, w.MembershipState = "", 0, unannotatedMembership
+	return snapshot
+}
+
+func TestNativeIPRecordJoinsItsSourceLease(t *testing.T) {
+	j, sink, _ := newSourceJoinerTest(t)
+	j.Begin(context.Background())
+	j.OnUpdate(sourceKey(validSourceMembershipRecord(1)))
+	j.ListDone(context.Background())
+	j.PublishRemoteWorkloadSnapshot(nativeIPSnapshotAt(j.now()))
+	got := latestJoined(t, sink)
+	if !got.Valid || len(got.Workloads) != 1 {
+		t.Fatalf("native record did not join its source lease: %+v", got)
+	}
+	want := validIPSnapshotAt(j.now()).Workloads[0]
+	if w := got.Workloads[0]; w.Key != want.Key || w.NodeName != "node-a" || w.MembershipEpoch != "agent-epoch-a" ||
+		w.MembershipGeneration != 2 || w.MembershipState != "captured" {
+		t.Fatalf("joined workload does not carry the source lease's membership: %+v", w)
+	}
+}
+
+func TestNativeIPRecordMustMatchItsSourceLeaseExactly(t *testing.T) {
+	for name, change := range map[string]func(*Workload){
+		"service account":     func(w *Workload) { w.ServiceAccount = "other" },
+		"identity":            func(w *Workload) { w.Identity++ },
+		"namespace":           func(w *Workload) { w.Namespace = "billing" },
+		"pod name":            func(w *Workload) { w.PodName = "api-2" },
+		"address":             func(w *Workload) { w.Addresses = []netip.Addr{netip.MustParseAddr("10.17.0.13")} },
+		"extra address":       func(w *Workload) { w.Addresses = append(w.Addresses, netip.MustParseAddr("fd00:17::12")) },
+		"pod UID":             func(w *Workload) { w.Key.PodUID = "pod-b" },
+		"other namespace UID": func(w *Workload) { w.Key.NamespaceUID = "ns-b" },
+		"other node":          func(w *Workload) { w.NodeName = "node-b" },
+		"carries an epoch":    func(w *Workload) { w.MembershipEpoch = "agent-epoch-a" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			j, sink, _ := newSourceJoinerTest(t)
+			j.Begin(context.Background())
+			j.OnUpdate(sourceKey(validSourceMembershipRecord(1)))
+			j.ListDone(context.Background())
+			snapshot := nativeIPSnapshotAt(j.now())
+			change(&snapshot.Workloads[0])
+			j.PublishRemoteWorkloadSnapshot(snapshot)
+			if got := latestJoined(t, sink); !got.Valid || len(got.Workloads) != 0 {
+				t.Fatalf("mismatched native record was joined: %+v", got)
+			}
+		})
+	}
+	// A native record that carries the namespace UID and node still joins.
+	j, sink, _ := newSourceJoinerTest(t)
+	j.Begin(context.Background())
+	j.OnUpdate(sourceKey(validSourceMembershipRecord(1)))
+	j.ListDone(context.Background())
+	snapshot := nativeIPSnapshotAt(j.now())
+	snapshot.Workloads[0].Key.NamespaceUID, snapshot.Workloads[0].NodeName = "ns-a", "node-a"
+	j.PublishRemoteWorkloadSnapshot(snapshot)
+	if got := latestJoined(t, sink); !got.Valid || len(got.Workloads) != 1 {
+		t.Fatalf("native record with matching namespace UID and node was not joined: %+v", got)
+	}
+}
+
+// The native join keys on the Pod UID, so two leases may not claim one Pod
+// UID under different namespace UIDs.
+func TestSourceLeasesCannotClaimOnePodUIDTwice(t *testing.T) {
+	j, sink, _ := newSourceJoinerTest(t)
+	first := validSourceMembershipRecord(1)
+	second := validSourceMembershipRecord(1)
+	second.NodeName, second.AgentEpoch = "node-b", "agent-epoch-b"
+	second.Workloads[0].NodeName, second.Workloads[0].MembershipEpoch = "node-b", "agent-epoch-b"
+	second.Workloads[0].NamespaceUID, second.Workloads[0].Addresses = "ns-b", []string{"10.17.0.13"}
+	j.Begin(context.Background())
+	j.OnUpdate(sourceKey(first))
+	j.OnUpdate(sourceKey(second))
+	j.ListDone(context.Background())
+	j.PublishRemoteWorkloadSnapshot(nativeIPSnapshotAt(j.now()))
+	if got := latestJoined(t, sink); got.Valid {
+		t.Fatalf("two source leases claimed one Pod UID: %+v", got)
+	}
+}
+
+// The inventory's reason for an invalid list is logged, not only published.
+func TestInvalidIPSnapshotReasonIsLogged(t *testing.T) {
+	var logged strings.Builder
+	j, err := NewSourceMembershipJoiner("cluster-beta", 17, slog.New(slog.NewTextHandler(&logged, nil)), &recordingSink{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.PublishRemoteWorkloadSnapshot(Snapshot{ClusterName: "cluster-beta", ClusterID: 17, Reason: "workload record lacks ztunnel membership wire version 1"})
+	if !strings.Contains(logged.String(), "Remote IP identity snapshot is invalid") || !strings.Contains(logged.String(), "lacks ztunnel membership wire version 1") {
+		t.Fatalf("invalid IP snapshot reason was not logged: %q", logged.String())
+	}
+}

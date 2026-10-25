@@ -186,6 +186,71 @@ func TestMissingMembershipVersionFailsClosed(t *testing.T) {
 	}
 }
 
+// nativePair is a record as the ClusterMesh API server writes it from a
+// CiliumEndpoint under CRD identity allocation (ciliumEndpointMapper): no
+// namespace UID, node or ztunnel membership.
+func nativePair(ip, podUID, sa string) *identity.IPIdentityPair {
+	pair := validPair(ip, podUID, "", sa)
+	pair.HostIP = net.ParseIP("172.18.0.5")
+	pair.K8sNodeName = ""
+	pair.ZtunnelMembershipVersion = 0
+	pair.ZtunnelMembershipEpoch = ""
+	pair.ZtunnelMembershipGeneration = 0
+	pair.ZtunnelMembershipState = ""
+	return pair
+}
+
+// A native record must not end the session: before this, the first CiliumEndpoint
+// of the peer refused the whole list, so no remote workload was ever joined.
+func TestNativeRecordWithoutMembershipIsOnlyAnIPWitness(t *testing.T) {
+	inventory, sink := newTestInventory(t)
+	inventory.Begin(context.Background())
+	inventory.OnUpdate(nativePair("10.17.0.12", "pod-a", "api"))
+	inventory.OnUpdate(nativePair("fd00:17::12", "pod-a", "api"))
+	inventory.ListDone(context.Background())
+	requireValidWorkloads(t, sink, 1)
+	workload := last(t, sink).Workloads[0]
+	if workload.Key != (WorkloadKey{ClusterID: 17, PodUID: "pod-a"}) || workload.NodeName != "" ||
+		workload.MembershipState != unannotatedMembership || workload.MembershipEpoch != "" || workload.MembershipGeneration != 0 {
+		t.Fatalf("native record gained membership it does not carry: %+v", workload)
+	}
+	if len(workload.Addresses) != 2 {
+		t.Fatalf("native record addresses = %v", workload.Addresses)
+	}
+}
+
+func TestPartialOrMixedMembershipStillFailsClosed(t *testing.T) {
+	for name, change := range map[string]func(*identity.IPIdentityPair){
+		"version without state":  func(p *identity.IPIdentityPair) { p.ZtunnelMembershipVersion = 1 },
+		"epoch without version":  func(p *identity.IPIdentityPair) { p.ZtunnelMembershipEpoch = "agent-epoch-a" },
+		"state without version":  func(p *identity.IPIdentityPair) { p.ZtunnelMembershipState = "captured" },
+		"noncanonical namespace": func(p *identity.IPIdentityPair) { p.K8sNamespaceUID = " ns-a" },
+		"noncanonical node name": func(p *identity.IPIdentityPair) { p.K8sNodeName = "node-a " },
+		"unknown future version": func(p *identity.IPIdentityPair) { p.ZtunnelMembershipVersion = 2 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inventory, sink := newTestInventory(t)
+			pair := nativePair("10.17.0.12", "pod-a", "api")
+			change(pair)
+			inventory.Begin(context.Background())
+			inventory.OnUpdate(pair)
+			inventory.ListDone(context.Background())
+			if last(t, sink).Valid {
+				t.Fatalf("record was accepted: %+v", pair)
+			}
+		})
+	}
+	// One Pod cannot have one annotated and one native address.
+	inventory, sink := newTestInventory(t)
+	inventory.Begin(context.Background())
+	inventory.OnUpdate(validPair("10.17.0.12", "pod-a", "ns-a", "api"))
+	inventory.OnUpdate(nativePair("fd00:17::12", "pod-a", "api"))
+	inventory.ListDone(context.Background())
+	if last(t, sink).Valid {
+		t.Fatal("a Pod with an annotated and a native address was accepted")
+	}
+}
+
 func TestUnenrolledMembershipIsNotAnExportedWorkload(t *testing.T) {
 	inventory, sink := newTestInventory(t)
 	pair := validPair("10.17.0.12", "pod-a", "ns-a", "api")

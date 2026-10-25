@@ -31,6 +31,13 @@ type WorkloadKey struct {
 	PodUID       string
 }
 
+// unannotatedMembership is the MembershipState of a workload whose records
+// carry no ztunnel membership: the ClusterMesh API server writes them from
+// CiliumEndpoints when identities are allocated as CRDs. Such a record is
+// evidence of the native IP-to-identity mapping only; the source membership
+// join supplies the namespace UID, node and capture from the source lease.
+const unannotatedMembership = "unannotated"
+
 // Workload is one remote Kubernetes Pod represented by its current addresses.
 type Workload struct {
 	Key                  WorkloadKey
@@ -368,10 +375,18 @@ func (i *Inventory) validate(pair identity.IPIdentityPair) (netip.Addr, bool, er
 	if !hasK8s {
 		return ip, false, nil
 	}
-	if pair.ZtunnelMembershipVersion != 1 {
+	// A record with no membership field at all is a native record (see
+	// unannotatedMembership); a partial one is refused, as is any other version.
+	unannotated := pair.ZtunnelMembershipVersion == 0 && pair.ZtunnelMembershipEpoch == "" &&
+		pair.ZtunnelMembershipGeneration == 0 && pair.ZtunnelMembershipState == ""
+	if !unannotated && pair.ZtunnelMembershipVersion != 1 {
 		return netip.Addr{}, false, fmt.Errorf("workload record lacks ztunnel membership wire version 1")
 	}
 	switch pair.ZtunnelMembershipState {
+	case "":
+		if !unannotated {
+			return netip.Addr{}, false, fmt.Errorf("workload record has membership version 1 without a state")
+		}
 	case "unenrolled":
 		if pair.ZtunnelMembershipEpoch != "" || pair.ZtunnelMembershipGeneration != 0 {
 			return netip.Addr{}, false, fmt.Errorf("unenrolled workload carries membership epoch or generation")
@@ -387,10 +402,16 @@ func (i *Inventory) validate(pair identity.IPIdentityPair) (netip.Addr, bool, er
 		ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
 		return netip.Addr{}, false, fmt.Errorf("workload record has invalid unicast Pod IP")
 	}
-	if !nonEmptyCanonical(pair.K8sNamespace) || !nonEmptyCanonical(pair.K8sNamespaceUID) ||
-		!nonEmptyCanonical(pair.K8sNodeName) || !nonEmptyCanonical(pair.K8sPodName) || !nonEmptyCanonical(pair.K8sPodUID) ||
+	if !nonEmptyCanonical(pair.K8sNamespace) || !nonEmptyCanonical(pair.K8sPodName) || !nonEmptyCanonical(pair.K8sPodUID) ||
 		!nonEmptyCanonical(pair.K8sServiceAccount) {
-		return netip.Addr{}, false, fmt.Errorf("workload record lacks namespace UID, node name, Pod UID, namespace, Pod name, or ServiceAccount")
+		return netip.Addr{}, false, fmt.Errorf("workload record lacks Pod UID, namespace, Pod name, or ServiceAccount")
+	}
+	// A native record may lack the namespace UID and node; the join then
+	// takes them from the source lease. When present they must be exact.
+	for _, field := range []string{pair.K8sNamespaceUID, pair.K8sNodeName} {
+		if !nonEmptyCanonical(field) && !(unannotated && field == "") {
+			return netip.Addr{}, false, fmt.Errorf("workload record lacks a canonical namespace UID or node name")
+		}
 	}
 
 	min := identity.NumericIdentity(i.clusterInfo.MinimalAllocationIdentityFor(i.clusterID))
@@ -446,7 +467,10 @@ func (i *Inventory) snapshotLockedChecked() ([]Workload, error) {
 
 	out := make([]Workload, 0, len(workloads))
 	for _, workload := range workloads {
-		if workload.MembershipState != "captured" {
+		if workload.MembershipState == "" {
+			workload.MembershipState = unannotatedMembership
+		}
+		if workload.MembershipState != "captured" && workload.MembershipState != unannotatedMembership {
 			continue
 		}
 		sort.Slice(workload.Addresses, func(a, b int) bool { return workload.Addresses[a].Less(workload.Addresses[b]) })

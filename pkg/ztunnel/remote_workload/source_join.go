@@ -541,6 +541,14 @@ func (j *SourceMembershipJoiner) PublishRemoteWorkloadSnapshot(snapshot Snapshot
 	} else {
 		j.publishLocked(false, snapshot.Reason, nil, time.Time{})
 	}
+	if !snapshot.Valid && snapshot.Reason != "" {
+		// The inventory has no logger; without this its reason (a refused
+		// record ends the whole watch session) appears nowhere.
+		j.logger.Warn("Remote IP identity snapshot is invalid",
+			logSourceJoinStage, "ip-identity",
+			logfields.Reason, snapshot.Reason,
+			logfields.ClusterName, j.clusterName)
+	}
 	j.mu.Unlock()
 	if notifyReady != nil {
 		notifyReady()
@@ -576,6 +584,7 @@ func (j *SourceMembershipJoiner) publishJoinedLocked() func() {
 	}
 
 	byPod := make(map[string]membership.SourceMembershipEntry)
+	byPodUID := make(map[string]membership.SourceMembershipEntry)
 	leaseDeadline := time.Time{}
 	for _, source := range j.leases {
 		record := source.key.Record
@@ -586,12 +595,17 @@ func (j *SourceMembershipJoiner) publishJoinedLocked() func() {
 			leaseDeadline = source.expiresAt
 		}
 		for _, workload := range record.Workloads {
+			// A Pod UID names one incarnation in the whole cluster; a native
+			// IP record is matched by it alone.
 			podKey := workload.NamespaceUID + "/" + workload.PodUID
-			if _, duplicate := byPod[podKey]; duplicate {
+			_, duplicate := byPod[podKey]
+			_, duplicateUID := byPodUID[workload.PodUID]
+			if duplicate || duplicateUID {
 				j.invalidateLocked("source leases contain a duplicate Pod incarnation")
 				return nil
 			}
 			byPod[podKey] = workload
+			byPodUID[workload.PodUID] = workload
 		}
 	}
 	if leaseDeadline.IsZero() {
@@ -604,6 +618,13 @@ func (j *SourceMembershipJoiner) publishJoinedLocked() func() {
 
 	workloads := make([]Workload, 0, len(j.ipSnapshot.Workloads))
 	for _, ipWorkload := range j.ipSnapshot.Workloads {
+		if ipWorkload.MembershipState == unannotatedMembership {
+			source, exists := byPodUID[ipWorkload.Key.PodUID]
+			if exists && sourceMatchesNativeIPWorkload(j.clusterID, source, ipWorkload) {
+				workloads = append(workloads, joinNativeIPWorkload(source, ipWorkload))
+			}
+			continue
+		}
 		source, exists := byPod[ipWorkload.Key.NamespaceUID+"/"+ipWorkload.Key.PodUID]
 		if !exists || !sourceMatchesIPWorkload(j.clusterID, source, ipWorkload) {
 			continue
@@ -810,6 +831,32 @@ func sourceMatchesIPWorkload(clusterID uint32, source membership.SourceMembershi
 	sort.Strings(ipAddresses)
 	sort.Strings(sourceAddresses)
 	return reflect.DeepEqual(ipAddresses, sourceAddresses)
+}
+
+// sourceMatchesNativeIPWorkload matches a record without membership (see
+// unannotatedMembership) to its source entry on every field both carry: the
+// Pod, its ServiceAccount, its Cilium identity and its exact address set.
+// The namespace UID and node are compared when the record has them.
+func sourceMatchesNativeIPWorkload(clusterID uint32, source membership.SourceMembershipEntry, ip Workload) bool {
+	if ip.MembershipEpoch != "" || ip.MembershipGeneration != 0 ||
+		(ip.Key.NamespaceUID != "" && ip.Key.NamespaceUID != source.NamespaceUID) ||
+		(ip.NodeName != "" && ip.NodeName != source.NodeName) {
+		return false
+	}
+	joined := joinNativeIPWorkload(source, ip)
+	return sourceMatchesIPWorkload(clusterID, source, joined)
+}
+
+// joinNativeIPWorkload completes a native record from its source entry: the
+// source lease is the only witness of the namespace UID, node and capture.
+func joinNativeIPWorkload(source membership.SourceMembershipEntry, ip Workload) Workload {
+	joined := cloneWorkload(ip)
+	joined.Key.NamespaceUID = source.NamespaceUID
+	joined.NodeName = source.NodeName
+	joined.MembershipEpoch = source.MembershipEpoch
+	joined.MembershipGeneration = source.ZDSGeneration
+	joined.MembershipState = "captured"
+	return joined
 }
 
 func cloneSourceRecord(record membership.SourceMembershipRecord) membership.SourceMembershipRecord {
