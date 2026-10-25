@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"golang.org/x/time/rate"
+	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/yaml"
 
@@ -336,7 +337,11 @@ type etcdClient struct {
 	limiter       *ciliumrate.APILimiter
 	listBatchSize int
 
-	lastHeartbeat time.Time
+	lastHeartbeat         time.Time
+	lastObservedHeartbeat time.Time
+
+	// remotePeerTLS is immutable per client and validates every TLS connection.
+	remotePeerTLS *remotePeerTLSBinding
 
 	leaseExpiredObservers     lock.Map[string, func(string)]
 	lockLeaseExpiredObservers lock.Map[string, func(string)]
@@ -427,6 +432,10 @@ func connectEtcdClient(ctx context.Context, logger *slog.Logger, errChan chan er
 		config = cfg
 	}
 
+	remotePeerTLS, err := newRemotePeerTLSBinding(opts.ClusterName, opts.RemotePeerIdentity)
+	if err != nil {
+		return nil, fmt.Errorf("invalid remote peer TLS profile: %w", err)
+	}
 	// Shuffle the order of endpoints to avoid all agents connecting to the
 	// same etcd endpoint and to work around etcd client library failover
 	// bugs. (https://github.com/etcd-io/etcd/pull/9860)
@@ -438,6 +447,16 @@ func connectEtcdClient(ctx context.Context, logger *slog.Logger, errChan chan er
 	config.Context = ctx
 	// Configure the dial options provided by the caller.
 	config.DialOptions = append(config.DialOptions, opts.DialOption...)
+	if remotePeerTLS != nil {
+		remoteCredentials, err := newRemotePeerTransportCredentials(config.TLS, remotePeerTLS)
+		if err != nil {
+			return nil, fmt.Errorf("unable to configure remote peer TLS verification: %w", err)
+		}
+		// etcd appends Config.DialOptions after its default TLS option, so this
+		// last credential deliberately wraps the exact TLS state used by every
+		// client transport, including reconnections and endpoint failover.
+		config.DialOptions = append(config.DialOptions, grpc.WithTransportCredentials(remoteCredentials))
+	}
 	// Set DialTimeout to 0, otherwise the creation of a new client will
 	// block until DialTimeout is reached or a connection to the server
 	// is made.
@@ -457,8 +476,9 @@ func connectEtcdClient(ctx context.Context, logger *slog.Logger, errChan chan er
 	}
 
 	ec := &etcdClient{
-		client: c,
-		config: config,
+		client:        c,
+		config:        config,
+		remotePeerTLS: remotePeerTLS,
 		status: models.Status{
 			State: models.StatusStateWarning,
 			Msg:   "Waiting for initial connection to be established",
@@ -589,8 +609,10 @@ func (e *etcdClient) asyncConnectEtcdClient(errChan chan<- error) {
 		// It is tempting to compare against the heartbeat value stored in
 		// the key. However, this would require the time on all nodes to
 		// be synchronized. Instead, let's just assume current time.
+		now := time.Now()
 		e.RWMutex.Lock()
-		e.lastHeartbeat = time.Now()
+		e.lastHeartbeat = now
+		e.lastObservedHeartbeat = now
 		e.RWMutex.Unlock()
 		e.logger.Debug("Received update notification of heartbeat")
 	}
@@ -1013,6 +1035,14 @@ func (e *etcdClient) statusChecker() {
 			if heartbeatDelta := time.Since(lastHeartbeat); heartbeatDelta > 2*HeartbeatWriteInterval {
 				recordQuorumError("no event received")
 				quorumError = fmt.Errorf("%s since last heartbeat update has been received", heartbeatDelta)
+			}
+		}
+		if e.remotePeerTLS != nil {
+			e.RWMutex.RLock()
+			lastObservedHeartbeat := e.lastObservedHeartbeat
+			e.RWMutex.RUnlock()
+			if _, peerErr := e.remotePeerTLS.evidence(lastObservedHeartbeat); peerErr != nil {
+				quorumError = errors.Join(quorumError, fmt.Errorf("remote peer TLS identity is no longer fresh: %w", peerErr))
 			}
 		}
 
@@ -1602,6 +1632,9 @@ func (e *etcdClient) Close() {
 			"Failed to close etcd client",
 			logfields.Error, err,
 		)
+	}
+	if e.remotePeerTLS != nil {
+		e.remotePeerTLS.clearConnections()
 	}
 
 	// Wait until all child goroutines spawned by the lease managers have terminated.

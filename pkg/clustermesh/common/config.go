@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/yaml"
 
+	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 )
 
@@ -53,7 +54,8 @@ type HostAlias struct {
 // the etcd client config so that our config watcher can help retriggering the
 // connection if this change too.
 type CiliumEtcdConfig struct {
-	HostAliases []HostAlias `json:"cilium-host-aliases" yaml:"cilium-host-aliases"`
+	HostAliases        []HostAlias                       `json:"cilium-host-aliases" yaml:"cilium-host-aliases"`
+	RemotePeerIdentity *kvstore.RemotePeerIdentityConfig `json:"cilium-remote-peer" yaml:"cilium-remote-peer"`
 }
 
 // ParseCiliumConfig reads Cilium specific fields from the etcd client config.
@@ -80,6 +82,9 @@ func ParseCiliumConfig(path string) (CiliumEtcdConfig, error) {
 			return CiliumEtcdConfig{}, fmt.Errorf("failed to parse config file: cilium-host-aliases has duplicate hostname %q", hostAlias.Hostname)
 		}
 		seen.Insert(hostAlias.Hostname)
+	}
+	if err := cfg.RemotePeerIdentity.Validate(); err != nil {
+		return CiliumEtcdConfig{}, fmt.Errorf("failed to parse config file: invalid cilium-remote-peer profile: %w", err)
 	}
 
 	return cfg, nil

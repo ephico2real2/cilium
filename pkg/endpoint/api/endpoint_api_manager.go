@@ -250,6 +250,7 @@ func (m *endpointAPIManager) CreateEndpoint(ctx context.Context, epTemplate *mod
 		} else {
 			ep.SetPod(pod)
 			ep.SetK8sMetadata(k8sMetadata.NamedPorts)
+			ep.SetK8sNamespaceUID(k8sMetadata.NamespaceUID)
 			identityLbls.MergeLabels(k8sMetadata.IdentityLabels)
 			infoLabels.MergeLabels(k8sMetadata.InfoLabels)
 			if _, ok := pod.Annotations[bandwidth.IngressBandwidth]; ok && !m.bandwidthManager.Enabled() {

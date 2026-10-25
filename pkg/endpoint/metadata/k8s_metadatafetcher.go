@@ -92,6 +92,7 @@ func (cemf *cachedEndpointMetadataFetcher) FetchK8sMetadataForEndpointFromPod(p 
 	k8sLbls := labels.Map2Labels(lbls, labels.LabelSourceK8s)
 	identityLabels, infoLabels := labelsfilter.Filter(k8sLbls)
 	return &endpoint.K8sMetadata{
+		NamespaceUID:         ns.UID,
 		NamedPorts:           namedPorts,
 		IdentityLabels:       identityLabels,
 		InfoLabels:           infoLabels,
@@ -100,14 +101,27 @@ func (cemf *cachedEndpointMetadataFetcher) FetchK8sMetadataForEndpointFromPod(p 
 }
 
 func (cemf *cachedEndpointMetadataFetcher) fetchNamespace(nsName string) (k8sTables.Namespace, error) {
-	// If network policies are disabled, labels are not needed, the namespace
-	// watcher is not running, and a namespace containing only the name is returned.
+	// If network policies are disabled, retain the existing name-only label
+	// behavior, but opportunistically carry the current Namespace UID without
+	// waiting for a namespace reflector that may not be running. Remote workload
+	// snapshots fail closed when that UID is unavailable.
 	if !option.NetworkPolicyEnabled(cemf.config) {
-		return k8sTables.Namespace{
-			Name: nsName,
-		}, nil
+		return k8sTables.Namespace{Name: nsName, UID: cemf.namespaceUIDIfInitialized(nsName)}, nil
 	}
 	return cemf.getNamespace(nsName)
+}
+
+func (cemf *cachedEndpointMetadataFetcher) namespaceUIDIfInitialized(nsName string) string {
+	txn := cemf.db.ReadTxn()
+	initialized, _ := cemf.namespaces.Initialized(txn)
+	if !initialized {
+		return ""
+	}
+	ns, _, found := cemf.namespaces.Get(txn, k8sTables.NamespaceIndex.Query(nsName))
+	if !found {
+		return ""
+	}
+	return ns.UID
 }
 
 func (cemf *cachedEndpointMetadataFetcher) getPod(namespace, name string) (*slim_corev1.Pod, error) {

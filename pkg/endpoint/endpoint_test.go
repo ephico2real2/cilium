@@ -1789,3 +1789,29 @@ func TestComputeCIDRLabelsAfterRestore(t *testing.T) {
 	require.Equal(t, podIP, restoredEP.IPv4)
 	require.Equal(t, expected, restoredEP.computeCIDRLabelsRLocked())
 }
+
+func TestK8sNamespaceUIDIsLiveMetadataOnly(t *testing.T) {
+	e := &Endpoint{}
+	if got := e.GetK8sNamespaceUID(); got != "" {
+		t.Fatalf("initial UID = %q, want empty", got)
+	}
+	if !e.SetK8sNamespaceUID("namespace-uid-a") {
+		t.Fatal("first live namespace UID update was not detected")
+	}
+	if got := e.GetK8sNamespaceUID(); got != "namespace-uid-a" {
+		t.Fatalf("UID = %q", got)
+	}
+	if e.SetK8sNamespaceUID("namespace-uid-a") {
+		t.Fatal("unchanged namespace UID was reported as a new incarnation")
+	}
+	if !e.SetK8sNamespaceUID("namespace-uid-b") {
+		t.Fatal("same-name namespace recreation was not detected")
+	}
+	if got := e.GetK8sNamespaceUID(); got != "namespace-uid-b" {
+		t.Fatalf("replacement UID = %q", got)
+	}
+	e.SetK8sNamespaceUID("")
+	if got := e.GetK8sNamespaceUID(); got != "" {
+		t.Fatalf("cleared UID = %q, want empty", got)
+	}
+}

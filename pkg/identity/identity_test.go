@@ -25,6 +25,7 @@ func TestIPIdentityPairK8sMetadataJSONCompatibility(t *testing.T) {
 
 	withoutPodUIDAndWorkload, err := pair.Marshal()
 	require.NoError(t, err)
+	assert.NotContains(t, string(withoutPodUIDAndWorkload), "K8sNamespaceUID")
 	assert.NotContains(t, string(withoutPodUIDAndWorkload), "K8sPodUID")
 	assert.NotContains(t, string(withoutPodUIDAndWorkload), "K8sWorkloadName")
 	assert.NotContains(t, string(withoutPodUIDAndWorkload), "K8sWorkloadKind")
@@ -33,16 +34,22 @@ func TestIPIdentityPairK8sMetadataJSONCompatibility(t *testing.T) {
 	require.NoError(t, json.Unmarshal(withoutPodUIDAndWorkload, &decoded))
 	assert.Empty(t, decoded.K8sPodUID)
 
+	pair.K8sNamespaceUID = "ns-uid-v1"
+	pair.K8sNodeName = "node-a"
 	pair.K8sPodUID = "90b3d76d-3c14-42ce-b132-d2aad6789d47"
 	pair.K8sWorkloadName = "echo"
 	pair.K8sWorkloadKind = "Deployment"
 	withPodUIDAndWorkload, err := pair.Marshal()
 	require.NoError(t, err)
+	assert.Contains(t, string(withPodUIDAndWorkload), `"K8sNamespaceUID":"ns-uid-v1"`)
+	assert.Contains(t, string(withPodUIDAndWorkload), `"K8sNodeName":"node-a"`)
 	assert.Contains(t, string(withPodUIDAndWorkload), `"K8sPodUID":"90b3d76d-3c14-42ce-b132-d2aad6789d47"`)
 	assert.Contains(t, string(withPodUIDAndWorkload), `"K8sWorkloadName":"echo"`)
 	assert.Contains(t, string(withPodUIDAndWorkload), `"K8sWorkloadKind":"Deployment"`)
 
 	require.NoError(t, json.Unmarshal(withPodUIDAndWorkload, &decoded))
+	assert.Equal(t, pair.K8sNamespaceUID, decoded.K8sNamespaceUID)
+	assert.Equal(t, pair.K8sNodeName, decoded.K8sNodeName)
 	assert.Equal(t, pair.K8sPodUID, decoded.K8sPodUID)
 	assert.Equal(t, pair.K8sWorkloadName, decoded.K8sWorkloadName)
 	assert.Equal(t, pair.K8sWorkloadKind, decoded.K8sWorkloadKind)

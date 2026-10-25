@@ -148,6 +148,10 @@ type CiliumClusterConfigCapabilities struct {
 	// Supports per-prefix "synced" canaries
 	SyncedCanaries bool `json:"syncedCanaries,omitempty"`
 
+	// Supports Namespace UID in IPIdentityPair K8s metadata. This advertises
+	// wire-format support only; each record still requires a non-empty UID.
+	WorkloadIdentityV1 bool `json:"workloadIdentityV1,omitempty"`
+
 	// The information concerning the given cluster is cached from an external
 	// kvstore (for instance, by kvstoremesh). This implies that keys are stored
 	// under the dedicated "cilium/cache" prefix, and all are cluster-scoped.

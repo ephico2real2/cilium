@@ -44,6 +44,10 @@ type ExtraOptions struct {
 	// ClusterName is the name of each etcd cluster
 	ClusterName string
 
+	// RemotePeerIdentity is a locally configured TLS SPKI-to-ClusterID binding
+	// for one direct ClusterMesh etcd client. Nil preserves ordinary behavior.
+	RemotePeerIdentity *RemotePeerIdentityConfig
+
 	// BootstrapComplete is an optional channel that can be provided to signal
 	// to the client that bootstrap is complete. If provided, the client will
 	// have an initial rate limit equal to etcd.bootstrapQps and be updated to

@@ -1243,13 +1243,20 @@ func (e *Endpoint) runIPIdentitySync(endpointIP netip.Addr) {
 				key := node.GetEndpointEncryptKeyIndex(ln, e.wgConfig.Enabled(), e.ipsecConfig.Enabled())
 				metadata := e.FormatGlobalEndpointID()
 				k8sNamespace := e.K8sNamespace
+				k8sNamespaceUID := e.GetK8sNamespaceUID()
 				k8sPodName := e.K8sPodName
 				k8sPodUID := e.GetK8sPodUID()
 
+				k8sNodeName := ""
 				k8sServiceAccount := ""
 				k8sWorkloadName := ""
 				k8sWorkloadKind := ""
 				if pod := e.GetPod(); pod != nil {
+					// Only export node provenance when the Pod assignment matches
+					// this Cilium agent's configured node identity.
+					if pod.Spec.NodeName == nodeTypes.GetName() {
+						k8sNodeName = pod.Spec.NodeName
+					}
 					k8sServiceAccount = pod.Spec.ServiceAccountName
 					if workloadMeta, workloadTypeMeta, ok := k8sUtils.GetWorkloadMetaFromPod(pod); ok {
 						k8sWorkloadName = workloadMeta.Name
@@ -1268,6 +1275,8 @@ func (e *Endpoint) runIPIdentitySync(endpointIP netip.Addr) {
 					Key:               key,
 					Metadata:          metadata,
 					K8sNamespace:      k8sNamespace,
+					K8sNamespaceUID:   k8sNamespaceUID,
+					K8sNodeName:       k8sNodeName,
 					K8sPodName:        k8sPodName,
 					K8sPodUID:         k8sPodUID,
 					K8sWorkloadName:   k8sWorkloadName,

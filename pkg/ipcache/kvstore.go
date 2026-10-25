@@ -71,6 +71,8 @@ type UpsertParams struct {
 	Key               uint8
 	Metadata          string
 	K8sNamespace      string
+	K8sNamespaceUID   string
+	K8sNodeName       string
 	K8sPodName        string
 	K8sPodUID         string
 	K8sWorkloadName   string
@@ -102,6 +104,8 @@ func (s *IPIdentitySynchronizer) Upsert(ctx context.Context, params *UpsertParam
 		HostIP:            params.HostIP.AsSlice(),
 		Key:               params.Key,
 		K8sNamespace:      params.K8sNamespace,
+		K8sNamespaceUID:   params.K8sNamespaceUID,
+		K8sNodeName:       params.K8sNodeName,
 		K8sPodName:        params.K8sPodName,
 		K8sPodUID:         params.K8sPodUID,
 		K8sWorkloadName:   params.K8sWorkloadName,

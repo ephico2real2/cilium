@@ -116,6 +116,8 @@ func TestIPIdentitySynchronizerK8sMetadata(t *testing.T) {
 		IP:              netip.MustParseAddr("10.0.0.1"),
 		HostIP:          netip.MustParseAddr("10.0.0.2"),
 		K8sNamespace:    "default",
+		K8sNamespaceUID: "namespace-uid-v1",
+		K8sNodeName:     "node-a",
 		K8sPodName:      "echo",
 		K8sPodUID:       "90b3d76d-3c14-42ce-b132-d2aad6789d47",
 		K8sWorkloadName: "echo",
@@ -124,6 +126,8 @@ func TestIPIdentitySynchronizerK8sMetadata(t *testing.T) {
 
 	var pair identity.IPIdentityPair
 	require.NoError(t, json.Unmarshal(client.value, &pair))
+	require.Equal(t, "namespace-uid-v1", pair.K8sNamespaceUID)
+	require.Equal(t, "node-a", pair.K8sNodeName)
 	require.Equal(t, "90b3d76d-3c14-42ce-b132-d2aad6789d47", pair.K8sPodUID)
 	require.Equal(t, "echo", pair.K8sWorkloadName)
 	require.Equal(t, "Deployment", pair.K8sWorkloadKind)

@@ -252,3 +252,17 @@ func TestConfigFiles(t *testing.T) {
 	_, err = ConfigFiles(filepath.Join(baseDir, "non-existing"))
 	require.Error(t, err, "ConfigFiles should have failed for a non-existing directory")
 }
+
+func TestParseCiliumRemotePeerProfile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "remote")
+	writeFile(t, path, "endpoints:\n- https://cluster1.cilium-etcd.cilium.svc:2379\ncilium-remote-peer:\n  cluster-id: 17\n  spki-sha256:\n  - \"0000000000000000000000000000000000000000000000000000000000000000\"\n")
+	cfg, err := ParseCiliumConfig(path)
+	require.NoError(t, err)
+	require.NotNil(t, cfg.RemotePeerIdentity)
+	require.EqualValues(t, 17, cfg.RemotePeerIdentity.ClusterID)
+	require.Len(t, cfg.RemotePeerIdentity.SPKISHA256, 1)
+
+	writeFile(t, path, "endpoints:\n- https://cluster1.cilium-etcd.cilium.svc:2379\ncilium-remote-peer:\n  cluster-id: 0\n  spki-sha256: []\n")
+	_, err = ParseCiliumConfig(path)
+	require.ErrorContains(t, err, "invalid cilium-remote-peer profile")
+}

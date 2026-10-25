@@ -12,6 +12,7 @@ import (
 	"github.com/cilium/cilium/pkg/ztunnel/admission"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/reconciler"
+	"github.com/cilium/cilium/pkg/ztunnel/remote_workload"
 	"github.com/cilium/cilium/pkg/ztunnel/xds"
 	"github.com/cilium/cilium/pkg/ztunnel/zds"
 )
@@ -25,6 +26,7 @@ var Cell = cell.Module(
 
 	// XDS control plane for ztunnel
 	xds.Cell,
+	remote_workload.Cell,
 
 	// ZDS server for ztunnel
 	zds.Cell,

@@ -27,6 +27,22 @@ type fakeBackend struct {
 	statusErrors chan error
 }
 
+type fakePeerBackend struct {
+	kvstore.BackendOperations
+	name   string
+	id     uint32
+	err    error
+	called bool
+}
+
+func (b *fakePeerBackend) BindRemotePeer(name string, id uint32) (kvstore.BackendOperations, error) {
+	b.called, b.name, b.id = true, name, id
+	if b.err != nil {
+		return nil, b.err
+	}
+	return b, nil
+}
+
 func (fb *fakeBackend) StatusCheckErrors() <-chan error {
 	return fb.statusErrors
 }
@@ -224,4 +240,39 @@ func TestRemoteClusterCacheRevokeOnTimeout(t *testing.T) {
 	case <-time.After(timeout):
 		t.Fatal("Cache was not revoked after timeout")
 	}
+}
+
+func TestBindRemotePeerBeforeClusterRegistration(t *testing.T) {
+	profile := &kvstore.RemotePeerIdentityConfig{ClusterID: 17, SPKISHA256: []string{"0000000000000000000000000000000000000000000000000000000000000000"}}
+	config := CiliumEtcdConfig{RemotePeerIdentity: profile}
+	remote := types.CiliumClusterConfig{ID: 17}
+
+	t.Run("no profile preserves ordinary ClusterMesh", func(t *testing.T) {
+		base := &fakeBackend{}
+		got, err := bindRemotePeerIfConfigured(base, CiliumEtcdConfig{}, "cluster-beta", remote)
+		require.NoError(t, err)
+		require.Same(t, base, got)
+	})
+
+	t.Run("configured profile requires backend verifier", func(t *testing.T) {
+		_, err := bindRemotePeerIfConfigured(&fakeBackend{}, config, "cluster-beta", remote)
+		require.ErrorContains(t, err, "unsupported by backend")
+	})
+
+	t.Run("binding is performed before caller can register remote state", func(t *testing.T) {
+		base := &fakePeerBackend{}
+		got, err := bindRemotePeerIfConfigured(base, config, "cluster-beta", remote)
+		require.NoError(t, err)
+		require.Same(t, base, got)
+		require.True(t, base.called)
+		require.Equal(t, "cluster-beta", base.name)
+		require.EqualValues(t, 17, base.id)
+	})
+
+	t.Run("advertised ID mismatch fails before observer registration", func(t *testing.T) {
+		base := &fakePeerBackend{err: errors.New("remote CiliumClusterConfig ID 18 does not match pinned ID 17")}
+		_, err := bindRemotePeerIfConfigured(base, config, "cluster-beta", types.CiliumClusterConfig{ID: 18})
+		require.ErrorContains(t, err, "does not match pinned ID")
+		require.True(t, base.called)
+	})
 }

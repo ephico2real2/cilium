@@ -227,6 +227,15 @@ func (rc *remoteCluster) restartRemoteConnection() {
 					cancel()
 					return err
 				}
+				boundBackend, err := bindRemotePeerIfConfigured(backend, ciliumConfig, rc.name, config)
+				if err != nil {
+					rc.logger.Warn("Remote ClusterMesh identity does not match the locally pinned peer profile",
+						logfields.ClusterName, rc.name,
+						logfields.Error, err,
+					)
+					cancel()
+					return err
+				}
 				if err := rc.onClusterConfigUpdate(ctx, config); err != nil {
 					rc.logger.Warn("Invalid remote cluster configuration", logfields.Error, err)
 					cancel()
@@ -248,7 +257,7 @@ func (rc *remoteCluster) restartRemoteConnection() {
 				// are updated correctly. Instead, blocking until rc.Run terminates
 				// would prevent a previous failure from being cleared out.
 				rc.wg.Go(func() {
-					rc.Run(ctx, backend, config, ready)
+					rc.Run(ctx, boundBackend, config, ready)
 					cancel()
 				})
 
@@ -415,10 +424,33 @@ func (rc *remoteCluster) makeExtraOpts(clusterLock *clusterLock, ciliumConfig Ci
 	return kvstore.ExtraOptions{
 		NoLockQuorumCheck:            true,
 		ClusterName:                  rc.name,
+		RemotePeerIdentity:           ciliumConfig.RemotePeerIdentity,
 		ClusterSizeDependantInterval: rc.clusterSizeDependantInterval,
 		DialOption:                   dialOpts,
 		NoEndpointStatusChecks:       true,
 	}
+}
+
+// bindRemotePeerIfConfigured verifies the remote ClusterMesh ID against the
+// administrator-owned TLS SPKI profile before onClusterConfigUpdate reserves
+// that ID or RemoteCluster.Run registers any observers. An absent profile
+// leaves ordinary ClusterMesh behavior unchanged, but remote workload
+// discovery remains disabled because its observer requires the typed evidence
+// interface.
+func bindRemotePeerIfConfigured(
+	backend kvstore.BackendOperations,
+	localConfig CiliumEtcdConfig,
+	peerName string,
+	remoteConfig types.CiliumClusterConfig,
+) (kvstore.BackendOperations, error) {
+	if localConfig.RemotePeerIdentity == nil {
+		return backend, nil
+	}
+	binder, ok := backend.(kvstore.RemotePeerBackendBinder)
+	if !ok {
+		return nil, fmt.Errorf("configured cilium-remote-peer profile is unsupported by backend")
+	}
+	return binder.BindRemotePeer(peerName, remoteConfig.ID)
 }
 
 func (rc *remoteCluster) connect() {

@@ -318,6 +318,9 @@ type Endpoint struct {
 	// It is used to enforce k8s network policies with port names.
 	k8sPorts atomic.Pointer[types.NamedPortMap]
 
+	// Namespace UID is live metadata and is deliberately resolved again after restore.
+	k8sNamespaceUID atomic.Pointer[string]
+
 	// logLimiter rate limits potentially repeating warning logs
 	logLimiter logging.Limiter
 
@@ -1451,6 +1454,23 @@ func (e *Endpoint) SetK8sMetadata(namedPorts types.NamedPortMap) {
 	e.k8sPorts.Store(&k8sPorts)
 }
 
+// SetK8sNamespaceUID stores the UID from a fresh Namespace lookup and reports
+// whether the live namespace incarnation changed.
+func (e *Endpoint) SetK8sNamespaceUID(uid string) bool {
+	previous := e.GetK8sNamespaceUID()
+	value := uid
+	e.k8sNamespaceUID.Store(&value)
+	return previous != uid
+}
+
+// GetK8sNamespaceUID returns empty until a live Namespace lookup has completed.
+func (e *Endpoint) GetK8sNamespaceUID() string {
+	if p := e.k8sNamespaceUID.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
+
 // GetK8sPorts returns the k8sPorts, which must not be modified by the caller
 func (e *Endpoint) GetK8sPorts() (k8sPorts types.NamedPortMap) {
 	if p := e.k8sPorts.Load(); p != nil && *p != nil {
@@ -1940,6 +1960,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 
 	e.SetPod(pod)
 	e.SetK8sMetadata(k8sMetadata.NamedPorts)
+	namespaceUIDChanged := e.SetK8sNamespaceUID(k8sMetadata.NamespaceUID)
 	e.UpdateNoTrackRules(func() string {
 		value, _ := annotation.Get(pod, annotation.NoTrack, annotation.NoTrackAlias)
 		return value
@@ -1978,6 +1999,17 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 		source = labels.LabelSourceAny
 	}
 	regenTriggered = e.UpdateLabels(ctx, source, controllerBaseLabels, k8sMetadata.InfoLabels, blocking)
+	if namespaceUIDChanged {
+		// Namespace UID is part of the add-only remote IP identity record. A
+		// label-identical namespace replacement may not trigger identity
+		// resolution, so explicitly refresh the exported mapping here.
+		if option.Config.EnableIPv4 {
+			e.runIPIdentitySync(e.IPv4)
+		}
+		if option.Config.EnableIPv6 {
+			e.runIPIdentitySync(e.IPv6)
+		}
+	}
 
 	// If SIP setting changed but UpdateLabels did not trigger regeneration (e.g., during
 	// endpoint restore or when identity labels are unchanged), we must explicitly trigger
@@ -2001,6 +2033,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 // from Kubernetes.
 type K8sMetadata struct {
 	NamedPorts           types.NamedPortMap
+	NamespaceUID         string
 	IdentityLabels       labels.Labels
 	InfoLabels           labels.Labels
 	NamespaceAnnotations map[string]string

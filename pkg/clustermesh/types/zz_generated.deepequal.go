@@ -35,6 +35,9 @@ func (in *CiliumClusterConfigCapabilities) DeepEqual(other *CiliumClusterConfigC
 	if in.SyncedCanaries != other.SyncedCanaries {
 		return false
 	}
+	if in.WorkloadIdentityV1 != other.WorkloadIdentityV1 {
+		return false
+	}
 	if in.Cached != other.Cached {
 		return false
 	}

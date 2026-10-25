@@ -43,6 +43,8 @@ type IPIdentityPair struct {
 	Key               uint8           `json:"Key"`
 	Metadata          string          `json:"Metadata"`
 	K8sNamespace      string          `json:"K8sNamespace,omitempty"`
+	K8sNamespaceUID   string          `json:"K8sNamespaceUID,omitempty"`
+	K8sNodeName       string          `json:"K8sNodeName,omitempty"`
 	K8sPodName        string          `json:"K8sPodName,omitempty"`
 	K8sPodUID         string          `json:"K8sPodUID,omitempty"`
 	K8sWorkloadName   string          `json:"K8sWorkloadName,omitempty"`
