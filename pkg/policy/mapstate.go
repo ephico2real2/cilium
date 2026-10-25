@@ -1674,11 +1674,29 @@ func (mc *MapChanges) detach() {
 	mc.mutex.Unlock()
 }
 
-// consumeMapChanges transfers the incremental changes from MapChanges to the caller,
-// while applying the changes to PolicyMapState.
+// consumeMapChanges preserves the ordinary native consumption path. A nil guard
+// cannot reject, so its guarded delegate has no error to propagate.
 func (mc *MapChanges) consumeMapChanges(p *EndpointPolicy, features policyFeatures) (SelectorSnapshot, ChangeState) {
+	selectors, changes, _ := mc.consumeMapChangesGuarded(p, features, nil)
+	return selectors, changes
+}
+
+// consumeMapChangesGuarded transfers changes only after a restrictive native
+// participant has authorized this queue mutation under the same lock.
+func (mc *MapChanges) consumeMapChangesGuarded(p *EndpointPolicy, features policyFeatures, guard func() error) (SelectorSnapshot, ChangeState, error) {
 	mc.mutex.Lock()
 	defer mc.mutex.Unlock()
+	if guard != nil && (len(mc.synced) != 0 || len(mc.changes) != 0) {
+		if err := guard(); err != nil {
+			return SelectorSnapshot{}, ChangeState{}, err
+		}
+	}
+	selectors, changes := mc.consumeMapChangesLocked(p, features)
+	return selectors, changes, nil
+}
+
+// Caller holds mc.mutex. A rejected guard consumes nothing, including selectors.
+func (mc *MapChanges) consumeMapChangesLocked(p *EndpointPolicy, features policyFeatures) (SelectorSnapshot, ChangeState) {
 	changes := ChangeState{
 		Adds:    make(Keys, len(mc.synced)),
 		Deletes: make(Keys, len(mc.synced)),

@@ -650,9 +650,20 @@ func (l4policy L4DirectionPolicy) forEachRedirectFilter(yield func(*L4Filter, Pe
 // ConsumeMapChanges applies accumulated MapChanges to EndpointPolicy 'p' and returns a summary of
 // changes.  Caller is responsible for calling the returned 'closer' to release resources held for
 // the new revision!
-func (p *EndpointPolicy) ConsumeMapChanges() (closer func(), changes ChangeState) {
+func (p *EndpointPolicy) ConsumeMapChanges() (func(), ChangeState) {
+	closer, changes, _ := p.ConsumeMapChangesGuarded(nil)
+	return closer, changes
+}
+
+// ConsumeMapChangesGuarded invokes guard under the real pending-change lock,
+// BEFORE changing desired state or dropping selector history. The guard must
+// not wait, perform I/O, or reenter policy. Nil preserves ordinary Envoy behavior.
+func (p *EndpointPolicy) ConsumeMapChangesGuarded(guard func() error) (closer func(), changes ChangeState, err error) {
 	features := p.SelectorPolicy.L4Policy.Ingress.features | p.SelectorPolicy.L4Policy.Egress.features
-	selectors, changes := p.policyMapChanges.consumeMapChanges(p, features)
+	selectors, changes, err := p.policyMapChanges.consumeMapChangesGuarded(p, features, guard)
+	if err != nil {
+		return nil, ChangeState{}, err
+	}
 
 	// Even if there were no incremental map changes, follow-on processing may
 	// still need a usable selector snapshot. Reopen one on demand if the
@@ -689,7 +700,7 @@ func (p *EndpointPolicy) ConsumeMapChanges() (closer func(), changes ChangeState
 		)
 	}
 
-	return closer, changes
+	return closer, changes, nil
 }
 
 // NewEndpointPolicy returns an empty EndpointPolicy stub.

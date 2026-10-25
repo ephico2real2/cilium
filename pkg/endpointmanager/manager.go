@@ -211,6 +211,7 @@ func (mgr *endpointManager) UpdatePolicyMaps(ctx context.Context) error {
 
 	var guard lock.Mutex
 	var revertibles revert.Revertibles
+	var applyErrors []error
 	proxyWaitGroup := completion.NewWaitGroup(ctx)
 
 	eps := mgr.GetEndpoints()
@@ -221,6 +222,9 @@ func (mgr *endpointManager) UpdatePolicyMaps(ctx context.Context) error {
 			err, revertible := ep.ApplyPolicyMapChanges(proxyWaitGroup)
 			guard.Lock()
 			revertibles.Add(revertible)
+			if err != nil && !errors.Is(err, endpoint.ErrNotAlive) {
+				applyErrors = append(applyErrors, err)
+			}
 			guard.Unlock()
 
 			if err != nil && !errors.Is(err, endpoint.ErrNotAlive) {
@@ -254,7 +258,7 @@ func (mgr *endpointManager) UpdatePolicyMaps(ctx context.Context) error {
 	// This should not block the main flow for Endpoint.
 	mgr.policyUpdateCallback(&sync.WaitGroup{}, nil, true)
 
-	return err
+	return errors.Join(append(applyErrors, err)...)
 }
 
 // InitMetrics hooks the endpointManager into the metrics subsystem. This can

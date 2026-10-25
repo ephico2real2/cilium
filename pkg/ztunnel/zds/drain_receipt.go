@@ -116,8 +116,25 @@ func (zc *ztunnelConn) sendDrain(req *pb.DrainWorkload) error {
 }
 
 func (s *Server) DrainDeletedEndpointContext(ctx context.Context, ep *endpoint.Endpoint, ref membership.Reference, generation uint64) (*DrainReceipt, error) {
-	if !s.strictDeletedEndpointCleanup || ep == nil || ep.IsAlive() || generation == 0 {
-		return nil, fmt.Errorf("native drain requires strict disconnected endpoint")
+	if ep == nil || ep.IsAlive() {
+		return nil, fmt.Errorf("native deletion drain requires disconnected endpoint")
+	}
+	return s.drainOriginalEndpointContext(ctx, ep, ref, generation)
+}
+
+// DrainLiveEndpointForPolicyContext is terminal for the original ADD incarnation.
+// It stops actual listeners and flows; it never removes native capture rules.
+// Re-enrollment of the same incarnation remains rejected by native DrainOwners.
+func (s *Server) DrainLiveEndpointForPolicyContext(ctx context.Context, ep *endpoint.Endpoint, ref membership.Reference, generation uint64) (*DrainReceipt, error) {
+	if ep == nil || !ep.IsAlive() {
+		return nil, fmt.Errorf("native policy drain requires live endpoint")
+	}
+	return s.drainOriginalEndpointContext(ctx, ep, ref, generation)
+}
+
+func (s *Server) drainOriginalEndpointContext(ctx context.Context, ep *endpoint.Endpoint, ref membership.Reference, generation uint64) (*DrainReceipt, error) {
+	if !s.strictDeletedEndpointCleanup || ep == nil || generation == 0 {
+		return nil, fmt.Errorf("native drain requires strict original endpoint ownership")
 	}
 	key, err := incarnation(ep)
 	if err != nil {
@@ -164,6 +181,9 @@ func (s *Server) DrainDeletedEndpointContext(ctx context.Context, ep *endpoint.E
 		defer s.endpointCacheMutex.Unlock()
 		if proto.Equal(s.drainBindings[key], b) {
 			delete(s.drainBindings, key)
+			if proto.Equal(s.policyADDAttempts[key], b) {
+				delete(s.policyADDAttempts, key)
+			}
 		}
 	}}, nil
 }

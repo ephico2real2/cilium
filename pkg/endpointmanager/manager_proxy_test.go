@@ -381,7 +381,7 @@ func TestUpdatePolicyMapsDoesNotDeferCallbacksForSynchronousApplyFailure(t *test
 
 	proxy.completeUpdate(t, ep2.GetID(), nil)
 
-	require.NoError(t, <-errCh)
+	require.ErrorContains(t, <-errCh, "sync proxy error")
 	require.Equal(t, 0, proxy.revertCount(ep1.GetID()))
 	require.Equal(t, 0, proxy.finalizeCount(ep1.GetID()))
 	require.Equal(t, 0, proxy.revertCount(ep2.GetID()))
@@ -436,4 +436,23 @@ func TestIncrementalProxyPolicyUpdateNoL7Rule(t *testing.T) {
 		require.NoError(t, <-errCh)
 		require.Equal(t, 1, proxy.updateCount())
 	})
+}
+
+func TestUpdatePolicyMapsReportsAllSynchronousFailuresWithoutACKWait(t *testing.T) {
+	logger := hivetest.Logger(t)
+	mgr := New(logger, nil, &dummyEpSyncher{}, nil, nil, nil, defaultEndpointManagerConfig)
+	repo, idmgr, fetcher := newUpdatePolicyMapsTestRepo(t, true)
+	proxy := newRecordingEndpointProxy()
+	ep1 := newUpdatePolicyMapsTestEndpoint(t, mgr, repo, idmgr, fetcher, proxy, 501, netip.MustParseAddr("10.0.4.1"))
+	ep2 := newUpdatePolicyMapsTestEndpoint(t, mgr, repo, idmgr, fetcher, proxy, 502, netip.MustParseAddr("10.0.4.2"))
+	first, second := errors.New("first native apply blocked"), errors.New("second native apply blocked")
+	proxy.expectUpdates(2)
+	proxy.setSynchronousError(ep1.GetID(), first)
+	proxy.setSynchronousError(ep2.GetID(), second)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	err := mgr.UpdatePolicyMaps(ctx)
+	require.ErrorIs(t, err, first)
+	require.ErrorIs(t, err, second)
+	require.Zero(t, proxy.totalCallbackCount())
 }

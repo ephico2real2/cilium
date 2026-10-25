@@ -408,6 +408,12 @@ func (e *Endpoint) setDesiredPolicy(datapathRegenCtxt *datapathRegenerationConte
 		return fmt.Errorf("endpoint %d SecurityIdentity revision changed during policy regeneration", e.ID)
 	}
 
+	if res.endpointPolicy != e.desiredPolicy || res.policyRevision != e.desiredPolicyRevision {
+		if err := e.requireZtunnelPolicyDrainLocked(); err != nil {
+			return err
+		}
+	}
+
 	oldDesiredPolicyRevision := e.desiredPolicyRevision
 	// Set the revision of this endpoint to the current revision of the policy
 	// repository.
@@ -1071,6 +1077,11 @@ func (e *Endpoint) ComputeInitialPolicy(regenContext *regenerationContext) (erro
 		}
 		// Do not error out so that the policy regeneration is tried again.
 		return nil, func() {}
+	}
+
+	if err := e.prepareZtunnelPolicyChange(regenContext.parentContext, datapathRegenCtxt.policyResult, false); err != nil {
+		datapathRegenCtxt.policyResult.release(e.getLogger())
+		return err, func() {}
 	}
 
 	err = e.lockAlive()

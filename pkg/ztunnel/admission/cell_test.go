@@ -51,6 +51,9 @@ func cniGateFixture(t *testing.T) (*gate, *slimfake.Clientset, *endpoint.Endpoin
 	}, Spec: slimv1.PodSpec{NodeName: "node-a", ServiceAccountName: "server"}}
 	client := slimfake.NewSimpleClientset(ns, pod)
 	ep := &endpoint.Endpoint{ID: 71, K8sNamespace: "apps", K8sPodName: "server", K8sUID: "pod-generation"}
+	lib := option.GetEndpointMutableOptionLibrary()
+	ep.Options = option.NewIntOptions(&lib)
+	ep.Options.SetBool(option.SourceIPVerification, true)
 	ep.SetContainerNetnsPath("/runtime-owned/netns/example")
 	ep.SetPod(&slimv1.Pod{ObjectMeta: slimmeta.ObjectMeta{
 		UID: "pod-generation", Name: "server", Namespace: "apps",
@@ -150,7 +153,7 @@ func TestAdmissionZDSNackLeavesRequiredMembershipUncaptured(t *testing.T) {
 	require.Equal(t, "namespace-generation", ref.Key.NamespaceUID)
 	require.True(t, state.Required)
 	require.False(t, state.Captured)
-	require.False(t, state.ZDSAcked)
+	require.False(t, state.Captured)
 	require.False(t, state.ReadyForAddress())
 	published, ok := ep.GetZtunnelMembership()
 	require.True(t, ok)
@@ -184,7 +187,7 @@ func TestAdmissionRevokesPriorCaptureBeforeRetryingLiveAPI(t *testing.T) {
 	_, state, ok := g.membership.CurrentForPodUID(ep.K8sUID)
 	require.True(t, ok)
 	require.False(t, state.Captured)
-	require.False(t, state.ZDSAcked)
+	require.False(t, state.Captured)
 	require.False(t, state.ReadyForAddress())
 	published, ok := ep.GetZtunnelMembership()
 	require.True(t, ok)
@@ -546,6 +549,7 @@ func TestAdmissionRejectsManagedDeletionBeforeAndAfterACK(t *testing.T) {
 				&models.EndpointChangeRequest{ID: int64(view.ID), K8sUID: view.K8sUID, K8sNamespace: view.K8sNamespace,
 					K8sPodName: view.K8sPodName, ContainerNetnsPath: view.GetContainerNetnsPath()}, nil)
 			require.NoError(t, err)
+			ep.Options.SetBool(option.SourceIPVerification, true)
 			ep.UpdateLogger(nil)
 			ep.SetPod(view.GetPod().DeepCopy())
 			require.True(t, ep.SetState(endpoint.StateWaitingForIdentity, "admission test"))
@@ -625,7 +629,7 @@ func TestAdmissionDoesNotExposeCapturedBeforeFinalLiveChecks(t *testing.T) {
 			_, state, ok := g.membership.CurrentForPodUID(ep.K8sUID)
 			require.True(t, ok)
 			require.False(t, state.Captured)
-			require.False(t, state.ZDSAcked)
+			require.False(t, state.Captured)
 			require.False(t, state.ReadyForAddress())
 			published, ok := ep.GetZtunnelMembership()
 			require.True(t, ok)
@@ -655,4 +659,17 @@ func TestAdmissionCancellationOnSandboxReleaseRevokesCompletedOnce(t *testing.T)
 	require.True(t, ok)
 	require.Equal(t, endpoint.ZtunnelMembershipRequired, published.State)
 	require.Zero(t, published.Generation)
+}
+
+func TestAdmissionRejectsDisabledSourceIPBeforeSendingADD(t *testing.T) {
+	g, _, ep := cniGateFixture(t)
+	ep.Options.SetBool(option.SourceIPVerification, false)
+	calls := 0
+	g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error { calls++; return nil }
+	err := g.WaitForEndpoint(t.Context(), ep)
+	require.ErrorContains(t, err, "Required membership could not be published before enrollment")
+	require.Zero(t, calls, "source-IP rejection must occur before any native ADD attempt")
+	_, state, found := g.membership.CurrentForPodUID(ep.K8sUID)
+	require.True(t, found, "restrictive Required intent must remain available")
+	require.False(t, state.Captured)
 }

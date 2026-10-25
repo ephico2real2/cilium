@@ -71,23 +71,27 @@ type params struct {
 
 type out struct {
 	cell.Out
-	Gate        endpointmanager.EndpointCreationGate `group:"endpoint-creation-gates"`
-	Revalidator membership.EndpointRevalidator       `group:"ztunnel-endpoint-revalidators"`
+	Gate             endpointmanager.EndpointCreationGate `group:"endpoint-creation-gates"`
+	Revalidator      membership.EndpointRevalidator       `group:"ztunnel-endpoint-revalidators"`
+	PolicyTransition endpoint.ZtunnelPolicyTransitioner   `group:"ztunnel-policy-transitions"`
 }
 
 type gate struct {
-	recorder       requiredRecorder
-	enabled        bool
-	core           slimcore.CoreV1Interface
-	enroll         func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error
-	validateNetns  func(string) error
-	nodeName       func() string
-	agentNamespace string
-	logger         *slog.Logger
-	membership     *membership.Registry
-	budget         time.Duration
-	attemptTimeout time.Duration
-	initialBackoff time.Duration
+	serverDisabledForExecution bool
+	policyOwnership            zds.PolicyOwnershipInspector
+	policyDrainer              zds.LivePolicyDrainCleaner
+	recorder                   requiredRecorder
+	enabled                    bool
+	core                       slimcore.CoreV1Interface
+	enroll                     func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error
+	validateNetns              func(string) error
+	nodeName                   func() string
+	agentNamespace             string
+	logger                     *slog.Logger
+	membership                 *membership.Registry
+	budget                     time.Duration
+	attemptTimeout             time.Duration
+	initialBackoff             time.Duration
 }
 
 type permanentError struct{ err error }
@@ -105,6 +109,8 @@ func newGate(p params) (out, error) {
 		validateNetns: validateNetworkNamespace,
 		membership:    p.Registry,
 	}
+	g.serverDisabledForExecution = !p.Config.EnableZTunnel && p.Server == nil
+	g.policyOwnership = p.Server // Also inspect retained ADDs when configuration is disabled.
 	if p.AgentConfig != nil {
 		g.agentNamespace = p.AgentConfig.K8sNamespace
 	}
@@ -114,6 +120,7 @@ func newGate(p params) (out, error) {
 		}
 		g.core = p.Clientset.Slim().CoreV1()
 		g.enroll = p.Server.EnrollEndpointForOwnerContext
+		g.policyDrainer = p.Server
 		g.recorder = newRequiredRecorder(p.AgentConfig.StateDir, p.ClusterInfo.ID, g.nodeName)
 		p.Lifecycle.Append(cell.Hook{OnStop: func(cell.HookContext) error { return g.recorder.Close() }})
 		if p.Config.EnableRemoteWorkloadMembership {
@@ -130,7 +137,7 @@ func newGate(p params) (out, error) {
 			}))
 		}
 	}
-	return out{Gate: g, Revalidator: g}, nil
+	return out{Gate: g, Revalidator: g, PolicyTransition: g}, nil
 }
 
 // ShouldRevalidate selects namespace-enrolled endpoints and endpoints still
@@ -275,6 +282,7 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 		return fmt.Errorf("reading durable Required intent: %w", err)
 	}
 	if durableRequired {
+		ep.ObserveZtunnelRequired()
 		if *pinnedUID != "" && string(*pinnedUID) != durableUID {
 			return permanent("durable namespace identity changed during admission")
 		}
@@ -358,6 +366,7 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 		}
 		defer release()
 		finalSandboxCheck = recheck
+		ep.ObserveZtunnelRequired()
 		ref, err := g.membership.Require(string(*pinnedUID), ep.K8sUID, ep.GetID16(), path)
 		if err != nil {
 			return permanent("creating exact required membership: %w", err)
@@ -367,13 +376,15 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 			return permanent("starting a fresh ZDS membership generation failed")
 		}
 		*token = membershipAttempt{ref, generation}
-		g.publishMembership(ep, ref, pod.Spec.NodeName, pod.Spec.ServiceAccountName)
 		defer func() {
 			if retErr != nil {
 				g.membership.InvalidateCaptureGeneration(ref, generation)
 				g.publishMembership(ep, ref, pod.Spec.NodeName, pod.Spec.ServiceAccountName)
 			}
 		}()
+		if !g.publishMembership(ep, ref, pod.Spec.NodeName, pod.Spec.ServiceAccountName) {
+			return permanent("Required membership could not be published before enrollment")
+		}
 		if err := ctx.Err(); err != nil {
 			return err
 		}

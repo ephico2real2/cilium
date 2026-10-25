@@ -106,6 +106,10 @@ func (zc *ztunnelConn) sendAndWaitForAck(req *pb.WorkloadRequest, netnsPath stri
 }
 
 func (zc *ztunnelConn) sendAndWaitForAckWithTimeout(req *pb.WorkloadRequest, netnsPath string, timeout time.Duration) error {
+	return zc.sendAndWaitForAckBeforeWrite(req, netnsPath, timeout, nil)
+}
+
+func (zc *ztunnelConn) sendAndWaitForAckBeforeWrite(req *pb.WorkloadRequest, netnsPath string, timeout time.Duration, beforeWrite func() error) error {
 	if err := zc.conn.SetDeadline(time.Now().Add(timeout)); err != nil {
 		return fmt.Errorf("setting ZDS acknowledgment deadline: %w", err)
 	}
@@ -142,6 +146,11 @@ func (zc *ztunnelConn) sendAndWaitForAckWithTimeout(req *pb.WorkloadRequest, net
 		}
 	}
 
+	if beforeWrite != nil {
+		if err := beforeWrite(); err != nil {
+			return err
+		}
+	}
 	if err := zc.sendMsg(req, ns); err != nil {
 		return err
 	}
@@ -222,6 +231,7 @@ type Server struct {
 	endpointCacheMutex           lock.Mutex
 	strictDeletedEndpointCleanup bool
 	drainBindings                map[endpointIncarnation]*pb.WorkloadBinding
+	policyADDAttempts            map[endpointIncarnation]*pb.WorkloadBinding
 	endpointOperationGate        chan struct{}
 
 	updates               chan zdsUpdate // updates to send to ztunnel
@@ -454,7 +464,7 @@ func (s *Server) processUpdate(ctx context.Context, zc *ztunnelConn, update zdsU
 	if drain := update.request.GetDrain(); drain != nil {
 		err = zc.sendDrain(drain)
 	} else {
-		err = zc.sendAndWaitForAck(update.request, update.netnsPath)
+		err = zc.sendAndWaitForAckBeforeWrite(update.request, update.netnsPath, defaultZDSAckTimeout, func() error { return s.recordPolicyADDAttempt(update.request, update.netnsPath) })
 	}
 	// Stop (or join) cancellation before publishing success: the caller
 	// normally cancels its context as soon as it receives the result.
@@ -500,6 +510,7 @@ func (s *Server) EnrollEndpointForOwnerContext(ctx context.Context, owner, ep *e
 			return fmt.Errorf("enrollment wire metadata does not match managed endpoint incarnation")
 		}
 	}
+	owner.ObserveZtunnelRequired()
 	started := time.Now()
 	if err := ctx.Err(); err != nil {
 		return err

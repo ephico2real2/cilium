@@ -23,6 +23,7 @@ import (
 	slimv1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	slimmeta "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/netns"
+	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
 	"github.com/cilium/cilium/pkg/testutils"
 	testpolicy "github.com/cilium/cilium/pkg/testutils/policy"
@@ -80,6 +81,7 @@ func recorderEndpoint(t *testing.T, pod *slimv1.Pod, sandbox recorderNetnsFixtur
 	repo := policy.NewPolicyRepository(logger, cmtypes.DefaultClusterInfo, nil, nil, nil, nil, testpolicy.NewPolicyMetricsNoop())
 	ep, err := endpoint.NewEndpointFromChangeModel(endpoint.EndpointParams{Logger: logger, PolicyRepo: repo}, nil, nil, &models.EndpointChangeRequest{ID: 71, K8sUID: string(pod.UID), K8sNamespace: pod.Namespace, K8sPodName: pod.Name, ContainerID: container, ContainerNetnsPath: sandbox.path, NetnsCookie: strconv.FormatUint(sandbox.cookie, 10)}, nil)
 	require.NoError(t, err)
+	ep.Options.SetBool(option.SourceIPVerification, true)
 	ep.UpdateLogger(nil)
 	ep.SetPod(pod.DeepCopy())
 	require.True(t, ep.SetState(endpoint.StateWaitingForIdentity, "recorder test"))

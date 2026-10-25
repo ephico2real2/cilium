@@ -31,24 +31,25 @@ import (
 type EndpointParams struct {
 	cell.In
 
-	Logger              *slog.Logger
-	EPBuildQueue        EndpointBuildQueue
-	Loader              loader.Loader
-	Orchestrator        endpoint.Orchestrator
-	CompilationLock     loader.CompilationLock
-	BandwidthManager    bandwidth.Manager
-	IPTablesManager     iptables.Manager
-	IdentityManager     identitymanager.IDManager
-	MonitorAgent        monitoragent.Agent
-	PolicyMapFactory    policymap.Factory
-	PolicyRepo          policy.PolicyRepository
-	PolicyFetcher       compute.PolicyRecomputer
-	Allocator           cache.IdentityAllocator
-	CTMapGC             ctmap.GCRunner
-	KVStoreSynchronizer *ipcache.IPIdentitySynchronizer
-	WgConfig            wgTypes.Config
-	IPSecConfig         ipsec.Config
-	LxcMap              lxcmap.Map
-	LocalNodeStore      node.NodeGetter
-	IPCache             IPCache
+	ZtunnelPolicyTransitions []ZtunnelPolicyTransitioner `group:"ztunnel-policy-transitions"`
+	Logger                   *slog.Logger
+	EPBuildQueue             EndpointBuildQueue
+	Loader                   loader.Loader
+	Orchestrator             endpoint.Orchestrator
+	CompilationLock          loader.CompilationLock
+	BandwidthManager         bandwidth.Manager
+	IPTablesManager          iptables.Manager
+	IdentityManager          identitymanager.IDManager
+	MonitorAgent             monitoragent.Agent
+	PolicyMapFactory         policymap.Factory
+	PolicyRepo               policy.PolicyRepository
+	PolicyFetcher            compute.PolicyRecomputer
+	Allocator                cache.IdentityAllocator
+	CTMapGC                  ctmap.GCRunner
+	KVStoreSynchronizer      *ipcache.IPIdentitySynchronizer
+	WgConfig                 wgTypes.Config
+	IPSecConfig              ipsec.Config
+	LxcMap                   lxcmap.Map
+	LocalNodeStore           node.NodeGetter
+	IPCache                  IPCache
 }
