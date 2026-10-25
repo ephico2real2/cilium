@@ -22,6 +22,7 @@ var Cell = cell.Module(
 	"ZTunnel SPIRE Enrollment",
 
 	cell.Config(config.DefaultConfig),
+	cell.Invoke(func(cfg config.Config) error { return cfg.Validate() }),
 	spire.Cell,
 	metrics.Metric(ztunnelReconciler.NewMetrics),
 	cell.Provide(
@@ -50,7 +51,7 @@ func registerEnrollmentReconciler(
 	// The reconciler manages SPIRE entries for enrolled namespaces, so it only
 	// runs when ztunnel is configured to use an external SPIRE CA. With the
 	// internal CA there is no SPIRE server to enroll against.
-	if !cfg.UseSpireCA() {
+	if !cfg.UseLegacySpireEnrollment() {
 		return nil
 	}
 	_, err := reconciler.Register(

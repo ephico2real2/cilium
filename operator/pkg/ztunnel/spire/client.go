@@ -115,7 +115,7 @@ type Client struct {
 
 // NewClient creates a new SPIRE client for ztunnel namespace enrollment.
 func NewClient(params params) *Client {
-	if !params.ZtunnelConfig.UseSpireCA() {
+	if !params.ZtunnelConfig.UseLegacySpireEnrollment() {
 		return nil
 	}
 

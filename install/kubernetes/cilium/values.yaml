@@ -1207,6 +1207,10 @@ encryption:
       # then manages SPIRE entries for enrolled namespaces). "internal" uses
       # Cilium's built-in CA and skips the SPIRE enrollment reconciler.
       type: internal
+      # -- Disable broad namespace/operator SPIRE management when a separately
+      # qualified exact server-local registrar owns registration. Does not
+      # enable the combined ClusterMesh/ztunnel path or prove readiness.
+      externalExactRegistrar: false
     # -- Experimental authenticated-only inbound TCP policy for enrolled workloads.
     # This does not establish fail-closed startup or platform probe compatibility.
     requireMtls: false

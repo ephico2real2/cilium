@@ -2000,6 +2000,9 @@
             },
             "ca": {
               "properties": {
+                "externalExactRegistrar": {
+                  "type": "boolean"
+                },
                 "type": {
                   "enum": [
                     "spire",

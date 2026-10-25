@@ -29,8 +29,9 @@ var DefaultConfig = Config{
 }
 
 type Config struct {
-	EnableZTunnel bool
-	CAType        CAType `mapstructure:"ztunnel-ca-type"`
+	EnableZTunnel          bool
+	ExternalExactRegistrar bool   `mapstructure:"ztunnel-spire-external-exact-registrar"`
+	CAType                 CAType `mapstructure:"ztunnel-ca-type"`
 }
 
 // UseSpireCA reports whether ztunnel is enabled and configured to use an
@@ -39,7 +40,22 @@ func (c Config) UseSpireCA() bool {
 	return c.EnableZTunnel && c.CAType == CATypeSpire
 }
 
+// Validate rejects a registrar selection without the corresponding external CA.
+func (c Config) Validate() error {
+	if c.ExternalExactRegistrar && !c.UseSpireCA() {
+		return fmt.Errorf("external exact SPIRE registrar requires enabled ztunnel with SPIRE CA")
+	}
+	return nil
+}
+
+// UseLegacySpireEnrollment is false when exact server-local registration owns
+// entries. Cilium then receives no SPIRE management identity or client.
+func (c Config) UseLegacySpireEnrollment() bool {
+	return c.UseSpireCA() && !c.ExternalExactRegistrar
+}
+
 func (c Config) Flags(flags *pflag.FlagSet) {
+	flags.Bool("ztunnel-spire-external-exact-registrar", false, "Use an independently qualified exact server-local registrar; disable operator SPIRE management and broad namespace registration")
 	flags.Bool("enable-ztunnel", false, "Use zTunnel as Cilium's encryption infrastructure")
 	flags.String("ztunnel-ca-type", string(CATypeInternal),
 		"CA backend used by ztunnel: 'spire' (external SPIRE server) or 'internal' (Cilium-managed CA)")

@@ -43,7 +43,7 @@ do
     spire_server entry create ${SOCKET_FLAG} -spiffeID $CILIUM_OPERATOR_SPIFFE_ID -parentID $AGENT_SPIFFE_ID $CILIUM_OPERATOR_SELECTORS
   fi
 
-  {{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") (eq .Values.encryption.ztunnel.ca.type "spire") }}
+  {{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") (eq .Values.encryption.ztunnel.ca.type "spire") (not .Values.encryption.ztunnel.ca.externalExactRegistrar) }}
   # The operator parents workload entries under this attested node alias.
   ZTUNNEL_NODE_ID="spiffe://{{ .Values.authentication.mutual.spire.trustDomain }}/ztunnel"
   if spire_server entry show ${SOCKET_FLAG} -spiffeID $ZTUNNEL_NODE_ID $AGENT_SELECTORS | grep -q "Found 0 entries" &> /dev/null; then
