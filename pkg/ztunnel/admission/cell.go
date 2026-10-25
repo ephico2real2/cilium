@@ -33,6 +33,7 @@ import (
 
 const (
 	logStage              = "stage"
+	stageCNIAdmission     = "cni-startup-admission"
 	logDeadline           = "deadline"
 	logNamespaceUID       = "namespaceUID"
 	logEnrollmentRequired = "enrollmentRequired"
@@ -94,6 +95,7 @@ type gate struct {
 	initialBackoff             time.Duration
 	membershipRetryMin         time.Duration
 	membershipRetryMax         time.Duration
+	admissions                 admissionSlots
 }
 
 type permanentError struct{ err error }
@@ -186,8 +188,77 @@ func (g *gate) RestrictRestoredEndpoint(ctx context.Context, ep *endpoint.Endpoi
 	return true, nil
 }
 
-func (g *gate) RevalidateEndpoint(ctx context.Context, ep *endpoint.Endpoint) error {
-	return g.WaitForEndpoint(ctx, ep)
+// EnsureEndpoint makes sure ep is admitted, for a caller that is not creating
+// it (restored re-admission, namespace enrollment, source verification).
+// Holding the endpoint's admission slot, it verifies the current evidence and
+// runs full admission only when that evidence is no longer current, so a
+// caller that waited for another admission of the same endpoint never repeats
+// or revokes it.
+func (g *gate) EnsureEndpoint(parent context.Context, ep *endpoint.Endpoint, stage string) error {
+	if !g.enabled {
+		return nil
+	}
+	if ep == nil {
+		return permanent("endpoint admission requires an endpoint")
+	}
+	ctx, cancel := context.WithTimeout(parent, g.budget)
+	defer cancel()
+	release, err := g.acquireAdmission(ctx, ep, stage)
+	if err != nil {
+		return err
+	}
+	defer release()
+	verifyErr := g.VerifyEndpoint(ctx, ep)
+	if verifyErr == nil {
+		return nil
+	}
+	g.logger.Info("Endpoint admission evidence is not current; re-admitting",
+		logStage, stage,
+		logfields.EndpointID, ep.GetID16(),
+		logfields.K8sUID, ep.GetK8sPodUID(),
+		logfields.Error, verifyErr)
+	return g.admitLocked(ctx, ep, stage)
+}
+
+// WaitForEndpoint is the CNI creation gate: it always runs full admission,
+// holding the endpoint's admission slot.
+func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) error {
+	if !g.enabled {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(parent, g.budget)
+	defer cancel()
+	release, err := g.acquireAdmission(ctx, ep, stageCNIAdmission)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return g.admitLocked(ctx, ep, stageCNIAdmission)
+}
+
+// acquireAdmission waits within ctx for ep's admission slot. It runs before
+// admission reads the endpoint's capture generation, because a failed
+// admission revokes that generation: a caller that gives up while waiting
+// must not revoke the generation of the admission holding the slot. Admission
+// rejects an endpoint without a Pod UID before any side effect, so that
+// endpoint needs no slot.
+func (g *gate) acquireAdmission(ctx context.Context, ep *endpoint.Endpoint, stage string) (func(), error) {
+	if ep == nil || ep.GetK8sPodUID() == "" {
+		return func() {}, nil
+	}
+	started := time.Now()
+	release, contended, err := g.admissions.acquire(ctx, ep.GetK8sPodUID())
+	attrs := []any{logStage, stage, logfields.EndpointID, ep.GetID16(), logfields.K8sUID, ep.GetK8sPodUID(),
+		logfields.ElapsedDuration, time.Since(started)}
+	if err != nil {
+		g.logger.Error("Endpoint admission did not start: another admission of the endpoint is still running",
+			append(attrs, logfields.Error, err)...)
+		return nil, fmt.Errorf("waiting for an admission of the same endpoint in progress: %w", err)
+	}
+	if contended {
+		g.logger.Info("Endpoint admission waited for another admission of the same endpoint", attrs...)
+	}
+	return release, nil
 }
 
 type membershipAttempt struct {
@@ -195,12 +266,9 @@ type membershipAttempt struct {
 	generation uint64
 }
 
-func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (resultErr error) {
-	if !g.enabled {
-		return nil
-	}
-	ctx, cancel := context.WithTimeout(parent, g.budget)
-	defer cancel()
+// admitLocked runs full admission. The caller holds ep's admission slot and
+// ctx carries the admission budget.
+func (g *gate) admitLocked(ctx context.Context, ep *endpoint.Endpoint, stage string) (resultErr error) {
 	started := time.Now()
 	deadline, _ := ctx.Deadline()
 	var namespaceUID types.UID
@@ -224,7 +292,7 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 		if resultErr != nil && ep != nil && g.membership != nil && g.membership.InvalidateCaptureGeneration(token.ref, token.generation) {
 			g.publishMembership(ep, token.ref, "", "")
 		}
-		attrs := []any{logStage, "cni-startup-admission", logfields.Attempt, attempt,
+		attrs := []any{logStage, stage, logfields.Attempt, attempt,
 			logfields.ElapsedDuration, time.Since(started), logDeadline, deadline,
 			logfields.EndpointID, endpointID, logfields.K8sUID, uid,
 			logfields.Pod, name, logfields.K8sNamespace, namespace,
@@ -274,7 +342,7 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 			return errors.Join(ctx.Err(), err)
 		}
 		g.logger.Warn("Endpoint startup admission retry",
-			logStage, "cni-startup-admission",
+			logStage, stage,
 			logfields.Attempt, attempt,
 			logfields.ElapsedDuration, time.Since(started),
 			logfields.Backoff, backoff,

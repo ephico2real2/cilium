@@ -8,7 +8,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/cilium/hive/hivetest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/cilium/pkg/endpoint"
@@ -62,46 +61,34 @@ func TestADSEvidenceDoesNotAdvancePublicationOrSourceRevision(t *testing.T) {
 	require.ErrorIs(t, r.PublishIfSourceSnapshotCurrent(snapshot, func() error { return nil }), ErrSourcePublicationStale)
 }
 
-type verifyFirstRevalidator struct {
-	verifyErr   error
-	verified    int
-	readmitted  int
-	readmitErr  error
-	restricted  int
-	shouldCheck int
+type ensuringRevalidator struct {
+	stages    []string
+	ensureErr error
 }
 
-func (r *verifyFirstRevalidator) ShouldRevalidate(context.Context, *endpoint.Endpoint, bool) (bool, error) {
-	r.shouldCheck++
+func (r *ensuringRevalidator) ShouldRevalidate(context.Context, *endpoint.Endpoint, bool) (bool, error) {
 	return true, nil
 }
-func (r *verifyFirstRevalidator) RestrictRestoredEndpoint(context.Context, *endpoint.Endpoint, bool) (bool, error) {
-	r.restricted++
+func (r *ensuringRevalidator) RestrictRestoredEndpoint(context.Context, *endpoint.Endpoint, bool) (bool, error) {
 	return true, nil
 }
-func (r *verifyFirstRevalidator) VerifyEndpoint(context.Context, *endpoint.Endpoint) error {
-	r.verified++
-	return r.verifyErr
-}
-func (r *verifyFirstRevalidator) RevalidateEndpoint(context.Context, *endpoint.Endpoint) error {
-	r.readmitted++
-	return r.readmitErr
+func (r *ensuringRevalidator) EnsureEndpoint(_ context.Context, _ *endpoint.Endpoint, stage string) error {
+	r.stages = append(r.stages, stage)
+	return r.ensureErr
 }
 
-// A lease refresh must not change a capture that still verifies; it re-admits
-// only when verification fails, and reports the re-admission's own result.
-func TestSourceRefreshVerifiesBeforeReadmitting(t *testing.T) {
+// A lease refresh asks every revalidator to ensure the endpoint is admitted,
+// which re-admits only stale evidence (the gate's EnsureEndpoint tests cover
+// that), and reports the first failure. No revalidator is never success.
+func TestSourceRefreshEnsuresAdmissionThroughEveryRevalidator(t *testing.T) {
 	ep := &endpoint.Endpoint{ID: 9}
-	current := &verifyFirstRevalidator{}
-	require.NoError(t, verifyOrReadmit(t.Context(), ep, []EndpointRevalidator{current}, hivetest.Logger(t)))
-	require.Equal(t, 1, current.verified)
-	require.Zero(t, current.readmitted, "a current capture is never re-admitted by a refresh")
+	first, second := &ensuringRevalidator{}, &ensuringRevalidator{}
+	require.NoError(t, ensureAdmitted(t.Context(), ep, []EndpointRevalidator{first, second}))
+	require.Equal(t, []string{StageSourceVerification}, first.stages)
+	require.Equal(t, []string{StageSourceVerification}, second.stages)
 
-	stale := &verifyFirstRevalidator{verifyErr: errors.New("retained ADD belongs to an earlier ztunnel execution")}
-	require.NoError(t, verifyOrReadmit(t.Context(), ep, []EndpointRevalidator{stale}, hivetest.Logger(t)))
-	require.Equal(t, 1, stale.readmitted, "stale evidence is re-admitted")
-
-	failed := &verifyFirstRevalidator{verifyErr: errors.New("stale"), readmitErr: errors.New("admission failed")}
-	require.ErrorContains(t, verifyOrReadmit(t.Context(), ep, []EndpointRevalidator{failed}, hivetest.Logger(t)), "admission failed")
-	require.Error(t, verifyOrReadmit(t.Context(), ep, nil, hivetest.Logger(t)), "no revalidator is never success")
+	failed := &ensuringRevalidator{ensureErr: errors.New("admission failed")}
+	require.ErrorContains(t, ensureAdmitted(t.Context(), ep, []EndpointRevalidator{failed}), "admission failed")
+	require.Error(t, ensureAdmitted(t.Context(), ep, nil), "no revalidator is never success")
+	require.Error(t, ensureAdmitted(t.Context(), ep, []EndpointRevalidator{nil}), "a nil revalidator is never success")
 }

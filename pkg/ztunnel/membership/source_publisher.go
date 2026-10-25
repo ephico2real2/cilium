@@ -104,7 +104,6 @@ type SourceEndpointProvider interface {
 type ciliumSourceEndpointProvider struct {
 	endpoints    endpointmanager.EndpointsLookup
 	revalidators []EndpointRevalidator
-	logger       *slog.Logger
 }
 
 func (p ciliumSourceEndpointProvider) Revalidate(ctx context.Context, id uint16) error {
@@ -112,14 +111,14 @@ func (p ciliumSourceEndpointProvider) Revalidate(ctx context.Context, id uint16)
 	if ep == nil || !ep.IsAlive() {
 		return fmt.Errorf("required Cilium endpoint %d is unavailable", id)
 	}
-	return verifyOrReadmit(ctx, ep, p.revalidators, p.logger)
+	return ensureAdmitted(ctx, ep, p.revalidators)
 }
 
-// verifyOrReadmit keeps a lease refresh from changing a current capture.
+// ensureAdmitted keeps a lease refresh from changing a current capture.
 // Re-admission quarantines the endpoint and starts a new capture generation,
 // so it runs only when the current evidence no longer verifies (for example
 // after a ztunnel or agent restart).
-func verifyOrReadmit(ctx context.Context, ep *endpoint.Endpoint, revalidators []EndpointRevalidator, logger *slog.Logger) error {
+func ensureAdmitted(ctx context.Context, ep *endpoint.Endpoint, revalidators []EndpointRevalidator) error {
 	if len(revalidators) == 0 {
 		return fmt.Errorf("strict endpoint revalidator is unavailable")
 	}
@@ -127,15 +126,7 @@ func verifyOrReadmit(ctx context.Context, ep *endpoint.Endpoint, revalidators []
 		if revalidator == nil {
 			return fmt.Errorf("strict endpoint revalidator is nil")
 		}
-		verifyErr := revalidator.VerifyEndpoint(ctx, ep)
-		if verifyErr == nil {
-			continue
-		}
-		logger.Info("Source membership evidence is not current; re-admitting endpoint",
-			logSourceStage, "source-verification",
-			logfields.EndpointID, ep.GetID16(),
-			logfields.Error, verifyErr)
-		if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
+		if err := revalidator.EnsureEndpoint(ctx, ep, StageSourceVerification); err != nil {
 			return err
 		}
 	}
@@ -251,8 +242,7 @@ func NewSourcePublisher(registry *Registry, endpoints endpointmanager.EndpointsL
 	if snapshot.Epoch == "" {
 		return nil, fmt.Errorf("membership registry has no process epoch")
 	}
-	provider := ciliumSourceEndpointProvider{endpoints: endpoints, revalidators: revalidators,
-		logger: logger.With(logfields.LogSubsys, "ztunnel-membership-source")}
+	provider := ciliumSourceEndpointProvider{endpoints: endpoints, revalidators: revalidators}
 	publisher, err := newSourcePublisher(registry, provider, sourceMembershipBackendAdapter{Client: backend}, logger, cfg, snapshot.Epoch)
 	if err != nil {
 		return nil, err

@@ -30,8 +30,10 @@ func (r *restoreRevalidator) ShouldRevalidate(context.Context, *endpoint.Endpoin
 func (r *restoreRevalidator) RestrictRestoredEndpoint(context.Context, *endpoint.Endpoint, bool) (bool, error) {
 	return r.restrict, nil
 }
-func (r *restoreRevalidator) VerifyEndpoint(context.Context, *endpoint.Endpoint) error { return nil }
-func (r *restoreRevalidator) RevalidateEndpoint(context.Context, *endpoint.Endpoint) error {
+func (r *restoreRevalidator) EnsureEndpoint(_ context.Context, _ *endpoint.Endpoint, stage string) error {
+	if stage != membership.StageRestoredReadmission {
+		return errors.New("restored re-admission named the wrong stage: " + stage)
+	}
 	if r.attempts.Add(1) <= r.failures {
 		return errors.New("ZDS cannot carry an ADD yet")
 	}

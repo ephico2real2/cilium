@@ -173,7 +173,7 @@ func (ops *EnrollmentReconciler) Update(ctx context.Context, txn statedb.ReadTxn
 			// One endpoint that cannot be admitted stays quarantined; it does
 			// not stop the others, and a retry re-admits only endpoints whose
 			// admission no longer verifies.
-			if err := ops.verifyOrRevalidateEndpoint(ctx, ep); err != nil {
+			if err := ops.ensureEnrolledEndpoint(ctx, ep); err != nil {
 				strictErrs = append(strictErrs, fmt.Errorf("revalidating enrolled endpoint %s/%s: %w", ep.GetK8sNamespace(), ep.GetK8sPodName(), err))
 			}
 			continue
@@ -413,9 +413,14 @@ func (ops *EnrollmentReconciler) readmitRestored(ctx context.Context, ep *endpoi
 	}
 }
 
+// readmitOnce makes sure a restored endpoint is admitted. When another path
+// (namespace enrollment) admitted it first, this verifies and does nothing.
 func (ops *EnrollmentReconciler) readmitOnce(ctx context.Context, ep *endpoint.Endpoint) error {
 	for _, revalidator := range ops.endpointRevalidators {
-		if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
+		if revalidator == nil {
+			return fmt.Errorf("endpoint revalidator is nil")
+		}
+		if err := revalidator.EnsureEndpoint(ctx, ep, membership.StageRestoredReadmission); err != nil {
 			return err
 		}
 	}
@@ -540,28 +545,10 @@ func (ops *EnrollmentReconciler) publishRevokedMembership(ep *endpoint.Endpoint,
 	})
 }
 
-func (ops *EnrollmentReconciler) revalidateEndpoint(ctx context.Context, ep *endpoint.Endpoint, namespaceEnrolled bool) error {
-	for _, revalidator := range ops.endpointRevalidators {
-		if revalidator == nil {
-			return fmt.Errorf("endpoint revalidator is nil")
-		}
-		should, err := revalidator.ShouldRevalidate(ctx, ep, namespaceEnrolled)
-		if err != nil {
-			return err
-		}
-		if should {
-			if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
-}
-
-// verifyOrRevalidateEndpoint re-admits an endpoint only when its current
-// admission no longer verifies: re-admission quarantines it and starts a new
-// capture generation.
-func (ops *EnrollmentReconciler) verifyOrRevalidateEndpoint(ctx context.Context, ep *endpoint.Endpoint) error {
+// ensureEnrolledEndpoint makes sure an endpoint of an enrolled namespace is
+// admitted. It re-admits only when the current admission no longer verifies:
+// re-admission quarantines the endpoint and starts a new capture generation.
+func (ops *EnrollmentReconciler) ensureEnrolledEndpoint(ctx context.Context, ep *endpoint.Endpoint) error {
 	for _, revalidator := range ops.endpointRevalidators {
 		if revalidator == nil {
 			return fmt.Errorf("endpoint revalidator is nil")
@@ -570,10 +557,10 @@ func (ops *EnrollmentReconciler) verifyOrRevalidateEndpoint(ctx context.Context,
 		if err != nil {
 			return err
 		}
-		if !should || revalidator.VerifyEndpoint(ctx, ep) == nil {
+		if !should {
 			continue
 		}
-		if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
+		if err := revalidator.EnsureEndpoint(ctx, ep, membership.StageNamespaceEnrollment); err != nil {
 			return err
 		}
 	}
