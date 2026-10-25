@@ -75,6 +75,7 @@ func NewServer(params xdsServerParams) *Server {
 	server.trustDomain = params.Config.SpiffeTrustDomain
 	server.clusterName = params.ClusterInfo.Name
 	server.requireMTLS = params.Config.RequireMTLS
+	server.effectivePolicyQuarantine = params.Config.EffectivePolicyQuarantine
 	server.issuerProfile = params.IssuerProfile
 
 	params.Lifecycle.Append(cell.Hook{

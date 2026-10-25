@@ -65,20 +65,24 @@ func NewIPIdentitySynchronizer(logger *slog.Logger, client kvstore.Client) *IPId
 
 // UpsertParams provides a structured set of parameters for IPIdentitySynchronizer.Upsert.
 type UpsertParams struct {
-	IP                netip.Addr
-	HostIP            netip.Addr
-	ID                identity.NumericIdentity
-	Key               uint8
-	Metadata          string
-	K8sNamespace      string
-	K8sNamespaceUID   string
-	K8sNodeName       string
-	K8sPodName        string
-	K8sPodUID         string
-	K8sWorkloadName   string
-	K8sWorkloadKind   string
-	K8sServiceAccount string
-	NPM               types.NamedPortMap
+	IP                          netip.Addr
+	HostIP                      netip.Addr
+	ID                          identity.NumericIdentity
+	Key                         uint8
+	Metadata                    string
+	K8sNamespace                string
+	K8sNamespaceUID             string
+	K8sNodeName                 string
+	K8sPodName                  string
+	K8sPodUID                   string
+	K8sWorkloadName             string
+	K8sWorkloadKind             string
+	K8sServiceAccount           string
+	ZtunnelMembershipVersion    uint8
+	ZtunnelMembershipEpoch      string
+	ZtunnelMembershipGeneration uint64
+	ZtunnelMembershipState      string
+	NPM                         types.NamedPortMap
 }
 
 // Upsert updates / inserts the provided IP->Identity mapping into the kvstore.
@@ -98,20 +102,24 @@ func (s *IPIdentitySynchronizer) Upsert(ctx context.Context, params *UpsertParam
 
 	ipKey := kvstore.JoinKey(IPIdentitiesPath, AddressSpace, params.IP.String())
 	ipIDPair := identity.IPIdentityPair{
-		IP:                params.IP.AsSlice(),
-		ID:                params.ID,
-		Metadata:          params.Metadata,
-		HostIP:            params.HostIP.AsSlice(),
-		Key:               params.Key,
-		K8sNamespace:      params.K8sNamespace,
-		K8sNamespaceUID:   params.K8sNamespaceUID,
-		K8sNodeName:       params.K8sNodeName,
-		K8sPodName:        params.K8sPodName,
-		K8sPodUID:         params.K8sPodUID,
-		K8sWorkloadName:   params.K8sWorkloadName,
-		K8sWorkloadKind:   params.K8sWorkloadKind,
-		K8sServiceAccount: params.K8sServiceAccount,
-		NamedPorts:        namedPorts,
+		IP:                          params.IP.AsSlice(),
+		ID:                          params.ID,
+		Metadata:                    params.Metadata,
+		HostIP:                      params.HostIP.AsSlice(),
+		Key:                         params.Key,
+		K8sNamespace:                params.K8sNamespace,
+		K8sNamespaceUID:             params.K8sNamespaceUID,
+		K8sNodeName:                 params.K8sNodeName,
+		K8sPodName:                  params.K8sPodName,
+		K8sPodUID:                   params.K8sPodUID,
+		K8sWorkloadName:             params.K8sWorkloadName,
+		K8sWorkloadKind:             params.K8sWorkloadKind,
+		K8sServiceAccount:           params.K8sServiceAccount,
+		ZtunnelMembershipVersion:    params.ZtunnelMembershipVersion,
+		ZtunnelMembershipEpoch:      params.ZtunnelMembershipEpoch,
+		ZtunnelMembershipGeneration: params.ZtunnelMembershipGeneration,
+		ZtunnelMembershipState:      params.ZtunnelMembershipState,
+		NamedPorts:                  namedPorts,
 	}
 
 	marshaledIPIDPair, err := json.Marshal(ipIDPair)

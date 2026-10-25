@@ -38,6 +38,9 @@ func (in *CiliumClusterConfigCapabilities) DeepEqual(other *CiliumClusterConfigC
 	if in.WorkloadIdentityV1 != other.WorkloadIdentityV1 {
 		return false
 	}
+	if in.ZtunnelMembershipV1 != other.ZtunnelMembershipV1 {
+		return false
+	}
 	if in.Cached != other.Cached {
 		return false
 	}

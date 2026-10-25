@@ -28,6 +28,7 @@ var Cell = cell.Module(
 				Capabilities: cmtypes.CiliumClusterConfigCapabilities{
 					SyncedCanaries:           bool(sc),
 					WorkloadIdentityV1:       true,
+					ZtunnelMembershipV1:      true,
 					MaxConnectedClusters:     cinfo.MaxConnectedClusters,
 					ServiceExportsEnabled:    &mcsAPICfg.EnableMCSAPI,
 					EndpointSlicesExportMode: endpointSlicesExportMode,

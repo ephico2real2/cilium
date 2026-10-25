@@ -36,6 +36,7 @@ import (
 	testpolicy "github.com/cilium/cilium/pkg/testutils/policy"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
+	"github.com/cilium/cilium/pkg/ztunnel/membership"
 	"github.com/cilium/cilium/pkg/ztunnel/zds"
 )
 
@@ -56,6 +57,7 @@ func cniGateFixture(t *testing.T) (*gate, *slimfake.Clientset, *endpoint.Endpoin
 	}, Spec: slimv1.PodSpec{NodeName: "node-a", ServiceAccountName: "stale-cache-service-account"}})
 	g := &gate{
 		enabled: true, core: client.CoreV1(), logger: hivetest.Logger(t), recorder: &fakeRequiredRecorder{},
+		membership:     membership.NewRegistry(1),
 		agentNamespace: "agent-system", nodeName: func() string { return "node-a" },
 		budget: 250 * time.Millisecond, attemptTimeout: 30 * time.Millisecond,
 		initialBackoff: time.Millisecond,
@@ -68,6 +70,27 @@ func cniGateFixture(t *testing.T) (*gate, *slimfake.Clientset, *endpoint.Endpoin
 func TestDisabledAdmissionHasNoDependenciesOrSideEffects(t *testing.T) {
 	g := &gate{} // nil clients/enroller/logger are intentionally safe when disabled
 	require.NoError(t, g.WaitForEndpoint(t.Context(), &endpoint.Endpoint{}))
+}
+
+func TestShouldRevalidateUsesNamespaceIntentAndDurableRequiredLedger(t *testing.T) {
+	g, _, ep := cniGateFixture(t)
+	should, err := g.ShouldRevalidate(t.Context(), ep, true)
+	require.NoError(t, err)
+	require.True(t, should, "currently enrolled namespaces must be revalidated")
+
+	g.recorder = &fakeRequiredRecorder{lookup: func(context.Context, string) (string, bool, error) {
+		return "", false, nil
+	}}
+	should, err = g.ShouldRevalidate(t.Context(), ep, false)
+	require.NoError(t, err)
+	require.False(t, should, "ordinary unenrolled endpoint should not receive strict admission")
+
+	g.recorder = &fakeRequiredRecorder{lookup: func(context.Context, string) (string, bool, error) {
+		return "namespace-generation", true, nil
+	}}
+	should, err = g.ShouldRevalidate(t.Context(), ep, false)
+	require.NoError(t, err)
+	require.True(t, should, "durable Required intent must survive namespace label removal")
 }
 
 func TestAdmissionUsesFreshPrivateMetadataAndRequiresEnrollment(t *testing.T) {
@@ -88,6 +111,10 @@ func TestAdmissionUsesFreshPrivateMetadataAndRequiresEnrollment(t *testing.T) {
 		require.Equal(t, "pod-generation", string(view.GetPod().UID))
 		require.Equal(t, "server", view.GetPod().Spec.ServiceAccountName)
 		require.Equal(t, "node-a", view.GetPod().Spec.NodeName)
+		pending, ok := managed.GetZtunnelMembership()
+		require.True(t, ok)
+		require.Equal(t, endpoint.ZtunnelMembershipRequired, pending.State, "membership must remain pending until ZDS returns its ACK")
+		require.Positive(t, pending.Generation)
 		require.NoError(t, ctx.Err())
 		enrolled.Add(1)
 		return nil
@@ -95,8 +122,74 @@ func TestAdmissionUsesFreshPrivateMetadataAndRequiresEnrollment(t *testing.T) {
 	require.NoError(t, g.WaitForEndpoint(t.Context(), managed))
 	require.EqualValues(t, 1, enrolled.Load())
 	require.EqualValues(t, 2, validated.Load())
+	captured, ok := managed.GetZtunnelMembership()
+	require.True(t, ok)
+	require.Equal(t, endpoint.ZtunnelMembershipCaptured, captured.State)
+	require.Equal(t, "namespace-generation", captured.NamespaceUID)
+	require.Equal(t, "node-a", captured.NodeName)
+	require.Equal(t, "server", captured.ServiceAccount)
+	require.NotEmpty(t, captured.Epoch)
+	require.Positive(t, captured.Generation)
+	require.Equal(t, "namespace-generation", managed.GetK8sNamespaceUID())
 	require.Len(t, client.Actions(), 4, "Namespace and Pod must each be read before and after enrollment")
 	require.Equal(t, "stale-cache-service-account", managed.GetPod().Spec.ServiceAccountName, "Admission must not mutate shared endpoint metadata")
+}
+
+func TestAdmissionZDSNackLeavesRequiredMembershipUncaptured(t *testing.T) {
+	g, _, ep := cniGateFixture(t)
+	g.budget = 20 * time.Millisecond
+	g.attemptTimeout = 5 * time.Millisecond
+	g.enroll = func(context.Context, *endpoint.Endpoint, *endpoint.Endpoint) error {
+		return errors.New("injected ZDS NACK")
+	}
+
+	err := g.WaitForEndpoint(t.Context(), ep)
+	require.ErrorContains(t, err, "capture/proxy enrollment")
+	ref, state, ok := g.membership.CurrentForPodUID(ep.K8sUID)
+	require.True(t, ok)
+	require.Equal(t, "namespace-generation", ref.Key.NamespaceUID)
+	require.True(t, state.Required)
+	require.False(t, state.Captured)
+	require.False(t, state.ZDSAcked)
+	require.False(t, state.ReadyForAddress())
+	published, ok := ep.GetZtunnelMembership()
+	require.True(t, ok)
+	require.Equal(t, endpoint.ZtunnelMembershipRequired, published.State)
+	require.Zero(t, published.Generation, "failed enrollment must not publish a current ZDS generation")
+}
+
+func TestAdmissionRevokesPriorCaptureBeforeRetryingLiveAPI(t *testing.T) {
+	g, client, ep := cniGateFixture(t)
+	ref, err := g.membership.Require("namespace-generation", ep.K8sUID, ep.GetID16(), ep.GetContainerNetnsPath())
+	require.NoError(t, err)
+	generation, ok := g.membership.BeginZDS(ref)
+	require.True(t, ok)
+	require.True(t, g.membership.MarkCaptured(ref, generation))
+	require.True(t, g.membership.AcknowledgeZDS(ref, generation))
+	ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
+		Version: 1, Revision: 1, Epoch: ref.Epoch, Generation: generation,
+		State: endpoint.ZtunnelMembershipCaptured, NamespaceUID: ref.Key.NamespaceUID,
+		NodeName: "node-a", ServiceAccount: "server",
+	})
+	g.recorder = &fakeRequiredRecorder{lookup: func(context.Context, string) (string, bool, error) {
+		return "namespace-generation", true, nil
+	}}
+	g.budget = 15 * time.Millisecond
+	g.attemptTimeout = 5 * time.Millisecond
+	client.PrependReactor("get", "namespaces", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("injected API read outage")
+	})
+
+	require.Error(t, g.WaitForEndpoint(t.Context(), ep))
+	_, state, ok := g.membership.CurrentForPodUID(ep.K8sUID)
+	require.True(t, ok)
+	require.False(t, state.Captured)
+	require.False(t, state.ZDSAcked)
+	require.False(t, state.ReadyForAddress())
+	published, ok := ep.GetZtunnelMembership()
+	require.True(t, ok)
+	require.Equal(t, endpoint.ZtunnelMembershipRequired, published.State)
+	require.Zero(t, published.Generation)
 }
 
 func TestAdmissionDoesNotAckMissingOrStaleManagedIdentity(t *testing.T) {
@@ -521,4 +614,45 @@ func TestStrictAdmissionRejectsEveryIncompleteIdentityBeforeSideEffects(t *testi
 			require.ErrorAs(t, err, &permanent)
 		})
 	}
+}
+
+func TestAdmissionDoesNotExposeCapturedBeforeFinalLiveChecks(t *testing.T) {
+	g, client, ep := cniGateFixture(t)
+	reads := 0
+	client.PrependReactor("get", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		reads++
+		if reads == 2 {
+			_, state, ok := g.membership.CurrentForPodUID(ep.K8sUID)
+			require.True(t, ok)
+			require.False(t, state.Captured)
+			require.False(t, state.ZDSAcked)
+			require.False(t, state.ReadyForAddress())
+			published, ok := ep.GetZtunnelMembership()
+			require.True(t, ok)
+			require.Equal(t, endpoint.ZtunnelMembershipRequired, published.State)
+		}
+		return false, nil, nil
+	})
+	require.NoError(t, g.WaitForEndpoint(t.Context(), ep))
+	require.Equal(t, 2, reads)
+	_, state, ok := g.membership.CurrentForPodUID(ep.K8sUID)
+	require.True(t, ok)
+	require.True(t, state.ReadyForAddress())
+}
+
+func TestAdmissionCancellationOnSandboxReleaseRevokesCompletedOnce(t *testing.T) {
+	g, _, ep := cniGateFixture(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	g.recorder = &fakeRequiredRecorder{record: func(context.Context, *endpoint.Endpoint, string, *slimv1.Pod) (func() error, func(), error) {
+		return func() error { return nil }, cancel, nil
+	}}
+	require.ErrorIs(t, g.WaitForEndpoint(ctx, ep), context.Canceled)
+	_, state, ok := g.membership.CurrentForPodUID(ep.K8sUID)
+	require.True(t, ok)
+	require.False(t, state.ReadyForAddress())
+	published, ok := ep.GetZtunnelMembership()
+	require.True(t, ok)
+	require.Equal(t, endpoint.ZtunnelMembershipRequired, published.State)
+	require.Zero(t, published.Generation)
 }

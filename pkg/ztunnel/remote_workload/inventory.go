@@ -33,13 +33,16 @@ type WorkloadKey struct {
 
 // Workload is one remote Kubernetes Pod represented by its current addresses.
 type Workload struct {
-	Key            WorkloadKey
-	Namespace      string
-	NodeName       string
-	PodName        string
-	ServiceAccount string
-	Identity       identity.NumericIdentity
-	Addresses      []netip.Addr
+	Key                  WorkloadKey
+	Namespace            string
+	NodeName             string
+	PodName              string
+	ServiceAccount       string
+	Identity             identity.NumericIdentity
+	MembershipEpoch      string
+	MembershipGeneration uint64
+	MembershipState      string
+	Addresses            []netip.Addr
 }
 
 // Snapshot is a complete replacement view. Invalid=true withdraws the prior
@@ -354,6 +357,21 @@ func (i *Inventory) validate(pair identity.IPIdentityPair) (netip.Addr, bool, er
 	if !hasK8s {
 		return ip, false, nil
 	}
+	if pair.ZtunnelMembershipVersion != 1 {
+		return netip.Addr{}, false, fmt.Errorf("workload record lacks ztunnel membership wire version 1")
+	}
+	switch pair.ZtunnelMembershipState {
+	case "unenrolled":
+		if pair.ZtunnelMembershipEpoch != "" || pair.ZtunnelMembershipGeneration != 0 {
+			return netip.Addr{}, false, fmt.Errorf("unenrolled workload carries membership epoch or generation")
+		}
+	case "required", "captured", "draining":
+		if !nonEmptyCanonical(pair.ZtunnelMembershipEpoch) || pair.ZtunnelMembershipGeneration == 0 {
+			return netip.Addr{}, false, fmt.Errorf("required workload lacks current membership epoch or generation")
+		}
+	default:
+		return netip.Addr{}, false, fmt.Errorf("workload has unknown ztunnel membership state %q", pair.ZtunnelMembershipState)
+	}
 	if !validIP || !ip.IsValid() || ip.Zone() != "" || !ip.IsGlobalUnicast() ||
 		ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
 		return netip.Addr{}, false, fmt.Errorf("workload record has invalid unicast Pod IP")
@@ -393,25 +411,33 @@ func (i *Inventory) snapshotLockedChecked() ([]Workload, error) {
 		workload, exists := workloads[key]
 		if !exists {
 			workload = &Workload{
-				Key:            key,
-				Namespace:      pair.K8sNamespace,
-				NodeName:       pair.K8sNodeName,
-				PodName:        pair.K8sPodName,
-				ServiceAccount: pair.K8sServiceAccount,
-				Identity:       pair.ID,
-				Addresses:      []netip.Addr{},
+				Key:                  key,
+				Namespace:            pair.K8sNamespace,
+				NodeName:             pair.K8sNodeName,
+				PodName:              pair.K8sPodName,
+				ServiceAccount:       pair.K8sServiceAccount,
+				Identity:             pair.ID,
+				MembershipEpoch:      pair.ZtunnelMembershipEpoch,
+				MembershipGeneration: pair.ZtunnelMembershipGeneration,
+				MembershipState:      pair.ZtunnelMembershipState,
+				Addresses:            []netip.Addr{},
 			}
 			workloads[key] = workload
 		} else if workload.Namespace != pair.K8sNamespace || workload.NodeName != pair.K8sNodeName ||
 			workload.PodName != pair.K8sPodName || workload.ServiceAccount != pair.K8sServiceAccount ||
-			workload.Identity != pair.ID {
-			return nil, fmt.Errorf("conflicting namespace, node, Pod name, ServiceAccount, or Cilium identity across addresses for Pod UID %q", pair.K8sPodUID)
+			workload.Identity != pair.ID || workload.MembershipEpoch != pair.ZtunnelMembershipEpoch ||
+			workload.MembershipGeneration != pair.ZtunnelMembershipGeneration ||
+			workload.MembershipState != pair.ZtunnelMembershipState {
+			return nil, fmt.Errorf("conflicting namespace, node, Pod name, ServiceAccount, Cilium identity, or membership across addresses for Pod UID %q", pair.K8sPodUID)
 		}
 		workload.Addresses = append(workload.Addresses, ip)
 	}
 
 	out := make([]Workload, 0, len(workloads))
 	for _, workload := range workloads {
+		if workload.MembershipState != "captured" {
+			continue
+		}
 		sort.Slice(workload.Addresses, func(a, b int) bool { return workload.Addresses[a].Less(workload.Addresses[b]) })
 		workload.Addresses = slices.Compact(workload.Addresses)
 		out = append(out, *workload)

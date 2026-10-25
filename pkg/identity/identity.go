@@ -50,7 +50,14 @@ type IPIdentityPair struct {
 	K8sWorkloadName   string          `json:"K8sWorkloadName,omitempty"`
 	K8sWorkloadKind   string          `json:"K8sWorkloadKind,omitempty"`
 	K8sServiceAccount string          `json:"K8sServiceAccount,omitempty"`
-	NamedPorts        []NamedPort     `json:"NamedPorts,omitempty"`
+	// ZtunnelMembership* is a versioned, fail-closed source annotation. It
+	// reports only Cilium's Required/Captured/ZDS-ACK state; it never reports
+	// remote ADS or policy activation.
+	ZtunnelMembershipVersion    uint8       `json:"ZtunnelMembershipVersion,omitempty"`
+	ZtunnelMembershipEpoch      string      `json:"ZtunnelMembershipEpoch,omitempty"`
+	ZtunnelMembershipGeneration uint64      `json:"ZtunnelMembershipGeneration,omitempty"`
+	ZtunnelMembershipState      string      `json:"ZtunnelMembershipState,omitempty"`
+	NamedPorts                  []NamedPort `json:"NamedPorts,omitempty"`
 }
 
 type IdentityMap map[NumericIdentity]labels.Labels

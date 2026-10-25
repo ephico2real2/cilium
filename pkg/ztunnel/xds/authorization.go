@@ -26,8 +26,9 @@ import (
 // names and workload references. Callers must not publish a broader SA allow
 // in place of a label-specific Cilium policy.
 type AuthorizationPolicies struct {
-	cache  *envoyxds.Cache
-	server *envoyxds.Server
+	quarantineMu lock.Mutex
+	cache        *envoyxds.Cache
+	server       *envoyxds.Server
 }
 
 // NewAuthorizationPolicies creates an empty, agent-local desired policy store.

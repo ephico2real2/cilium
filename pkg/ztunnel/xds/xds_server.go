@@ -54,14 +54,15 @@ type Server struct {
 	enrolledNamespaceTable    statedb.RWTable[*table.EnrolledNamespace]
 	// endpointEventChan is shared across streams. Overlapping sends during
 	// ztunnel reconnect are safe since xDS upserts are idempotent.
-	endpointEventChan chan *EndpointEvent
-	metrics           *Metrics
-	authorizations    *AuthorizationPolicies
-	caType            string
-	trustDomain       string
-	clusterName       string
-	requireMTLS       bool
-	issuerProfile     *issuerProfileSource
+	endpointEventChan         chan *EndpointEvent
+	metrics                   *Metrics
+	authorizations            *AuthorizationPolicies
+	caType                    string
+	trustDomain               string
+	clusterName               string
+	requireMTLS               bool
+	effectivePolicyQuarantine bool
+	issuerProfile             *issuerProfileSource
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -215,6 +216,7 @@ func (x *Server) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_D
 		TrustDomain:               x.trustDomain,
 		ClusterName:               x.clusterName,
 		RequireMTLS:               x.requireMTLS,
+		EffectivePolicyQuarantine: x.effectivePolicyQuarantine,
 		IssuerProfile:             x.issuerProfile,
 	}
 

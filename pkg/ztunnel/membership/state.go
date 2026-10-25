@@ -39,10 +39,11 @@ type Reference struct {
 // State keeps intent and evidence separate. Active is derived only after every
 // prerequisite is current and acknowledged.
 type State struct {
-	Key         Key
-	Incarnation uint64
-	EndpointID  uint16
-	NetnsPath   string
+	PublicationRevision uint64
+	Key                 Key
+	Incarnation         uint64
+	EndpointID          uint16
+	NetnsPath           string
 
 	Required       bool
 	Captured       bool
@@ -65,6 +66,50 @@ type State struct {
 	PolicyDenyByDefault             bool
 
 	DrainGeneration uint64
+}
+
+// Publication is the source-side evidence that Cilium completed a fresh
+// capture installation and ZDS ADD acknowledgment for one exact endpoint
+// incarnation. It deliberately has no Active field: ADS Address and effective
+// policy are separate acknowledgments owned by the receiving ztunnel stream.
+type Publication struct {
+	Revision   uint64
+	Version    uint8
+	Epoch      string
+	Generation uint64
+	State      string
+}
+
+const (
+	PublicationUnenrolled = "unenrolled"
+	PublicationRequired   = "required"
+	PublicationCaptured   = "captured"
+	PublicationDraining   = "draining"
+)
+
+// Publication returns only source-side capture/ZDS state for this exact
+// incarnation. Missing, stale, or draining state is not eligible for remote
+// workload publication.
+func (r *Registry) Publication(ref Reference) (Publication, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	state, ok := r.currentLocked(ref)
+	if !ok {
+		return Publication{}, false
+	}
+	p := Publication{
+		Version:    1,
+		Revision:   state.PublicationRevision,
+		Epoch:      ref.Epoch,
+		Generation: state.ZDSGeneration,
+		State:      PublicationRequired,
+	}
+	if state.Draining {
+		p.State = PublicationDraining
+	} else if state.Required && state.Captured && state.ZDSGeneration != 0 && state.ZDSAcked {
+		p.State = PublicationCaptured
+	}
+	return p, true
 }
 
 // Active reports whether all independently delivered and acknowledged
@@ -91,13 +136,15 @@ func (s State) ReadyForAddress() bool {
 type Registry struct {
 	mu lock.RWMutex
 
-	clusterID           uint32
-	epoch               string
-	nextIncarnation     uint64
-	nextZDSGeneration   uint64
-	nextADSGeneration   uint64
-	nextDrainGeneration uint64
-	nextVersion         uint64
+	clusterID               uint32
+	epoch                   string
+	nextIncarnation         uint64
+	nextPublicationRevision uint64
+	publicationPoisoned     bool
+	nextZDSGeneration       uint64
+	nextADSGeneration       uint64
+	nextDrainGeneration     uint64
+	nextVersion             uint64
 
 	states   map[Reference]State
 	byPodUID map[string]Reference
@@ -134,7 +181,7 @@ func (r *Registry) Require(namespaceUID, podUID string, endpointID uint16, netns
 				return Reference{}, fmt.Errorf("draining Pod membership cannot be reused")
 			}
 			existing.Required = true
-			r.states[previousRef] = existing
+			r.storeStateLocked(previousRef, existing)
 			return previousRef, nil
 		}
 	}
@@ -145,7 +192,7 @@ func (r *Registry) Require(namespaceUID, podUID string, endpointID uint16, netns
 		Key: key, Incarnation: ref.Incarnation, EndpointID: endpointID,
 		NetnsPath: netnsPath, Required: true,
 	}
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	r.byPodUID[podUID] = ref
 	return ref, nil
 }
@@ -172,7 +219,7 @@ func (r *Registry) BeginZDS(ref Reference) (uint64, bool) {
 	state.PolicyBoundToWorkload = false
 	state.PolicyRequiresAuthenticatedPeer = false
 	state.PolicyDenyByDefault = false
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return state.ZDSGeneration, true
 }
 
@@ -186,7 +233,7 @@ func (r *Registry) MarkCaptured(ref Reference, generation uint64) bool {
 		return false
 	}
 	state.Captured = true
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return true
 }
 
@@ -212,7 +259,7 @@ func (r *Registry) InvalidateCapture(ref Reference) bool {
 	state.PolicyBoundToWorkload = false
 	state.PolicyRequiresAuthenticatedPeer = false
 	state.PolicyDenyByDefault = false
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return true
 }
 
@@ -224,7 +271,7 @@ func (r *Registry) AcknowledgeZDS(ref Reference, generation uint64) bool {
 		return false
 	}
 	state.ZDSAcked = true
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return true
 }
 
@@ -245,7 +292,7 @@ func (r *Registry) BeginADSGeneration() uint64 {
 		state.PolicyBoundToWorkload = false
 		state.PolicyRequiresAuthenticatedPeer = false
 		state.PolicyDenyByDefault = false
-		r.states[ref] = state
+		r.storeStateLocked(ref, state)
 	}
 	return r.nextADSGeneration
 }
@@ -269,7 +316,7 @@ func (r *Registry) PublishAddress(ref Reference, generation uint64) (uint64, boo
 	state.PolicyBoundToWorkload = false
 	state.PolicyRequiresAuthenticatedPeer = false
 	state.PolicyDenyByDefault = false
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return state.AddressVersion, true
 }
 
@@ -282,7 +329,7 @@ func (r *Registry) AcknowledgeAddress(ref Reference, generation, version uint64)
 		return false
 	}
 	state.AddressAcked = true
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return true
 }
 
@@ -320,7 +367,7 @@ func (r *Registry) PublishPolicy(ref Reference, generation uint64, evidence Poli
 	state.PolicyBoundToWorkload = evidence.BoundToWorkload
 	state.PolicyRequiresAuthenticatedPeer = evidence.RequiresAuthenticatedPeer
 	state.PolicyDenyByDefault = evidence.DenyByDefault
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return state.PolicyVersion, true
 }
 
@@ -335,7 +382,7 @@ func (r *Registry) AcknowledgePolicy(ref Reference, generation, version uint64) 
 		return false
 	}
 	state.PolicyAcked = true
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return true
 }
 
@@ -355,7 +402,7 @@ func (r *Registry) BeginDrain(ref Reference) (uint64, bool) {
 	state.DrainGeneration = r.nextDrainGeneration
 	state.AddressAcked = false
 	state.PolicyAcked = false
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return state.DrainGeneration, true
 }
 
@@ -370,7 +417,7 @@ func (r *Registry) CompleteDrain(ref Reference, generation uint64) bool {
 		return false
 	}
 	state.DrainCompleted = true
-	r.states[ref] = state
+	r.storeStateLocked(ref, state)
 	return true
 }
 
@@ -401,6 +448,7 @@ func (r *Registry) Retire(ref Reference) bool {
 	if !ok || !state.Draining || !state.DrainCompleted {
 		return false
 	}
+	r.storeStateLocked(ref, state) // Retirement changes the complete source snapshot too.
 	delete(r.states, ref)
 	if r.byPodUID[ref.Key.PodUID] == ref {
 		delete(r.byPodUID, ref.Key.PodUID)
@@ -422,7 +470,7 @@ func (r *Registry) CurrentForPodUID(podUID string) (Reference, State, bool) {
 	if !ok {
 		return Reference{}, State{}, false
 	}
-	state, ok := r.states[ref]
+	state, ok := r.currentLocked(ref)
 	if !ok {
 		return Reference{}, State{}, false
 	}
@@ -431,6 +479,116 @@ func (r *Registry) CurrentForPodUID(podUID string) (Reference, State, bool) {
 
 func (r *Registry) currentLocked(ref Reference) (State, bool) {
 	state, ok := r.states[ref]
+	if r.publicationPoisoned {
+		state = closedPublicationState(state)
+		state.PublicationRevision = ^uint64(0)
+	}
 	return state, ok && ref.Epoch != "" && ref.Epoch == r.epoch &&
 		ref.Incarnation != 0 && state.Incarnation == ref.Incarnation
+}
+
+// storeStateLocked advances the source publication order for every state
+// mutation. Callers hold r.mu exclusively. The endpoint CAS rejects a delayed
+// copied publication after a newer revocation has already been installed.
+func (r *Registry) storeStateLocked(ref Reference, state State) {
+	if r.nextPublicationRevision >= ^uint64(0)-1 {
+		r.publicationPoisoned = true
+		r.nextPublicationRevision = ^uint64(0)
+	} else {
+		r.nextPublicationRevision++
+	}
+	if r.publicationPoisoned {
+		state = closedPublicationState(state)
+	}
+	state.PublicationRevision = r.nextPublicationRevision
+	r.states[ref] = state
+}
+
+// InvalidateCaptureGeneration revokes exactly one attempt, never a successor's
+// ZDS ACK. A canceled old caller cannot revoke a freshly completed generation.
+func (r *Registry) InvalidateCaptureGeneration(ref Reference, generation uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	state, ok := r.currentLocked(ref)
+	if !ok || state.Draining || generation == 0 || state.ZDSGeneration != generation {
+		return false
+	}
+	state.Captured = false
+	state.ZDSGeneration = 0
+	state.ZDSAcked = false
+	state.AddressVersion = 0
+	state.AddressAcked = false
+	state.PolicyVersion = 0
+	state.PolicyAddressVersion = 0
+	state.PolicyAcked = false
+	state.PolicyRevision = ""
+	state.PolicyBoundToWorkload = false
+	state.PolicyRequiresAuthenticatedPeer = false
+	state.PolicyDenyByDefault = false
+	r.storeStateLocked(ref, state)
+	return true
+}
+
+func closedPublicationState(state State) State {
+	state.Captured = false
+	state.ZDSGeneration = 0
+	state.ZDSAcked = false
+	state.AddressVersion = 0
+	state.AddressAcked = false
+	state.PolicyVersion = 0
+	state.PolicyAddressVersion = 0
+	state.PolicyAcked = false
+	state.PolicyRevision = ""
+	state.PolicyBoundToWorkload = false
+	state.PolicyRequiresAuthenticatedPeer = false
+	state.PolicyDenyByDefault = false
+	return state
+}
+
+// SourceEntry binds a publication to its exact process-local CNI incarnation.
+// It is public source evidence only; no ADS/policy activation is implied.
+type SourceEntry struct {
+	Reference   Reference
+	EndpointID  uint16
+	NetnsPath   string
+	Publication Publication
+}
+
+type SourceSnapshot struct {
+	Epoch    string
+	Revision uint64
+	Entries  []SourceEntry
+}
+
+// SourceSnapshot copies all current source evidence under one registry lock.
+// A future lease publisher must consume this snapshot, not independently read
+// endpoint atomics and concatenate states from different registry revisions.
+func (r *Registry) SourceSnapshot() SourceSnapshot {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := SourceSnapshot{Epoch: r.epoch, Revision: r.nextPublicationRevision, Entries: make([]SourceEntry, 0, len(r.byPodUID))}
+	for _, ref := range r.byPodUID {
+		state, ok := r.currentLocked(ref)
+		if !ok {
+			continue
+		}
+		publication := Publication{Version: 1, Revision: state.PublicationRevision, Epoch: ref.Epoch, Generation: state.ZDSGeneration, State: PublicationRequired}
+		if state.Draining {
+			publication.State = PublicationDraining
+		} else if state.ReadyForAddress() {
+			publication.State = PublicationCaptured
+		}
+		out.Entries = append(out.Entries, SourceEntry{Reference: ref, EndpointID: state.EndpointID, NetnsPath: state.NetnsPath, Publication: publication})
+	}
+	sort.Slice(out.Entries, func(a, b int) bool {
+		x, y := out.Entries[a].Reference, out.Entries[b].Reference
+		if x.Key.NamespaceUID != y.Key.NamespaceUID {
+			return x.Key.NamespaceUID < y.Key.NamespaceUID
+		}
+		if x.Key.PodUID != y.Key.PodUID {
+			return x.Key.PodUID < y.Key.PodUID
+		}
+		return x.Incarnation < y.Incarnation
+	})
+	return out
 }

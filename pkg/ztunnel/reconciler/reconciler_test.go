@@ -28,8 +28,10 @@ import (
 	"github.com/cilium/cilium/pkg/promise"
 	testendpointmanager "github.com/cilium/cilium/pkg/testutils/endpointmanager"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
+	"github.com/cilium/cilium/pkg/ztunnel/membership"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 	"github.com/cilium/cilium/pkg/ztunnel/xds"
+	"github.com/cilium/cilium/pkg/ztunnel/zds"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -236,6 +238,7 @@ func createTestEndpointWithLabels(id uint16, namespace, podName, netnsPath strin
 		ID:           id,
 		K8sNamespace: namespace,
 		K8sPodName:   podName,
+		K8sUID:       "test-pod-uid-" + namespace + "/" + podName,
 	}
 	ep.SetContainerNetnsPath(netnsPath)
 	if lbls != nil {
@@ -290,6 +293,7 @@ func setupTest(t *testing.T) (*statedb.DB, statedb.RWTable[*table.EnrolledNamesp
 		EndpointEventChannel:        endpointEventCh,
 		CiliumEndpointResource:      mockCEPResource,
 		CiliumEndpointSliceResource: mockCESResource,
+		Membership:                  membership.NewRegistry(1),
 	})
 	require.NoError(t, err)
 
@@ -810,4 +814,60 @@ func TestStrictDeletionUsesCleanerWithoutNamespaceOrProxyLabelExemption(t *testi
 	ops.EndpointDeleted(ep, endpoint.DeleteConfig{})
 	require.Equal(t, []*endpoint.Endpoint{ep}, mockEnroller.deletedEndpoints)
 	require.Empty(t, mockEnroller.disenrolledIDs, "Strict deletion must not remove capture through legacy unenrollment")
+}
+
+func TestStrictEndpointDeleteRevokesPublishedMembershipBeforeCleanup(t *testing.T) {
+	_, _, _, _, ops, _ := setupTest(t)
+	ops.strictCreationAdmission = true
+	ep := createTestEndpointWithLabels(78, "orders", "api", "/runtime/netns/api", labels.Labels{})
+	ep.K8sUID = "pod-incarnation-a"
+	ref, err := ops.membership.Require("namespace-incarnation-a", ep.K8sUID, ep.GetID16(), ep.GetContainerNetnsPath())
+	require.NoError(t, err)
+	generation, ok := ops.membership.BeginZDS(ref)
+	require.True(t, ok)
+	require.True(t, ops.membership.MarkCaptured(ref, generation))
+	require.True(t, ops.membership.AcknowledgeZDS(ref, generation))
+	ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
+		Version: 1, Revision: 1, Epoch: ref.Epoch, Generation: generation,
+		State: endpoint.ZtunnelMembershipCaptured, NamespaceUID: ref.Key.NamespaceUID,
+	})
+
+	ops.EndpointDeleted(ep, endpoint.DeleteConfig{})
+
+	state, ok := ops.membership.Get(ref)
+	require.True(t, ok)
+	require.True(t, state.Draining)
+	require.False(t, state.ReadyForAddress())
+	published, ok := ep.GetZtunnelMembership()
+	require.True(t, ok)
+	require.Equal(t, endpoint.ZtunnelMembershipDraining, published.State)
+}
+
+func TestStrictNamespaceUnenrollmentRevokesRemoteMembershipAndRetainsCapture(t *testing.T) {
+	_, _, mockEndpointManager, mockEnroller, ops, _ := setupTest(t)
+	ops.strictCreationAdmission = true
+	ep := createTestEndpointWithLabels(79, "orders", "api", "/runtime/netns/api", labels.Labels{})
+	ep.K8sUID = "pod-incarnation-b"
+	mockEndpointManager.Endpoints = []*endpoint.Endpoint{ep}
+	ref, err := ops.membership.Require("namespace-incarnation-b", ep.K8sUID, ep.GetID16(), ep.GetContainerNetnsPath())
+	require.NoError(t, err)
+	generation, ok := ops.membership.BeginZDS(ref)
+	require.True(t, ok)
+	require.True(t, ops.membership.MarkCaptured(ref, generation))
+	require.True(t, ops.membership.AcknowledgeZDS(ref, generation))
+	ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
+		Version: 1, Revision: 1, Epoch: ref.Epoch, Generation: generation,
+		State: endpoint.ZtunnelMembershipCaptured, NamespaceUID: ref.Key.NamespaceUID,
+	})
+
+	err = ops.Delete(t.Context(), ops.db.ReadTxn(), 1, &table.EnrolledNamespace{Name: "orders", UID: ref.Key.NamespaceUID})
+	require.ErrorIs(t, err, zds.ErrStrictLiveUnenrollment)
+	state, ok := ops.membership.Get(ref)
+	require.True(t, ok)
+	require.False(t, state.ReadyForAddress(), "unenrollment must revoke remote publication while keeping capture in place")
+	published, ok := ep.GetZtunnelMembership()
+	require.True(t, ok)
+	require.Equal(t, endpoint.ZtunnelMembershipRequired, published.State)
+	require.Zero(t, published.Generation)
+	require.Empty(t, mockEnroller.deletedEndpoints, "strict unenrollment must not remove capture while live endpoints remain")
 }

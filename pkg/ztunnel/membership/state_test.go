@@ -5,6 +5,48 @@ package membership
 
 import "testing"
 
+func TestPublicationSeparatesRequiredCapturedAndActive(t *testing.T) {
+	registry := NewRegistry(17)
+	ref := requireMembership(t, registry, "namespace-uid", "pod-uid", 42, "/var/run/netns/pod-42")
+	p, ok := registry.Publication(ref)
+	if !ok || p.Version != 1 || p.State != PublicationRequired || p.Epoch != ref.Epoch || p.Generation != 0 {
+		t.Fatalf("initial publication = %+v, want incomplete Required intent", p)
+	}
+
+	generation, ok := registry.BeginZDS(ref)
+	if !ok {
+		t.Fatal("BeginZDS rejected current membership")
+	}
+	p, ok = registry.Publication(ref)
+	if !ok || p.State != PublicationRequired || p.Generation != generation {
+		t.Fatalf("in-flight publication = %+v, want Required generation %d", p, generation)
+	}
+	if !registry.MarkCaptured(ref, generation) || !registry.AcknowledgeZDS(ref, generation) {
+		t.Fatal("fresh capture/ZDS evidence was rejected")
+	}
+	p, ok = registry.Publication(ref)
+	if !ok || p.State != PublicationCaptured || p.Generation != generation {
+		t.Fatalf("captured publication = %+v, want Captured generation %d", p, generation)
+	}
+	establishAddressAndPolicy(t, registry, ref)
+	state, found := registry.Get(ref)
+	if !found || !state.Active() {
+		t.Fatal("full source/ADS/policy state was not Active")
+	}
+	p, ok = registry.Publication(ref)
+	if !ok || p.State != PublicationCaptured {
+		t.Fatalf("source publication must never claim remote Active: %+v", p)
+	}
+	if _, ok := registry.BeginDrain(ref); !ok {
+		t.Fatal("BeginDrain rejected captured membership")
+	}
+	p, ok = registry.Publication(ref)
+	state, found = registry.Get(ref)
+	if !ok || !found || p.State != PublicationDraining || state.Active() || state.ReadyForAddress() {
+		t.Fatalf("draining publication = %+v, want Draining", p)
+	}
+}
+
 func requireMembership(t *testing.T, registry *Registry, namespaceUID, podUID string, endpointID uint16, netns string) Reference {
 	t.Helper()
 	ref, err := registry.Require(namespaceUID, podUID, endpointID, netns)
@@ -482,5 +524,73 @@ func TestRegistryRestartRejectsPriorExecutionAcknowledgments(t *testing.T) {
 	state, _ := current.Get(ref)
 	if !state.Active() {
 		t.Fatal("fresh evidence did not restore active membership")
+	}
+}
+
+func TestPublicationRevisionFencesDelayedFailureAndNeverWraps(t *testing.T) {
+	registry := NewRegistry(1)
+	ref := requireMembership(t, registry, "ns", "pod", 7, "/netns/pod")
+	first := establishCaptureAndZDS(t, registry, ref)
+	captured, ok := registry.Publication(ref)
+	if !ok || captured.Revision == 0 || captured.State != PublicationCaptured {
+		t.Fatal("missing revisioned captured publication")
+	}
+	next, ok := registry.BeginZDS(ref)
+	if !ok || next == first {
+		t.Fatal("missing fresh generation")
+	}
+	if registry.InvalidateCaptureGeneration(ref, first) {
+		t.Fatal("old attempt revoked a newer generation")
+	}
+	if !registry.MarkCaptured(ref, next) || !registry.AcknowledgeZDS(ref, next) {
+		t.Fatal("new generation should recover")
+	}
+	recovered, _ := registry.Publication(ref)
+	if recovered.Revision <= captured.Revision {
+		t.Fatal("publication revision did not advance")
+	}
+	if !registry.InvalidateCaptureGeneration(ref, next) {
+		t.Fatal("matching failed attempt must revoke")
+	}
+	revoked, _ := registry.Publication(ref)
+	if revoked.Revision <= recovered.Revision || revoked.State != PublicationRequired {
+		t.Fatal("revocation must advance source order")
+	}
+	registry.mu.Lock()
+	registry.nextPublicationRevision = ^uint64(0) - 1
+	registry.mu.Unlock()
+	generation, _ := registry.BeginZDS(ref)
+	if registry.MarkCaptured(ref, generation) {
+		t.Fatal("exhausted publication counter must remain closed")
+	}
+	exhausted, _ := registry.Publication(ref)
+	if exhausted.Revision != ^uint64(0) || exhausted.State == PublicationCaptured {
+		t.Fatal("source order wrapped or permitted capture")
+	}
+}
+
+func TestSourceSnapshotIsOneOrderedImmutableRegistryRevision(t *testing.T) {
+	registry := NewRegistry(1)
+	a := requireMembership(t, registry, "ns", "pod-a", 7, "/ns/a")
+	b := requireMembership(t, registry, "ns", "pod-b", 8, "/ns/b")
+	establishCaptureAndZDS(t, registry, a)
+	before := registry.SourceSnapshot()
+	if before.Epoch == "" || before.Revision == 0 || len(before.Entries) != 2 || before.Entries[0].Reference != a || before.Entries[1].Reference != b {
+		t.Fatal("missing complete ordered source snapshot")
+	}
+	if !registry.InvalidateCapture(a) {
+		t.Fatal("capture invalidation failed")
+	}
+	after := registry.SourceSnapshot()
+	if after.Revision <= before.Revision || after.Entries[0].Publication.State != PublicationRequired {
+		t.Fatal("new snapshot lost revocation/order")
+	}
+	if before.Entries[0].Publication.State != PublicationCaptured {
+		t.Fatal("immutable snapshot was mutated by a later update")
+	}
+	for _, entry := range after.Entries {
+		if entry.Publication.Revision > after.Revision || entry.Publication.Epoch != after.Epoch {
+			t.Fatal("mixed registry snapshot order/epoch")
+		}
 	}
 }

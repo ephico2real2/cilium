@@ -73,14 +73,18 @@ func validPair(ip, podUID, namespaceUID, sa string) *identity.IPIdentityPair {
 	clusterInfo := cmtypes.ClusterInfo{ID: 1, Name: "cluster-alpha", MaxConnectedClusters: 255}
 	id := identity.NumericIdentity(clusterInfo.MinimalAllocationIdentityFor(17) + 1)
 	return &identity.IPIdentityPair{
-		IP:                net.ParseIP(ip),
-		ID:                id,
-		K8sNamespace:      "orders",
-		K8sNamespaceUID:   namespaceUID,
-		K8sNodeName:       "node-a",
-		K8sPodName:        "api",
-		K8sPodUID:         podUID,
-		K8sServiceAccount: sa,
+		IP:                          net.ParseIP(ip),
+		ID:                          id,
+		K8sNamespace:                "orders",
+		K8sNamespaceUID:             namespaceUID,
+		K8sNodeName:                 "node-a",
+		K8sPodName:                  "api",
+		K8sPodUID:                   podUID,
+		K8sServiceAccount:           sa,
+		ZtunnelMembershipVersion:    1,
+		ZtunnelMembershipEpoch:      "agent-epoch-a",
+		ZtunnelMembershipGeneration: 1,
+		ZtunnelMembershipState:      "captured",
 	}
 }
 
@@ -121,11 +125,84 @@ func TestInitialListPublishesOneCompleteSortedSnapshot(t *testing.T) {
 	if workload.NodeName != "node-a" || workload.Identity != validPair("10.17.0.12", "pod-a", "ns-a", "api").ID {
 		t.Fatalf("source node or Cilium numeric identity was not preserved: %+v", workload)
 	}
+	if workload.MembershipEpoch != "agent-epoch-a" || workload.MembershipGeneration != 1 || workload.MembershipState != "captured" {
+		t.Fatalf("capture membership provenance was not preserved: %+v", workload)
+	}
 	if len(workload.Addresses) != 2 || !workload.Addresses[0].Less(workload.Addresses[1]) {
 		t.Fatalf("addresses are not complete and sorted: %v", workload.Addresses)
 	}
 	if got.Generation <= 1 {
 		t.Fatalf("generation did not advance: %d", got.Generation)
+	}
+}
+
+func TestRequiredMembershipWithdrawsUntilFreshCaptureAndAck(t *testing.T) {
+	inventory, sink := newTestInventory(t)
+	pair := validPair("10.17.0.12", "pod-a", "ns-a", "api")
+	inventory.Begin(context.Background())
+	inventory.OnUpdate(pair)
+	inventory.ListDone(context.Background())
+	requireValidWorkloads(t, sink, 1)
+
+	pending := *pair
+	pending.ZtunnelMembershipGeneration = 2
+	pending.ZtunnelMembershipState = "required"
+	inventory.OnUpdate(&pending)
+	requireValidWorkloads(t, sink, 0)
+
+	captured := pending
+	captured.ZtunnelMembershipState = "captured"
+	inventory.OnUpdate(&captured)
+	requireValidWorkloads(t, sink, 1)
+}
+
+func TestMembershipGenerationAndStateMustAgreeAcrossPodAddresses(t *testing.T) {
+	inventory, sink := newTestInventory(t)
+	inventory.Begin(context.Background())
+	v4 := validPair("10.17.0.12", "pod-a", "ns-a", "api")
+	v6 := validPair("fd00:17::12", "pod-a", "ns-a", "api")
+	inventory.OnUpdate(v4)
+	inventory.OnUpdate(v6)
+	inventory.ListDone(context.Background())
+	requireValidWorkloads(t, sink, 1)
+
+	changed := *v6
+	changed.ZtunnelMembershipGeneration++
+	inventory.OnUpdate(&changed)
+	if last(t, sink).Valid {
+		t.Fatal("mixed membership generations across addresses remained publishable")
+	}
+}
+
+func TestMissingMembershipVersionFailsClosed(t *testing.T) {
+	inventory, sink := newTestInventory(t)
+	pair := validPair("10.17.0.12", "pod-a", "ns-a", "api")
+	pair.ZtunnelMembershipVersion = 0
+	inventory.Begin(context.Background())
+	inventory.OnUpdate(pair)
+	inventory.ListDone(context.Background())
+	if last(t, sink).Valid {
+		t.Fatal("legacy workload record without membership version was accepted")
+	}
+}
+
+func TestUnenrolledMembershipIsNotAnExportedWorkload(t *testing.T) {
+	inventory, sink := newTestInventory(t)
+	pair := validPair("10.17.0.12", "pod-a", "ns-a", "api")
+	pair.ZtunnelMembershipEpoch = ""
+	pair.ZtunnelMembershipGeneration = 0
+	pair.ZtunnelMembershipState = "unenrolled"
+	inventory.Begin(context.Background())
+	inventory.OnUpdate(pair)
+	inventory.ListDone(context.Background())
+	requireValidWorkloads(t, sink, 0)
+}
+
+func requireValidWorkloads(t *testing.T, sink *recordingSink, want int) {
+	t.Helper()
+	got := last(t, sink)
+	if !got.Valid || len(got.Workloads) != want {
+		t.Fatalf("membership snapshot = valid:%t workloads:%d, want valid:%t workloads:%d (%s)", got.Valid, len(got.Workloads), true, want, got.Reason)
 	}
 }
 

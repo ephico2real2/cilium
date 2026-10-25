@@ -21,6 +21,7 @@ import (
 	"github.com/cilium/cilium/pkg/promise"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
+	"github.com/cilium/cilium/pkg/ztunnel/membership"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 	"github.com/cilium/cilium/pkg/ztunnel/xds"
 	"github.com/cilium/cilium/pkg/ztunnel/zds"
@@ -50,6 +51,8 @@ type params struct {
 	EndpointEventChannel        chan *xds.EndpointEvent
 	CiliumEndpointResource      resource.Resource[*types.CiliumEndpoint]
 	CiliumEndpointSliceResource resource.Resource[*v2alpha1.CiliumEndpointSlice]
+	EndpointRevalidators        []membership.EndpointRevalidator `group:"ztunnel-endpoint-revalidators"`
+	Membership                  *membership.Registry
 }
 
 type EnrollmentReconciler struct {
@@ -64,6 +67,8 @@ type EnrollmentReconciler struct {
 	endpointEventCh             chan *xds.EndpointEvent
 	ciliumEndpointResource      resource.Resource[*types.CiliumEndpoint]
 	ciliumEndpointSliceResource resource.Resource[*v2alpha1.CiliumEndpointSlice]
+	endpointRevalidators        []membership.EndpointRevalidator
+	membership                  *membership.Registry
 }
 
 func NewEnrollmentReconciler(cfg params) (reconciler.Operations[*table.EnrolledNamespace], error) {
@@ -72,6 +77,9 @@ func NewEnrollmentReconciler(cfg params) (reconciler.Operations[*table.EnrolledN
 	}
 	if cfg.Config.RequireMTLS && cfg.EndpointDeletionCleaner == nil {
 		return nil, fmt.Errorf("strict ztunnel enrollment requires deleted-endpoint cleanup")
+	}
+	if cfg.Config.RequireMTLS && (cfg.Membership == nil || len(cfg.EndpointRevalidators) == 0) {
+		return nil, fmt.Errorf("strict ztunnel enrollment requires membership registry and endpoint revalidator")
 	}
 
 	ops := &EnrollmentReconciler{
@@ -86,6 +94,8 @@ func NewEnrollmentReconciler(cfg params) (reconciler.Operations[*table.EnrolledN
 		endpointEventCh:             cfg.EndpointEventChannel,
 		ciliumEndpointResource:      cfg.CiliumEndpointResource,
 		ciliumEndpointSliceResource: cfg.CiliumEndpointSliceResource,
+		endpointRevalidators:        cfg.EndpointRevalidators,
+		membership:                  cfg.Membership,
 	}
 	cfg.Lifecycle.Append(ops)
 	return ops, nil
@@ -142,14 +152,16 @@ func (ops *EnrollmentReconciler) emitEndpointEvents(ctx context.Context, namespa
 }
 
 func (ops *EnrollmentReconciler) Update(ctx context.Context, txn statedb.ReadTxn, rev statedb.Revision, ns *table.EnrolledNamespace) error {
-	if err := ops.emitEndpointEvents(ctx, ns.Name, xds.CREATE); err != nil {
-		return err
-	}
-
 	// Enroll all endpoints in this namespace
 	endpoints := ops.endpointManager.GetEndpointsByNamespace(ns.Name)
 	for _, ep := range endpoints {
-		if ep.GetContainerNetnsPath() == "" || isZtunnelPod(ep) {
+		if ep.GetK8sPodUID() == "" || ep.GetContainerNetnsPath() == "" || isZtunnelPod(ep) {
+			continue
+		}
+		if ops.strictCreationAdmission {
+			if err := ops.revalidateEndpoint(ctx, ep, true); err != nil {
+				return fmt.Errorf("revalidating enrolled endpoint %s/%s: %w", ep.GetK8sNamespace(), ep.GetK8sPodName(), err)
+			}
 			continue
 		}
 		err := ops.endpointEnroller.EnrollEndpoint(ep)
@@ -162,6 +174,11 @@ func (ops *EnrollmentReconciler) Update(ctx context.Context, txn statedb.ReadTxn
 			return err
 		}
 	}
+	// Do not publish local xDS workload state until strict admission has
+	// revalidated the endpoint and completed fresh capture plus ZDS ACK.
+	if err := ops.emitEndpointEvents(ctx, ns.Name, xds.CREATE); err != nil {
+		return err
+	}
 	ops.logger.Info("Enrolled all endpoints in namespace", logfields.K8sNamespace, ns.Name)
 	return nil
 }
@@ -170,6 +187,13 @@ func (ops *EnrollmentReconciler) Delete(ctx context.Context, txn statedb.ReadTxn
 	if ops.strictCreationAdmission {
 		endpoints := ops.endpointManager.GetEndpointsByNamespace(ns.Name)
 		if len(endpoints) != 0 {
+			for _, ep := range endpoints {
+				if ref, state, ok := ops.membership.CurrentForPodUID(ep.GetK8sPodUID()); ok &&
+					state.EndpointID == ep.GetID16() && ref.Key.NamespaceUID == ns.UID {
+					ops.membership.InvalidateCapture(ref)
+					ops.publishRevokedMembership(ep, ref)
+				}
+			}
 			ops.logger.Warn("Strict namespace unenrollment deferred until endpoints are recreated",
 				logTransitionStage, "namespace-intent-transition",
 				logfields.K8sNamespace, ns.Name,
@@ -251,12 +275,23 @@ func (ops *EnrollmentReconciler) Start(ctx cell.HookContext) error {
 	for _, ep := range endpoints {
 		epNamespace := ep.GetK8sNamespace()
 		// If namespace is not enrolled or endpoint has no netns path or is ztunnel itself, skip
-		if epNamespace == "" || ep.GetContainerNetnsPath() == "" || isZtunnelPod(ep) {
+		if epNamespace == "" || ep.GetK8sPodUID() == "" || ep.GetContainerNetnsPath() == "" || isZtunnelPod(ep) {
 			continue
 		}
-		// Check if namespace is enrolled
+		// Check if namespace is enrolled.
 		txn := ops.db.ReadTxn()
 		_, _, found := ops.enrolledNamespaceTable.Get(txn, table.EnrolledNamespaceByName(epNamespace))
+		if ops.strictCreationAdmission {
+			if err := ops.revalidateEndpoint(ctx, ep, found); err != nil {
+				return fmt.Errorf("revalidating restored endpoint %s/%s: %w", ep.GetK8sNamespace(), ep.GetK8sPodName(), err)
+			}
+			_, state, ready := ops.membership.CurrentForPodUID(ep.GetK8sPodUID())
+			if !ready || !state.ReadyForAddress() || state.EndpointID != ep.GetID16() {
+				continue
+			}
+			endpointsToEnroll = append(endpointsToEnroll, ep)
+			continue
+		}
 		if !found {
 			ops.logger.Info("Skipping enrollment of endpoint in unenrolled namespace",
 				logfields.K8sNamespace, epNamespace,
@@ -313,6 +348,11 @@ func (ops *EnrollmentReconciler) EndpointDeleted(ep *endpoint.Endpoint, _ endpoi
 		if ep.K8sUID == "" && ep.GetK8sNamespace() == "" && ep.GetK8sPodName() == "" {
 			return
 		}
+		if ref, state, ok := ops.membership.CurrentForPodUID(ep.GetK8sPodUID()); ok && state.EndpointID == ep.GetID16() {
+			if _, began := ops.membership.BeginDrain(ref); began {
+				ops.publishRevokedMembership(ep, ref)
+			}
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := ops.endpointDeletionCleaner.CleanupDeletedEndpointContext(ctx, ep); err != nil {
@@ -348,6 +388,42 @@ func (ops *EnrollmentReconciler) EndpointDeleted(ep *endpoint.Endpoint, _ endpoi
 			logfields.Error, err,
 		)
 	}
+}
+
+func (ops *EnrollmentReconciler) publishRevokedMembership(ep *endpoint.Endpoint, ref membership.Reference) {
+	previous, _ := ep.GetZtunnelMembership()
+	state, ok := ops.membership.Publication(ref)
+	if !ok {
+		state = membership.Publication{Version: 1, Epoch: ref.Epoch, State: membership.PublicationRequired}
+	}
+	ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
+		Version:        state.Version,
+		Revision:       state.Revision,
+		Epoch:          state.Epoch,
+		Generation:     state.Generation,
+		State:          state.State,
+		NamespaceUID:   ref.Key.NamespaceUID,
+		NodeName:       previous.NodeName,
+		ServiceAccount: previous.ServiceAccount,
+	})
+}
+
+func (ops *EnrollmentReconciler) revalidateEndpoint(ctx context.Context, ep *endpoint.Endpoint, namespaceEnrolled bool) error {
+	for _, revalidator := range ops.endpointRevalidators {
+		if revalidator == nil {
+			return fmt.Errorf("endpoint revalidator is nil")
+		}
+		should, err := revalidator.ShouldRevalidate(ctx, ep, namespaceEnrolled)
+		if err != nil {
+			return err
+		}
+		if should {
+			if err := revalidator.RevalidateEndpoint(ctx, ep); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (ops *EnrollmentReconciler) EndpointRestored(ep *endpoint.Endpoint) {}

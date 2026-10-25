@@ -113,15 +113,19 @@ func TestIPIdentitySynchronizerK8sMetadata(t *testing.T) {
 	}
 
 	require.NoError(t, synchronizer.Upsert(t.Context(), &UpsertParams{
-		IP:              netip.MustParseAddr("10.0.0.1"),
-		HostIP:          netip.MustParseAddr("10.0.0.2"),
-		K8sNamespace:    "default",
-		K8sNamespaceUID: "namespace-uid-v1",
-		K8sNodeName:     "node-a",
-		K8sPodName:      "echo",
-		K8sPodUID:       "90b3d76d-3c14-42ce-b132-d2aad6789d47",
-		K8sWorkloadName: "echo",
-		K8sWorkloadKind: "Deployment",
+		IP:                          netip.MustParseAddr("10.0.0.1"),
+		HostIP:                      netip.MustParseAddr("10.0.0.2"),
+		K8sNamespace:                "default",
+		K8sNamespaceUID:             "namespace-uid-v1",
+		K8sNodeName:                 "node-a",
+		K8sPodName:                  "echo",
+		K8sPodUID:                   "90b3d76d-3c14-42ce-b132-d2aad6789d47",
+		K8sWorkloadName:             "echo",
+		K8sWorkloadKind:             "Deployment",
+		ZtunnelMembershipVersion:    1,
+		ZtunnelMembershipEpoch:      "agent-epoch-a",
+		ZtunnelMembershipGeneration: 9,
+		ZtunnelMembershipState:      "captured",
 	}))
 
 	var pair identity.IPIdentityPair
@@ -131,6 +135,10 @@ func TestIPIdentitySynchronizerK8sMetadata(t *testing.T) {
 	require.Equal(t, "90b3d76d-3c14-42ce-b132-d2aad6789d47", pair.K8sPodUID)
 	require.Equal(t, "echo", pair.K8sWorkloadName)
 	require.Equal(t, "Deployment", pair.K8sWorkloadKind)
+	require.Equal(t, uint8(1), pair.ZtunnelMembershipVersion)
+	require.Equal(t, "agent-epoch-a", pair.ZtunnelMembershipEpoch)
+	require.Equal(t, uint64(9), pair.ZtunnelMembershipGeneration)
+	require.Equal(t, "captured", pair.ZtunnelMembershipState)
 }
 
 func TestIPIdentityWatcher(t *testing.T) {

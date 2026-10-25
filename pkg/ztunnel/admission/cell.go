@@ -24,6 +24,7 @@ import (
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
+	"github.com/cilium/cilium/pkg/ztunnel/membership"
 	"github.com/cilium/cilium/pkg/ztunnel/zds"
 )
 
@@ -34,7 +35,21 @@ const (
 	logEnrollmentRequired = "enrollmentRequired"
 )
 
-var Cell = cell.Module("ztunnel-admission", "ztunnel new-pod startup admission", cell.Provide(newGate))
+var Cell = cell.Module(
+	"ztunnel-admission",
+	"ztunnel new-pod startup admission",
+	cell.Provide(
+		func(p membershipRegistryParams) *membership.Registry {
+			return membership.NewRegistry(p.ClusterInfo.ID)
+		},
+		newGate,
+	),
+)
+
+type membershipRegistryParams struct {
+	cell.In
+	ClusterInfo cmtypes.ClusterInfo
+}
 
 type params struct {
 	cell.In
@@ -45,11 +60,13 @@ type params struct {
 	Server      *zds.Server
 	AgentConfig *option.DaemonConfig
 	Logger      *slog.Logger
+	Registry    *membership.Registry
 }
 
 type out struct {
 	cell.Out
-	Gate endpointmanager.EndpointCreationGate `group:"endpoint-creation-gates"`
+	Gate        endpointmanager.EndpointCreationGate `group:"endpoint-creation-gates"`
+	Revalidator membership.EndpointRevalidator       `group:"ztunnel-endpoint-revalidators"`
 }
 
 type gate struct {
@@ -61,6 +78,7 @@ type gate struct {
 	nodeName       func() string
 	agentNamespace string
 	logger         *slog.Logger
+	membership     *membership.Registry
 	budget         time.Duration
 	attemptTimeout time.Duration
 	initialBackoff time.Duration
@@ -79,20 +97,53 @@ func newGate(p params) (out, error) {
 	g := &gate{enabled: enabled, logger: p.Logger, nodeName: nodetypes.GetName,
 		budget: 30 * time.Second, attemptTimeout: 5 * time.Second, initialBackoff: 100 * time.Millisecond,
 		validateNetns: validateNetworkNamespace,
+		membership:    p.Registry,
 	}
 	if p.AgentConfig != nil {
 		g.agentNamespace = p.AgentConfig.K8sNamespace
 	}
 	if enabled {
-		if p.Clientset == nil || !p.Clientset.IsEnabled() || p.Server == nil || g.agentNamespace == "" {
-			return out{}, fmt.Errorf("strict ztunnel admission requires Kubernetes, ZDS and configured agent namespace")
+		if p.Clientset == nil || !p.Clientset.IsEnabled() || p.Server == nil || g.agentNamespace == "" || g.membership == nil {
+			return out{}, fmt.Errorf("strict ztunnel admission requires Kubernetes, ZDS, a membership registry, and configured agent namespace")
 		}
 		g.core = p.Clientset.Slim().CoreV1()
 		g.enroll = p.Server.EnrollEndpointForOwnerContext
 		g.recorder = newRequiredRecorder(p.AgentConfig.StateDir, p.ClusterInfo.ID, g.nodeName)
 		p.Lifecycle.Append(cell.Hook{OnStop: func(cell.HookContext) error { return g.recorder.Close() }})
 	}
-	return out{Gate: g}, nil
+	return out{Gate: g, Revalidator: g}, nil
+}
+
+// ShouldRevalidate selects namespace-enrolled endpoints and endpoints still
+// present in the durable Required ledger. It lets restored endpoints rebuild
+// process-local membership before ztunnel's initial snapshot is seeded.
+func (g *gate) ShouldRevalidate(ctx context.Context, ep *endpoint.Endpoint, namespaceEnrolled bool) (bool, error) {
+	if !g.enabled {
+		return false, nil
+	}
+	if ep == nil || ep.GetK8sPodUID() == "" {
+		return false, fmt.Errorf("endpoint restore admission requires immutable Pod UID")
+	}
+	if namespaceEnrolled {
+		return true, nil
+	}
+	if g.recorder == nil {
+		return false, fmt.Errorf("durable Required intent recorder is unavailable")
+	}
+	_, required, err := g.recorder.Lookup(ctx, ep.GetK8sPodUID())
+	if err != nil {
+		return false, fmt.Errorf("reading durable Required intent for restored endpoint: %w", err)
+	}
+	return required, nil
+}
+
+func (g *gate) RevalidateEndpoint(ctx context.Context, ep *endpoint.Endpoint) error {
+	return g.WaitForEndpoint(ctx, ep)
+}
+
+type membershipAttempt struct {
+	ref        membership.Reference
+	generation uint64
 }
 
 func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (resultErr error) {
@@ -106,6 +157,12 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 	var namespaceUID types.UID
 	var attempt int
 	required := false // Never downgrade an observed enrolled request on retry.
+	token := membershipAttempt{}
+	if ep != nil && g.membership != nil {
+		if ref, state, ok := g.membership.CurrentForPodUID(ep.GetK8sPodUID()); ok && state.EndpointID == ep.GetID16() && state.NetnsPath == ep.GetContainerNetnsPath() {
+			token = membershipAttempt{ref, state.ZDSGeneration}
+		}
+	}
 	namespace, name, uid := "", "", ""
 	var endpointID uint16
 	if ep != nil {
@@ -115,6 +172,9 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 	// Every exit, including cancellation before an attempt or during backoff,
 	// records one terminal outcome. An admission ACK is not Protected status.
 	defer func() {
+		if resultErr != nil && ep != nil && g.membership != nil && g.membership.InvalidateCaptureGeneration(token.ref, token.generation) {
+			g.publishMembership(ep, token.ref, "", "")
+		}
 		attrs := []any{logStage, "cni-startup-admission", logfields.Attempt, attempt,
 			logfields.ElapsedDuration, time.Since(started), logDeadline, deadline,
 			logfields.EndpointID, endpointID, logfields.K8sUID, uid,
@@ -145,7 +205,7 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 			return permanent("managed endpoint disconnected during CNI admission")
 		}
 		attemptCtx, cancelAttempt := context.WithTimeout(ctx, g.attemptTimeout)
-		err := g.once(attemptCtx, ep, &namespaceUID, &required)
+		err := g.once(attemptCtx, ep, &namespaceUID, &required, &token)
 		if err == nil {
 			err = attemptCtx.Err()
 		}
@@ -186,7 +246,7 @@ func (g *gate) WaitForEndpoint(parent context.Context, ep *endpoint.Endpoint) (r
 	}
 }
 
-func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types.UID, required *bool) error {
+func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types.UID, required *bool, token *membershipAttempt) (retErr error) {
 	namespace, name := ep.GetK8sNamespace(), ep.GetK8sPodName()
 	if g.recorder == nil {
 		return permanent("durable Required intent recorder is unavailable")
@@ -201,6 +261,18 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 		}
 		*pinnedUID = types.UID(durableUID)
 		*required = true
+		if ref, state, ok := g.membership.CurrentForPodUID(ep.K8sUID); ok && state.EndpointID == ep.GetID16() {
+			g.membership.InvalidateCapture(ref)
+			g.publishMembership(ep, ref, "", "")
+		} else {
+			// A Required journal entry from before this process epoch is intent,
+			// never proof of capture. Publish an incomplete Required marker so a
+			// consumer rejects any stale serialized Captured record.
+			ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
+				Version: 1, State: endpoint.ZtunnelMembershipRequired,
+				NamespaceUID: durableUID,
+			})
+		}
 	}
 	before, err := g.core.Namespaces().Get(ctx, namespace, metav1.GetOptions{})
 	if err != nil {
@@ -267,6 +339,22 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 		}
 		defer release()
 		finalSandboxCheck = recheck
+		ref, err := g.membership.Require(string(*pinnedUID), ep.K8sUID, ep.GetID16(), path)
+		if err != nil {
+			return permanent("creating exact required membership: %w", err)
+		}
+		generation, ok := g.membership.BeginZDS(ref)
+		if !ok {
+			return permanent("starting a fresh ZDS membership generation failed")
+		}
+		*token = membershipAttempt{ref, generation}
+		g.publishMembership(ep, ref, pod.Spec.NodeName, pod.Spec.ServiceAccountName)
+		defer func() {
+			if retErr != nil {
+				g.membership.InvalidateCaptureGeneration(ref, generation)
+				g.publishMembership(ep, ref, pod.Spec.NodeName, pod.Spec.ServiceAccountName)
+			}
+		}()
 		if err := ctx.Err(); err != nil {
 			return err
 		}
@@ -312,5 +400,38 @@ func (g *gate) once(ctx context.Context, ep *endpoint.Endpoint, pinnedUID *types
 			return permanent("sandbox changed during final admission checks: %w", err)
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if *required {
+		if !g.membership.MarkCaptured(token.ref, token.generation) || !g.membership.AcknowledgeZDS(token.ref, token.generation) {
+			return permanent("final capture/ZDS evidence no longer matches the checked attempt")
+		}
+		ep.SetK8sNamespaceUID(string(*pinnedUID))
+		ref, state, ok := g.membership.CurrentForPodUID(ep.K8sUID)
+		if !ok || state.EndpointID != ep.GetID16() || ref.Key.NamespaceUID != string(*pinnedUID) || ref != token.ref || state.ZDSGeneration != token.generation || !state.ReadyForAddress() {
+			return permanent("required membership disappeared before publication")
+		}
+		if !g.publishMembership(ep, ref, pod.Spec.NodeName, pod.Spec.ServiceAccountName) {
+			return permanent("source publication was superseded before admission commit")
+		}
+	}
 	return nil
+}
+
+func (g *gate) publishMembership(ep *endpoint.Endpoint, ref membership.Reference, nodeName, serviceAccount string) bool {
+	p, ok := g.membership.Publication(ref)
+	if !ok {
+		return false
+	}
+	return ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
+		Revision:       p.Revision,
+		Version:        p.Version,
+		Epoch:          p.Epoch,
+		Generation:     p.Generation,
+		State:          p.State,
+		NamespaceUID:   ref.Key.NamespaceUID,
+		NodeName:       nodeName,
+		ServiceAccount: serviceAccount,
+	})
 }

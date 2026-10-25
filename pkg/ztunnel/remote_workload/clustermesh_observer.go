@@ -107,6 +107,13 @@ func (o *clusterMeshObserver) Register(mgr store.WatchStoreManager, backend kvst
 		o.disable("remote peer does not support the workload identity v1 capability")
 		return
 	}
+	if !cfg.Capabilities.ZtunnelMembershipV1 {
+		o.logger.Warn("Remote workload discovery disabled because peer does not advertise required/captured membership metadata",
+			logFieldStage, "remote-workload-peer-check",
+		)
+		o.disable("remote peer does not support the ztunnel membership v1 capability")
+		return
+	}
 
 	binding, ok := backend.(kvstore.RemotePeerBindingInfo)
 	if !ok {

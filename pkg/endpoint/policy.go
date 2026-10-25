@@ -1251,6 +1251,13 @@ func (e *Endpoint) runIPIdentitySync(endpointIP netip.Addr) {
 				k8sServiceAccount := ""
 				k8sWorkloadName := ""
 				k8sWorkloadKind := ""
+				membership := ZtunnelMembership{}
+				if k8sNamespace != "" && k8sPodUID != "" {
+					membership = ZtunnelMembership{Version: 1, State: ZtunnelMembershipUnenrolled}
+					if current, ok := e.GetZtunnelMembership(); ok {
+						membership = current
+					}
+				}
 				if pod := e.GetPod(); pod != nil {
 					// Only export node provenance when the Pod assignment matches
 					// this Cilium agent's configured node identity.
@@ -1263,26 +1270,38 @@ func (e *Endpoint) runIPIdentitySync(endpointIP netip.Addr) {
 						k8sWorkloadKind = workloadTypeMeta.Kind
 					}
 				}
+				if membership.NamespaceUID != "" {
+					// Strict admission sourced these values from a live API read and
+					// binds them to the exact CNI UID. Do not let delayed Pod metadata
+					// overwrite that provenance in the KVStore record.
+					k8sNamespaceUID = membership.NamespaceUID
+					k8sNodeName = membership.NodeName
+					k8sServiceAccount = membership.ServiceAccount
+				}
 
 				// Release lock as we do not want to have long-lasting key-value
 				// store operations resulting in lock being held for a long time.
 				e.runlock()
 
 				params := &ipcache.UpsertParams{
-					IP:                endpointIP,
-					HostIP:            hostIP,
-					ID:                ID,
-					Key:               key,
-					Metadata:          metadata,
-					K8sNamespace:      k8sNamespace,
-					K8sNamespaceUID:   k8sNamespaceUID,
-					K8sNodeName:       k8sNodeName,
-					K8sPodName:        k8sPodName,
-					K8sPodUID:         k8sPodUID,
-					K8sWorkloadName:   k8sWorkloadName,
-					K8sWorkloadKind:   k8sWorkloadKind,
-					K8sServiceAccount: k8sServiceAccount,
-					NPM:               e.GetK8sPorts(),
+					IP:                          endpointIP,
+					HostIP:                      hostIP,
+					ID:                          ID,
+					Key:                         key,
+					Metadata:                    metadata,
+					K8sNamespace:                k8sNamespace,
+					K8sNamespaceUID:             k8sNamespaceUID,
+					K8sNodeName:                 k8sNodeName,
+					K8sPodName:                  k8sPodName,
+					K8sPodUID:                   k8sPodUID,
+					K8sWorkloadName:             k8sWorkloadName,
+					K8sWorkloadKind:             k8sWorkloadKind,
+					K8sServiceAccount:           k8sServiceAccount,
+					ZtunnelMembershipVersion:    membership.Version,
+					ZtunnelMembershipEpoch:      membership.Epoch,
+					ZtunnelMembershipGeneration: membership.Generation,
+					ZtunnelMembershipState:      membership.State,
+					NPM:                         e.GetK8sPorts(),
 				}
 
 				if err := e.kvstoreSyncher.Upsert(ctx, params); err != nil {

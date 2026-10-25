@@ -152,6 +152,11 @@ type CiliumClusterConfigCapabilities struct {
 	// wire-format support only; each record still requires a non-empty UID.
 	WorkloadIdentityV1 bool `json:"workloadIdentityV1,omitempty"`
 
+	// ZtunnelMembershipV1 means the peer exports versioned Required/Captured/
+	// Draining state with a per-process epoch and generation in every workload
+	// IPIdentityPair. It does not advertise policy or Active status.
+	ZtunnelMembershipV1 bool `json:"ztunnelMembershipV1,omitempty"`
+
 	// The information concerning the given cluster is cached from an external
 	// kvstore (for instance, by kvstoremesh). This implies that keys are stored
 	// under the dedicated "cilium/cache" prefix, and all are cluster-scoped.

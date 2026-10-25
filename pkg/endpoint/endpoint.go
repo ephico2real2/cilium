@@ -321,6 +321,11 @@ type Endpoint struct {
 	// Namespace UID is live metadata and is deliberately resolved again after restore.
 	k8sNamespaceUID atomic.Pointer[string]
 
+	// ztunnelMembership is process-local evidence. It is never serialized as
+	// endpoint configuration; restored endpoints must revalidate and receive a
+	// fresh ZDS acknowledgment before this can be republished.
+	ztunnelMembership atomic.Pointer[ZtunnelMembership]
+
 	// logLimiter rate limits potentially repeating warning logs
 	logLimiter logging.Limiter
 

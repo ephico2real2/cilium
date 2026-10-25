@@ -50,9 +50,10 @@ type StreamProcessorParams struct {
 	Authorizations            *AuthorizationPolicies
 	TrustDomain               string
 	// ClusterName is the canonical local name expected by ztunnel's cluster inventory.
-	ClusterName   string
-	RequireMTLS   bool
-	IssuerProfile *issuerProfileSource
+	ClusterName               string
+	RequireMTLS               bool
+	EffectivePolicyQuarantine bool
+	IssuerProfile             *issuerProfileSource
 }
 
 // StreamProcessor implements the logic for handling xDS streams to zTunnel.
@@ -60,20 +61,22 @@ type StreamProcessorParams struct {
 // promote decoupling and the handling multiple streams without a shared set of
 // channels being required on the Server object.
 type StreamProcessor struct {
-	stream                 v3.AggregatedDiscoveryService_DeltaAggregatedResourcesServer
-	streamRecv             chan *v3.DeltaDiscoveryRequest
-	endpointRecv           chan *EndpointEvent
-	expectedNonce          map[string]struct{}
-	log                    *slog.Logger
-	endpointSource         EndpointEventSource
-	db                     *statedb.DB
-	enrolledNamespaceTable statedb.RWTable[*table.EnrolledNamespace]
-	metrics                *Metrics
-	authorizations         *AuthorizationPolicies
-	trustDomain            string
-	clusterName            string
-	requireMTLS            bool
-	issuerProfile          *issuerProfileSource
+	stream                    v3.AggregatedDiscoveryService_DeltaAggregatedResourcesServer
+	streamRecv                chan *v3.DeltaDiscoveryRequest
+	endpointRecv              chan *EndpointEvent
+	expectedNonce             map[string]struct{}
+	log                       *slog.Logger
+	endpointSource            EndpointEventSource
+	db                        *statedb.DB
+	enrolledNamespaceTable    statedb.RWTable[*table.EnrolledNamespace]
+	metrics                   *Metrics
+	authorizations            *AuthorizationPolicies
+	trustDomain               string
+	clusterName               string
+	requireMTLS               bool
+	effectivePolicyQuarantine bool
+	quarantineResources       map[string]string
+	issuerProfile             *issuerProfileSource
 }
 
 // CiliumEndpointsWatcher defines the interface for watching CiliumEndpoints and CiliumEndpointSlices.
@@ -125,19 +128,20 @@ func NewStreamProcessor(params *StreamProcessorParams) *StreamProcessor {
 		authorizations = NewAuthorizationPolicies(params.Log, metrics)
 	}
 	sp := &StreamProcessor{
-		stream:                 params.Stream,
-		streamRecv:             params.StreamRecv,
-		endpointRecv:           params.EndpointEventRecv,
-		log:                    params.Log,
-		expectedNonce:          make(map[string]struct{}),
-		db:                     params.DB,
-		enrolledNamespaceTable: params.EnrolledNamespaceTable,
-		metrics:                metrics,
-		authorizations:         authorizations,
-		trustDomain:            params.TrustDomain,
-		clusterName:            params.ClusterName,
-		requireMTLS:            params.RequireMTLS,
-		issuerProfile:          params.IssuerProfile,
+		stream:                    params.Stream,
+		streamRecv:                params.StreamRecv,
+		endpointRecv:              params.EndpointEventRecv,
+		log:                       params.Log,
+		expectedNonce:             make(map[string]struct{}),
+		db:                        params.DB,
+		enrolledNamespaceTable:    params.EnrolledNamespaceTable,
+		metrics:                   metrics,
+		authorizations:            authorizations,
+		trustDomain:               params.TrustDomain,
+		clusterName:               params.ClusterName,
+		requireMTLS:               params.RequireMTLS,
+		effectivePolicyQuarantine: params.EffectivePolicyQuarantine,
+		issuerProfile:             params.IssuerProfile,
 	}
 	sp.endpointSource = NewEndpointSource(params.K8sCiliumEndpointsWatcher, sp)
 	return sp
@@ -761,7 +765,16 @@ func (sp *StreamProcessor) drainEndpointEvents(first *EndpointEvent) (EndpointEv
 
 func (sp *StreamProcessor) addressResponse(collection EndpointEventCollection) (*v3.DeltaDiscoveryResponse, error) {
 	if sp.requireMTLS {
-		return collection.toValidatedDeltaDiscoveryResponse(sp.trustDomain, sp.clusterName)
+		response, err := collection.toValidatedDeltaDiscoveryResponse(sp.trustDomain, sp.clusterName)
+		if err != nil {
+			return nil, err
+		}
+		if sp.effectivePolicyQuarantine {
+			if err := sp.bindEffectiveQuarantine(response); err != nil {
+				return nil, err
+			}
+		}
+		return response, nil
 	}
 	return collection.toDeltaDiscoveryResponse(sp.trustDomain, sp.clusterName), nil
 }
