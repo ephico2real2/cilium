@@ -314,6 +314,7 @@ func (p *SourcePublisher) Run(ctx context.Context) error {
 		}
 	}
 	var attempt uint64
+	waitStarted := time.Now() // A writer that ended without unlocking holds the lock until its lease expires.
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil
@@ -337,6 +338,11 @@ func (p *SourcePublisher) Run(ctx context.Context) error {
 			}
 			continue
 		}
+		p.logger.Info("Acquired source membership writer lock",
+			logSourceStage, "lock",
+			logfields.ClusterName, p.config.ClusterInfo.Name,
+			logfields.Attempt, attempt,
+			logfields.ElapsedDuration, time.Since(waitStarted))
 		err = p.runLocked(ctx, locker)
 		// Do not delete the source key as an error-recovery fence: publish a
 		// restrictive generation under the same persistent server write head.
@@ -355,6 +361,7 @@ func (p *SourcePublisher) Run(ctx context.Context) error {
 				logfields.Error, unlockErr)
 		}
 		cancel()
+		waitStarted = time.Now()
 		if ctx.Err() != nil {
 			return nil
 		}
