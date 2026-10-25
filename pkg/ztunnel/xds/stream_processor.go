@@ -905,10 +905,12 @@ func (sp *StreamProcessor) addressResponse(collection EndpointEventCollection) (
 
 // Start multiplexes the legacy Address stream and the shared delta engine's
 // Authorization stream. A protocol or send error terminates this connection;
-// the next connection reconstructs its own subscription/nonce state.
+// the next connection reconstructs its own subscription/nonce state, and the
+// ADS generation this connection began ends with it.
 func (sp *StreamProcessor) Start() error {
 	ctx, cancel := context.WithCancel(sp.stream.Context())
 	defer cancel()
+	defer sp.endStream()
 	if err := ctx.Err(); err != nil {
 		return err
 	}

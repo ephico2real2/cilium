@@ -117,6 +117,22 @@ func (o *effectivePolicyOwner) beginStream() uint64 {
 	return generation
 }
 
+// endStream is called by the stream that began generation when it closes.
+// The acknowledgments of that stream no longer describe a live ztunnel
+// session, so nothing is published or released until the next stream begins.
+// A stream that a newer one replaced ends nothing.
+func (o *effectivePolicyOwner) endStream(generation uint64) {
+	if !o.registry.EndADSGeneration(generation) {
+		return
+	}
+	o.mu.Lock()
+	if o.generation == generation {
+		o.generation, o.acked = 0, 0
+		clear(o.published)
+	}
+	o.mu.Unlock()
+}
+
 // observeAuthorizationAck records that the ztunnel on stream generation
 // applied the Authorization resources of cache version.
 func (o *effectivePolicyOwner) observeAuthorizationAck(generation, version uint64) {

@@ -131,3 +131,10 @@ func (sp *StreamProcessor) reportAuthorizationAck() {
 		sp.policyOwner.observeAuthorizationAck(sp.adsGeneration, acked)
 	}
 }
+
+// endStream ends the ADS generation this stream began, when the stream closes.
+func (sp *StreamProcessor) endStream() {
+	if sp.policyOwner != nil && sp.adsGeneration != 0 {
+		sp.policyOwner.endStream(sp.adsGeneration)
+	}
+}

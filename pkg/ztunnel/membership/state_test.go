@@ -316,6 +316,51 @@ func TestMembershipAdmittedAfterADSStreamBeganPublishesOnThatStream(t *testing.T
 	}
 }
 
+// Evidence lives only as long as the stream that produced it. Once that
+// stream closes no workload is Active, nothing from it can be published or
+// acknowledged, and its generation is never reused. A stream that a newer one
+// replaced cannot end the newer one.
+func TestEndedADSStreamDropsItsEvidence(t *testing.T) {
+	registry := NewRegistry(17)
+	ref := requireMembership(t, registry, "ns-uid", "pod-uid", 42, "/var/run/netns/pod-42")
+	establishCaptureAndZDS(t, registry, ref)
+	generation := establishAddressAndPolicy(t, registry, ref)
+	if state, _ := registry.Get(ref); !state.Active() {
+		t.Fatalf("expected Active before the stream ended: %+v", state)
+	}
+	stale, _ := registry.Get(ref)
+
+	if !registry.EndADSGeneration(generation) {
+		t.Fatal("the current stream could not end")
+	}
+	if registry.ADSGeneration() != 0 {
+		t.Fatal("a stream is still reported after it ended")
+	}
+	if state, _ := registry.Get(ref); state.Active() || state.ADSGeneration != 0 || state.AddressVersion != 0 || state.PolicyVersion != 0 {
+		t.Fatalf("an ended stream must leave no Address or policy evidence: %+v", state)
+	}
+	if _, ok := registry.PublishAddress(ref, generation); ok {
+		t.Fatal("an ended stream published an Address")
+	}
+	if registry.AcknowledgeAddress(ref, generation, stale.AddressVersion) || registry.AcknowledgePolicy(ref, generation, stale.PolicyVersion) {
+		t.Fatal("an ended stream acknowledged evidence")
+	}
+	if registry.EndADSGeneration(generation) {
+		t.Fatal("a stream ended twice")
+	}
+
+	next := establishAddressAndPolicy(t, registry, ref)
+	if next <= generation {
+		t.Fatalf("stream generation %d reused or went backwards after %d", next, generation)
+	}
+	if registry.EndADSGeneration(generation) {
+		t.Fatal("a replaced stream ended its successor")
+	}
+	if state, _ := registry.Get(ref); !state.Active() {
+		t.Fatalf("a replaced stream's end dropped the current stream's evidence: %+v", state)
+	}
+}
+
 func TestEndpointReplacementAndDrainFenceOldIncarnation(t *testing.T) {
 	registry := NewRegistry(17)
 	oldRef := requireMembership(t, registry, "ns-uid", "pod-uid", 42, "/var/run/netns/pod-42")

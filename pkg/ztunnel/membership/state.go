@@ -146,7 +146,8 @@ type Registry struct {
 	nextPublicationRevision uint64
 	publicationPoisoned     bool
 	nextZDSGeneration       uint64
-	adsGeneration           uint64 // current ztunnel stream; 0 before the first
+	nextADSGeneration       uint64
+	adsGeneration           uint64 // current ztunnel stream; 0 while none is open
 	nextDrainGeneration     uint64
 	nextVersion             uint64
 
@@ -265,21 +266,41 @@ func (r *Registry) AcknowledgeZDS(ref Reference, generation uint64) bool {
 
 // BeginADSGeneration starts a new ztunnel stream and drops the Address and
 // policy evidence of every earlier one. The returned generation identifies the
-// new stream; each workload publishes its Address on it again, including one
-// admitted after the stream began.
+// new stream and is never reused; each workload publishes its Address on it
+// again, including one admitted after the stream began.
 func (r *Registry) BeginADSGeneration() uint64 {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.adsGeneration++
+	r.nextADSGeneration++
+	r.adsGeneration = r.nextADSGeneration
+	r.clearADSEvidenceLocked()
+	return r.adsGeneration
+}
+
+// EndADSGeneration closes generation if it is still the current stream. Its
+// acknowledgments described a ztunnel session that no longer exists, so they
+// are dropped and no workload is Active until a new stream acknowledges it. A
+// stream that a newer one already replaced ends nothing.
+func (r *Registry) EndADSGeneration(generation uint64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if generation == 0 || generation != r.adsGeneration {
+		return false
+	}
+	r.adsGeneration = 0
+	r.clearADSEvidenceLocked()
+	return true
+}
+
+func (r *Registry) clearADSEvidenceLocked() {
 	for ref, state := range r.states {
 		clearADSEvidence(&state)
 		r.storeEvidenceLocked(ref, state)
 	}
-	return r.adsGeneration
 }
 
-// ADSGeneration returns the current ztunnel stream generation, 0 before the
-// first stream.
+// ADSGeneration returns the current ztunnel stream generation, 0 while no
+// stream is open.
 func (r *Registry) ADSGeneration() uint64 {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

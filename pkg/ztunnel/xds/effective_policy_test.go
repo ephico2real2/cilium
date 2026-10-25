@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"slices"
 	"testing"
+	"time"
 
 	v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
 	"github.com/stretchr/testify/require"
@@ -368,6 +369,81 @@ func TestEffectivePolicyReleaseRetryAndStreamReset(t *testing.T) {
 	f.owner.reconcile()
 	require.Len(t, d.receipts, 2)
 	require.False(t, d.quarantined)
+}
+
+// A plan acknowledged on a stream that has since closed, with no newer
+// stream yet, cannot release: that ztunnel session no longer exists. A late
+// ACK from the closed stream is ignored, and the next stream releases only on
+// its own acknowledgments.
+func TestEffectivePolicyEndedStreamCannotRelease(t *testing.T) {
+	f := newOwnerFixture(t)
+	d := f.capture("api", 10, podD, "10.0.0.20", 300, l4Snapshot(t, entries(allowAll(ingress), allowAll(egress))...))
+	d.releaseErr = errors.New("native policy drain is pending")
+	generation := f.owner.beginStream()
+	f.bindAndAcknowledgeAddress(generation, podD)
+	f.owner.reconcile()
+	f.owner.observeAuthorizationAck(generation, f.cacheVersion())
+	f.owner.reconcile()
+	require.Len(t, d.receipts, 1)
+	require.True(t, d.quarantined)
+
+	f.owner.endStream(generation)
+	d.releaseErr = nil
+	f.owner.observeAuthorizationAck(generation, f.cacheVersion())
+	f.owner.reconcile()
+	require.Len(t, d.receipts, 1, "an ended stream's acknowledgments cannot release")
+	require.True(t, d.quarantined)
+	state, _ := f.registry.Get(f.refs[podD])
+	require.False(t, state.Active())
+
+	next := f.owner.beginStream()
+	f.owner.reconcile()
+	require.Len(t, d.receipts, 1, "a new stream releases only on its own acknowledgments")
+	f.bindAndAcknowledgeAddress(next, podD)
+	f.owner.reconcile()
+	f.owner.observeAuthorizationAck(next, f.cacheVersion())
+	f.owner.reconcile()
+	require.Len(t, d.receipts, 2)
+	require.False(t, d.quarantined)
+}
+
+// The real stream loop ends the ADS generation it began when the ztunnel
+// connection closes, so the owner and the registry hold no live stream.
+func TestStreamCloseEndsItsADSGeneration(t *testing.T) {
+	f := newOwnerFixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	requests := make(chan *v3.DeltaDiscoveryRequest, 1)
+	stream := &MockStream{}
+	stream.OnContext = func() context.Context { return ctx }
+	stream.OnSendMsg = func(any) error { return nil }
+	stream._Recv = func() (*v3.DeltaDiscoveryRequest, error) {
+		select {
+		case r := <-requests:
+			return r, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	sp := NewStreamProcessor(&StreamProcessorParams{NodeNames: fixtureNodeNames(t), Stream: stream,
+		StreamRecv: make(chan *v3.DeltaDiscoveryRequest, 1), EndpointEventRecv: make(chan *EndpointEvent),
+		Log: slog.New(slog.DiscardHandler), Metrics: NewMetrics(), PolicyOwner: f.owner})
+	sp.endpointSource = &MockEndpointEventSource{initial: EndpointEventCollection{}}
+	done := make(chan error, 1)
+	go func() { done <- sp.Start() }()
+	requests <- &v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLAddress}
+	require.Eventually(t, func() bool { return f.registry.ADSGeneration() != 0 }, 5*time.Second, 10*time.Millisecond)
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stream did not close")
+	}
+	require.Zero(t, f.registry.ADSGeneration(), "the closed stream is still the registry's current stream")
+	f.owner.mu.Lock()
+	defer f.owner.mu.Unlock()
+	require.Zero(t, f.owner.generation, "the closed stream is still the owner's current stream")
 }
 
 // Stream hooks: an Address version is acknowledged only by the ACK of the
