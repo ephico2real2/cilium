@@ -134,7 +134,7 @@ func newGate(p params) (out, error) {
 			switch path := p.Config.SourceMembershipEtcdConfig; {
 			case path != "":
 				p.JobGroup.Add(job.OneShot(logSourcePublisher, g.dedicatedSourcePublisher(
-					openMembershipBackend(p.Logger, path, p.Resolver), p.Endpoints, publisherConfig, path)))
+					membership.OpenDedicatedBackend(p.Logger, path, p.Resolver), p.Endpoints, publisherConfig, path)))
 			case p.KVStore != nil && p.KVStore.IsEnabled():
 				publisher, err := membership.NewSourcePublisher(g.membership, p.Endpoints, []membership.EndpointRevalidator{g}, p.KVStore, p.Logger,
 					publisherConfig)

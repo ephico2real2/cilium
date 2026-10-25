@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"net/netip"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
+	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/lock"
@@ -160,6 +162,9 @@ type SourceMembershipJoiner struct {
 
 	clusterName string
 	clusterID   uint32
+	// localNode is set when this joiner reads its own cluster's records; see
+	// NewLocalSourceMembershipJoiner.
+	localNode   string
 	maxLeaseTTL time.Duration
 	now         func() time.Time
 	logger      *slog.Logger
@@ -200,6 +205,24 @@ func NewSourceMembershipJoiner(clusterName string, clusterID uint32, logger *slo
 		floors:       make(map[string]map[string]sourceMembershipFloor),
 		currentEpoch: make(map[string]string),
 	}, nil
+}
+
+// NewLocalSourceMembershipJoiner reads this cluster's own source records: the
+// workloads of the other nodes, which a destination on localNode may admit as
+// sources. There is no IP record to join and no peer certificate bounds the
+// view; the lease, its floors and receiver-side expiry are the evidence, as
+// for a remote record. The destination still checks every workload against
+// its own ipcache before it uses it.
+func NewLocalSourceMembershipJoiner(clusterName string, clusterID uint32, localNode string, logger *slog.Logger, sink SnapshotSink) (*SourceMembershipJoiner, error) {
+	if problems := validation.IsDNS1123Subdomain(localNode); len(problems) != 0 {
+		return nil, fmt.Errorf("local source membership joiner requires a valid node name")
+	}
+	j, err := NewSourceMembershipJoiner(clusterName, clusterID, logger, sink)
+	if err != nil {
+		return nil, err
+	}
+	j.localNode = localNode
+	return j, nil
 }
 
 // Begin starts a new source-record list epoch and immediately withdraws the
@@ -453,7 +476,7 @@ func (j *SourceMembershipJoiner) Ready() bool {
 		}
 		return false
 	}
-	ready := j.sourceListed && !j.sourceInvalid && j.haveIP && j.ipSnapshot.Valid
+	ready := j.sourceListed && !j.sourceInvalid && (j.localNode != "" || (j.haveIP && j.ipSnapshot.Valid))
 	j.mu.Unlock()
 	if notifyReady != nil {
 		notifyReady()
@@ -466,6 +489,11 @@ func (j *SourceMembershipJoiner) Ready() bool {
 // their list and exact workload matches are available.
 func (j *SourceMembershipJoiner) PublishRemoteWorkloadSnapshot(snapshot Snapshot) {
 	j.mu.Lock()
+	if j.localNode != "" {
+		j.invalidateLocked("a local source membership joiner has no IP identity input")
+		j.mu.Unlock()
+		return
+	}
 	var notifyReady func()
 	j.ipSnapshot = cloneSnapshot(snapshot)
 	j.haveIP = true
@@ -504,6 +532,9 @@ func (j *SourceMembershipJoiner) invalidateLocked(reason string) {
 }
 
 func (j *SourceMembershipJoiner) publishJoinedLocked() func() {
+	if j.localNode != "" {
+		return j.publishLocalLocked()
+	}
 	if !j.haveIP || !j.ipSnapshot.Valid || !j.sourceListed || j.sourceInvalid {
 		j.publishLocked(false, "source membership and IP identity lists are not both current", nil, time.Time{})
 		return nil
@@ -577,6 +608,111 @@ func (j *SourceMembershipJoiner) publishJoinedLocked() func() {
 		return callback
 	}
 	return nil
+}
+
+// publishLocalLocked publishes the leased workloads of every other node of
+// this cluster. A Pod UID names one incarnation in the cluster, so a second
+// lease claiming one withdraws the whole view.
+func (j *SourceMembershipJoiner) publishLocalLocked() func() {
+	if !j.sourceListed || j.sourceInvalid {
+		j.publishLocked(false, "local source membership list is not current", nil, time.Time{})
+		return nil
+	}
+	j.expireLeasesLocked(j.now())
+	seen := make(map[string]struct{})
+	var workloads []Workload
+	leaseDeadline := time.Time{}
+	for node, source := range j.leases {
+		record := source.key.Record
+		if node == j.localNode || !record.Valid {
+			continue
+		}
+		if leaseDeadline.IsZero() || source.expiresAt.Before(leaseDeadline) {
+			leaseDeadline = source.expiresAt
+		}
+		for _, entry := range record.Workloads {
+			if _, duplicate := seen[entry.PodUID]; duplicate {
+				j.invalidateLocked("source leases contain a duplicate Pod incarnation")
+				return nil
+			}
+			seen[entry.PodUID] = struct{}{}
+			workload, err := workloadFromSourceEntry(j.clusterID, entry)
+			if err != nil {
+				j.invalidateLocked(err.Error())
+				return nil
+			}
+			workloads = append(workloads, workload)
+		}
+	}
+	sort.Slice(workloads, func(i, k int) bool {
+		if workloads[i].Key.NamespaceUID != workloads[k].Key.NamespaceUID {
+			return workloads[i].Key.NamespaceUID < workloads[k].Key.NamespaceUID
+		}
+		return workloads[i].Key.PodUID < workloads[k].Key.PodUID
+	})
+	if workloads == nil {
+		workloads = []Workload{}
+	}
+	j.publishLocked(true, "", workloads, leaseDeadline)
+	if j.onReady != nil {
+		var callback func()
+		j.readyOnce.Do(func() { callback = j.onReady })
+		return callback
+	}
+	return nil
+}
+
+// workloadFromSourceEntry is a source entry as a workload: with no IP record,
+// the lease is the only witness of every field.
+func workloadFromSourceEntry(clusterID uint32, entry membership.SourceMembershipEntry) (Workload, error) {
+	addresses := make([]netip.Addr, 0, len(entry.Addresses))
+	for _, value := range entry.Addresses {
+		addr, err := netip.ParseAddr(value)
+		if err != nil {
+			return Workload{}, fmt.Errorf("source lease contains an invalid workload address")
+		}
+		addresses = append(addresses, addr)
+	}
+	slices.SortFunc(addresses, netip.Addr.Compare)
+	return Workload{
+		Key:       WorkloadKey{ClusterID: clusterID, NamespaceUID: entry.NamespaceUID, PodUID: entry.PodUID},
+		Namespace: entry.Namespace, NodeName: entry.NodeName, PodName: entry.PodName, ServiceAccount: entry.ServiceAccount,
+		Identity: identity.NumericIdentity(entry.Identity), MembershipEpoch: entry.MembershipEpoch,
+		MembershipGeneration: entry.ZDSGeneration, MembershipState: "captured", Addresses: addresses,
+		EndpointID: entry.EndpointID, EgressPolicy: entry.EgressPolicy.Clone(),
+	}, nil
+}
+
+// runLocalSourceMembershipWatch watches this cluster's source records until
+// the watch ends or the joiner withdraws its view. Receiver-side expiry runs
+// every second, so a writer that stops refreshing is removed even if etcd's
+// delete event never arrives.
+func runLocalSourceMembershipWatch(ctx context.Context, backend store.WatchStoreBackend, watch store.WatchStore, joiner *SourceMembershipJoiner) error {
+	if backend == nil || watch == nil || joiner == nil || joiner.localNode == "" {
+		return fmt.Errorf("local source membership watch dependencies are incomplete")
+	}
+	sessionCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	joiner.SetSessionCancel(cancel)
+	defer joiner.SetSessionCancel(nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watch.Watch(sessionCtx, backend, kvstore.JoinKey(membership.SourceMembershipPrefix))
+	}()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-done:
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			return fmt.Errorf("local source membership watch ended before cancellation")
+		case now := <-ticker.C:
+			joiner.Expire(now)
+		}
+	}
 }
 
 func (j *SourceMembershipJoiner) publishLocked(valid bool, reason string, workloads []Workload, leaseDeadline time.Time) {

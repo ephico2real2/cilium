@@ -30,13 +30,17 @@ type cellParams struct {
 // shared PeerSnapshotStore. Those snapshots are discovery state only; the xDS
 // owner applies issuer-profile, deadline and collision authority before it
 // projects any remote workload, and source membership alone does not
-// authorize traffic. This cell does not synthesize local APIWorkloads or
-// modify endpoint/ipcache state.
+// authorize traffic. The same-cluster reader fills LocalSourceMailbox with
+// the leased workloads of this cluster's other nodes, as sources only. This
+// cell does not synthesize local APIWorkloads or modify endpoint/ipcache
+// state.
 var Cell = cell.Module(
 	"ztunnel-remote-workloads",
 	"Observe authenticated remote ClusterMesh workload identity snapshots",
 
 	cell.Provide(NewPeerSnapshotStore),
+	cell.Provide(newLocalSourceMailbox),
+	cell.Invoke(registerLocalSourceReader),
 	cell.Provide(func(params cellParams, store *PeerSnapshotStore) observer.FactoryOut {
 		factory := NewClusterMeshObserverFactory(FactoryParams{
 			Logger:                 params.Logger,
