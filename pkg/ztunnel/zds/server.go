@@ -790,6 +790,10 @@ func (s *Server) SeedInitialSnapshot(eps ...*endpoint.Endpoint) {
 // This is called by handleConn for each new connection.
 // snapshotBinding returns the retained ADD binding a strict endpoint can
 // replay into the ztunnel execution identified by epoch, or why it cannot.
+// A later ADD of the same original binding may be installed although its
+// answer was lost; ztunnel refuses a replay of the older capture generation,
+// and a refused replay fails this snapshot and every later one. The newest
+// retained binding of that original ADD is accepted as a refresh of either.
 func (s *Server) snapshotBinding(ep *endpoint.Endpoint, epoch []byte) (*pb.WorkloadBinding, string) {
 	key, err := incarnation(ep)
 	if err != nil {
@@ -797,6 +801,13 @@ func (s *Server) snapshotBinding(ep *endpoint.Endpoint, epoch []byte) (*pb.Workl
 	}
 	s.endpointCacheMutex.RLock()
 	binding := s.drainBindings[key]
+	if binding != nil {
+		for _, b := range append([]*pb.WorkloadBinding{s.policyADDAttempts[key]}, s.policyADDHistory[key]...) {
+			if b != nil && sameOriginalADD(b, binding) && b.CaptureGeneration > binding.CaptureGeneration {
+				binding = b
+			}
+		}
+	}
 	s.endpointCacheMutex.RUnlock()
 	switch {
 	case binding == nil:

@@ -143,9 +143,12 @@ func (s *Server) originalDrainCandidatesLocked(key endpointIncarnation, ref memb
 
 // forgetRefusedADD removes a bound ADD that ztunnel refused from the ADD
 // uncertainty history. ztunnel installs an owner only when the ADD succeeds, so
-// a refused binding is not installed and is no owner to drain. Kept, refusals
-// alone would fill the history and block every later ADD of the endpoint. The
-// acknowledged owner marker is never removed here.
+// a refused binding is not installed and is no owner to drain. The refusal also
+// covers every earlier send of that binding: processUpdate never sends one
+// twice, because each admission attempt takes a fresh capture generation
+// (membership.BeginZDS). Kept, refusals alone would fill the history and block
+// every later ADD of the endpoint. The acknowledged owner marker, which only
+// the snapshot replays, is never removed here.
 func (s *Server) forgetRefusedADD(req *pb.WorkloadRequest, path string) {
 	add := req.GetAdd()
 	if add == nil || add.Binding == nil || path == "" {

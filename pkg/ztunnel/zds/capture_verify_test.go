@@ -54,6 +54,38 @@ func TestVerifyCaptureRequiresTheLiveExecutionAndExactGeneration(t *testing.T) {
 		"verification never changes retained state")
 }
 
+// An ADD sent after the acknowledged one can be installed although its answer
+// was lost. ztunnel then refuses a replay of the older capture generation, and
+// a refused replay fails the snapshot of every reconnect. The snapshot replays
+// the newest retained binding of the acknowledged ADD, never one of another
+// ztunnel execution, and choosing it changes no retained state.
+func TestSnapshotReplaysTheNewestBindingOfTheAcknowledgedADD(t *testing.T) {
+	s := strictCleanupServer(t)
+	ep := liveManagedEndpoint(t, 9, "pod-uid", "/ns")
+	key := endpointIncarnation{id: 9, uid: "pod-uid", netnsPath: "/ns"}
+	_, acknowledged, live := captureFixture()
+	lost := proto.Clone(acknowledged).(*pb.WorkloadBinding)
+	lost.CaptureGeneration++
+	earlier := proto.Clone(acknowledged).(*pb.WorkloadBinding)
+	earlier.CaptureGeneration += 2
+	earlier.ProxyEpoch = bytes.Repeat([]byte{8}, 32)
+	s.drainBindings = map[endpointIncarnation]*pb.WorkloadBinding{key: proto.Clone(acknowledged).(*pb.WorkloadBinding)}
+	s.policyADDAttempts = map[endpointIncarnation]*pb.WorkloadBinding{key: proto.Clone(lost).(*pb.WorkloadBinding)}
+	s.policyADDHistory = map[endpointIncarnation][]*pb.WorkloadBinding{key: {proto.Clone(acknowledged).(*pb.WorkloadBinding), earlier, lost}}
+
+	replay, reason := s.snapshotBinding(ep, live)
+	require.Empty(t, reason)
+	require.True(t, proto.Equal(lost, replay), "the replay is the newest binding this execution may own")
+	require.True(t, proto.Equal(acknowledged, s.drainBindings[key]), "choosing the replay changes no retained state")
+	require.Len(t, s.policyADDHistory[key], 3)
+
+	delete(s.policyADDAttempts, key)
+	delete(s.policyADDHistory, key)
+	replay, reason = s.snapshotBinding(ep, live)
+	require.Empty(t, reason)
+	require.True(t, proto.Equal(acknowledged, replay), "without later sends the acknowledged binding is replayed")
+}
+
 // A ztunnel restart (stale binding) or an agent restart (no binding) must not
 // fail the initial snapshot: those endpoints are left out, and the snapshot
 // completes so admission can re-capture them over this connection.
