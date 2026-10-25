@@ -294,6 +294,12 @@ func (s *issuerProfileSource) protocolTiming() issuerProfileTiming {
 	return issuerProfileTiming{poll: 2 * time.Second, ack: 5 * time.Second}
 }
 
+// observationRaced reports a producer write between the reads of one API
+// observation: that observation is incoherent, the delivered profile is not.
+func observationRaced(err error) bool {
+	return errors.Is(err, issuerprofile.ErrOutputChanged) || errors.Is(err, issuerprofile.ErrSourceChanged)
+}
+
 type issuerProfilePending struct {
 	nonce, version string
 	until          time.Time
@@ -354,11 +360,32 @@ func (s *issuerProfileSource) run(ctx context.Context, requests <-chan *v3.Delta
 		attempt++
 		stage = "issuer-profile-api-poll"
 		next, err := s.snapshot(ctx)
+		if observationRaced(err) {
+			// The producer renews every 15s; a write between this poll's reads
+			// (observed live 2026-10-25T17:42:53Z and 17:55:07Z) is routine.
+			// Observe again at once, so a raced renewal or withdrawal is not
+			// delayed; never project the raced observation itself.
+			if s.log != nil {
+				s.log.Info("Issuer-profile API observation raced a concurrent publication; observing again",
+					issuerProfileLogComponent, "ztunnel-xds",
+					issuerProfileLogStage, stage,
+					logfields.Attempt, attempt,
+					logfields.Error, err,
+				)
+			}
+			next, err = s.snapshot(ctx)
+			if observationRaced(err) {
+				// Publish nothing; the next poll observes again. Nothing is
+				// reused or extended: the subscriber's lease and this session's
+				// deadline still bound the last delivery.
+				return nil
+			}
+		}
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
 			}
-			// A double-GET coherence failure closes this session immediately.
+			// Any other observation failure closes this session immediately.
 			// It is not permission to reuse the last good profile. Classify it
 			// as Unavailable so the native client backs off instead of treating
 			// a generic gRPC Unknown as a normal 10ms reconnect/GOAWAY.

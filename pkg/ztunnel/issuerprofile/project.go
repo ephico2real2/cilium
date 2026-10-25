@@ -101,6 +101,15 @@ func checkOutput(out *corev1.ConfigMap, e Install) error {
 	}
 	return nil
 }
+
+// A producer write between the reads of one observation makes that observation
+// incoherent. It says nothing about the authority already delivered, which stays
+// bounded by its own lease; callers may observe again instead of failing.
+var (
+	ErrSourceChanged = errors.New("source changed during API observation")
+	ErrOutputChanged = errors.New("output changed during API observation")
+)
+
 func sameObject(a, b *corev1.ConfigMap) bool {
 	return a != nil && b != nil && a.UID == b.UID && a.ResourceVersion == b.ResourceVersion && b.DeletionTimestamp == nil
 }
@@ -167,7 +176,7 @@ func ReadAndProject(ctx context.Context, core typedcore.CoreV1Interface, e Insta
 			return nil, readErr
 		}
 		if !sameObject(source, latest) {
-			return nil, errors.New("source changed during API observation")
+			return nil, ErrSourceChanged
 		}
 	}
 	latest, err := core.ConfigMaps(e.OutputNamespace).Get(ctx, e.OutputName, metav1.GetOptions{})
@@ -175,7 +184,7 @@ func ReadAndProject(ctx context.Context, core typedcore.CoreV1Interface, e Insta
 		return nil, err
 	}
 	if !sameObject(output, latest) {
-		return nil, errors.New("output changed during API observation")
+		return nil, ErrOutputChanged
 	}
 	if err = checkOutput(latest, e); err != nil {
 		return nil, err

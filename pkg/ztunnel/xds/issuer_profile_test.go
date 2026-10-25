@@ -277,7 +277,7 @@ func (h *profileAckLog) Handle(_ context.Context, r slog.Record) error {
 		default:
 		}
 	}
-	if r.Message == "Issuer-profile API observation unavailable" && h.apiErrors != nil {
+	if (r.Message == "Issuer-profile API observation unavailable" || r.Message == "Issuer-profile API observation raced a concurrent publication; observing again") && h.apiErrors != nil {
 		r.Attrs(func(attr slog.Attr) bool {
 			if attr.Key == "error" {
 				select {
@@ -334,7 +334,7 @@ func profileRenewBetweenObservations(t *testing.T, source *issuerProfileSource, 
 	require.NoError(t, err)
 }
 
-func TestIssuerProfileConcurrentOutputRenewalClosesSessionThenReconnects(t *testing.T) {
+func TestIssuerProfileConcurrentOutputRenewalIsObservedAgainOnTheSameSession(t *testing.T) {
 	source, api, _ := profileTestSource(t)
 	acks := make(chan struct{}, 4)
 	apiErrors := make(chan string, 4)
@@ -389,36 +389,64 @@ func TestIssuerProfileConcurrentOutputRenewalClosesSessionThenReconnects(t *test
 	})
 	source.mu.Unlock()
 
-	usable, err := stream.Recv()
-	require.Error(t, err)
-	require.Nil(t, usable, "mixed API observation must not publish any profile")
+	// The raced observation is never projected; the immediate re-observation
+	// reads the committed newer object coherently on the SAME stream.
+	renewed, err := stream.Recv()
+	require.NoError(t, err, "a concurrent producer renewal must not close the session")
 	require.True(t, mutated.Load(), "deterministic concurrent mutation did not execute")
-	require.Equal(t, codes.Unavailable, grpcstatus.Code(err))
+	require.NotEqual(t, first.Nonce, renewed.Nonce)
+	require.NotEqual(t, first.Resources[0].Version, renewed.Resources[0].Version)
 	select {
 	case cause := <-apiErrors:
 		require.Contains(t, cause, "output changed during API observation")
 	case <-time.After(time.Second):
-		t.Fatal("exact API coherence failure was not logged")
+		t.Fatal("exact API coherence race was not logged")
 	}
 	source.mu.Lock()
 	afterSequence := source.pins.MinimumSequence
 	afterDigest := source.pins.PublicationDigestAtMinimum
 	source.mu.Unlock()
-	require.Equal(t, beforeSequence, afterSequence, "failed observation advanced the process-local sequence floor")
-	require.Equal(t, beforeDigest, afterDigest, "failed observation advanced the process-local digest floor")
+	require.Equal(t, beforeSequence+1, afterSequence, "only the coherent observation advances the sequence floor")
+	require.NotEqual(t, beforeDigest, afterDigest, "only the coherent observation advances the digest floor")
 
-	// A fresh session reads the now-coherent newer object and receives a fresh
-	// nonce/version. Transport receipt still does not prove TLS activation.
-	recovered, _ := profileTLSStream(t, source)
-	fresh, err := recovered.Recv()
-	require.NoError(t, err)
-	require.NotEqual(t, first.Nonce, fresh.Nonce)
-	require.NotEqual(t, first.Resources[0].Version, fresh.Resources[0].Version)
-	source.mu.Lock()
-	recoveredSequence := source.pins.MinimumSequence
-	source.mu.Unlock()
-	require.Equal(t, beforeSequence+1, recoveredSequence)
-	require.NoError(t, recovered.Send(&v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLIssuerProfile, ResponseNonce: fresh.Nonce, ErrorDetail: &status.Status{Code: 9, Message: "durable provider remains unavailable"}}))
-	_, err = recovered.Recv()
+	// Every other check still applies to the renewed delivery: a NACK ends it.
+	require.NoError(t, stream.Send(&v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLIssuerProfile, ResponseNonce: renewed.Nonce, ErrorDetail: &status.Status{Code: 9, Message: "durable provider remains unavailable"}}))
+	_, err = stream.Recv()
 	require.Error(t, err)
+}
+
+func TestIssuerProfileNonRaceObservationFailureStillClosesSession(t *testing.T) {
+	source, api, _ := profileTestSource(t)
+	acks := make(chan struct{}, 4)
+	apiErrors := make(chan string, 4)
+	source.log = slog.New(&profileAckLog{acks: acks, apiErrors: apiErrors})
+	stream, _ := profileTLSStream(t, source)
+	first, err := stream.Recv()
+	require.NoError(t, err)
+	require.NoError(t, stream.Send(&v3.DeltaDiscoveryRequest{TypeUrl: xdsTypeURLIssuerProfile, ResponseNonce: first.Nonce}))
+	select {
+	case <-acks:
+	case <-time.After(time.Second):
+		t.Fatal("matching native transport ACK was not observed")
+	}
+	// An output that lost its pinned publication label is not a race: it fails
+	// the output metadata check on every read, so the session closes as before.
+	source.mu.Lock()
+	out, err := api.CoreV1().ConfigMaps(source.pins.OutputNamespace).Get(context.Background(), source.pins.OutputName, metav1.GetOptions{})
+	require.NoError(t, err)
+	out.Labels[issuerprofile.OutputLabel] = "false"
+	out.ResourceVersion = "24"
+	_, err = api.CoreV1().ConfigMaps(out.Namespace).Update(context.Background(), out, metav1.UpdateOptions{})
+	require.NoError(t, err)
+	source.mu.Unlock()
+	usable, err := stream.Recv()
+	require.Error(t, err)
+	require.Nil(t, usable, "an unpinned output must not publish any profile")
+	require.Equal(t, codes.Unavailable, grpcstatus.Code(err))
+	select {
+	case cause := <-apiErrors:
+		require.NotContains(t, cause, "changed during API observation")
+	case <-time.After(time.Second):
+		t.Fatal("API observation failure was not logged")
+	}
 }
