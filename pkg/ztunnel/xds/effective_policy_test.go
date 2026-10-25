@@ -47,6 +47,16 @@ type l4Entry struct {
 // l4Snapshot builds a native snapshot through the production bounded decoder.
 func l4Snapshot(t *testing.T, entries ...l4Entry) *policy.ZtunnelL4Snapshot {
 	t.Helper()
+	wire, digest := l4Wire(ownerCluster, entries...)
+	snapshot, err := policy.DecodeNativeZtunnelL4(slog.New(slog.DiscardHandler), policy.NativeZtunnelL4Expectation{
+		Owner: ownerCluster, PolicyRevision: 1, SelectorRevision: 1, Digest: digest}, wire)
+	require.NoError(t, err)
+	return snapshot
+}
+
+// l4Wire encodes a native snapshot of owner at policy and selector revision 1.
+func l4Wire(owner cmtypes.ClusterInfo, entries ...l4Entry) ([]byte, string) {
+	entries = slices.Clone(entries)
 	slices.SortFunc(entries, func(a, b l4Entry) int {
 		for _, d := range []int{int(a.dir) - int(b.dir), int(a.proto) - int(b.proto), int(a.port) - int(b.port), int(a.prefix) - int(b.prefix)} {
 			if d != 0 {
@@ -62,10 +72,10 @@ func l4Snapshot(t *testing.T, entries ...l4Entry) *policy.ZtunnelL4Snapshot {
 		return 0
 	})
 	body := []byte("CL4SNAP1")
-	body = binary.BigEndian.AppendUint32(body, ownerCluster.ID)
-	body = binary.BigEndian.AppendUint32(body, ownerCluster.MaxConnectedClusters)
-	body = append(body, byte(len(ownerCluster.Name)))
-	body = append(body, ownerCluster.Name...)
+	body = binary.BigEndian.AppendUint32(body, owner.ID)
+	body = binary.BigEndian.AppendUint32(body, owner.MaxConnectedClusters)
+	body = append(body, byte(len(owner.Name)))
+	body = append(body, owner.Name...)
 	body = binary.BigEndian.AppendUint64(body, 1)
 	body = binary.BigEndian.AppendUint64(body, 1)
 	body = binary.BigEndian.AppendUint32(body, uint32(len(entries)))
@@ -82,10 +92,7 @@ func l4Snapshot(t *testing.T, entries ...l4Entry) *policy.ZtunnelL4Snapshot {
 		body = binary.BigEndian.AppendUint32(body, 0)
 	}
 	sum := sha256.Sum256(body)
-	snapshot, err := policy.DecodeNativeZtunnelL4(slog.New(slog.DiscardHandler), policy.NativeZtunnelL4Expectation{
-		Owner: ownerCluster, PolicyRevision: 1, SelectorRevision: 1, Digest: hex.EncodeToString(sum[:])}, append(body, sum[:]...))
-	require.NoError(t, err)
-	return snapshot
+	return append(body, sum[:]...), hex.EncodeToString(sum[:])
 }
 
 // allowAll is what a distilled map contains when every peer is allowed in

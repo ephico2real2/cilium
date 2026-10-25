@@ -61,10 +61,11 @@ func (m managerLookup) lookup(id uint16) policyWorkload {
 //
 // The ALLOW rules come from policy.CompileZtunnelTCP over the destination's
 // realized native ingress map and each source's realized egress map, with
-// exact principal, source IP, destination IP and port. A source is included
-// only when this agent has its realized policy: captured workloads of this
-// node. Callers on other nodes or clusters match no rule and are denied by
-// ztunnel until authenticated source-policy delivery exists.
+// exact principal, source IP, destination IP and port. The sources are the
+// captured workloads of this node and the external callers externalSubjects
+// admits: leased workloads of this cluster's other nodes and of ClusterMesh
+// peers, each with the realized egress map its own agent published. A caller
+// whose egress map this agent does not hold matches no rule and is denied.
 type effectivePolicyOwner struct {
 	log         *slog.Logger
 	registry    *membership.Registry
@@ -73,6 +74,8 @@ type effectivePolicyOwner struct {
 	cluster     cmtypes.ClusterInfo
 	trustDomain string
 	metrics     *Metrics
+	sources     externalSources
+	clock       func() time.Time
 	interval    time.Duration
 	trigger     chan struct{}
 
@@ -82,8 +85,14 @@ type effectivePolicyOwner struct {
 	published  map[membership.Reference]publishedPolicy
 
 	// ineligible holds the last logged reason each Required workload is not an
-	// effective-policy destination. Only the reconcile goroutine uses it.
+	// effective-policy destination. Only the reconcile goroutine uses it, as
+	// it does the external-source state below.
 	ineligible map[membership.Reference]string
+	// decoded holds the egress policies decoded by the last reconcile.
+	decoded map[decodeKey]decodeResult
+	// refusedSources and sourceCounts are what logSources last logged.
+	refusedSources map[string]string
+	sourceCounts   map[string]int
 }
 
 type publishedPolicy struct {
@@ -94,14 +103,15 @@ type publishedPolicy struct {
 	cacheVersion   uint64
 	acknowledged   bool
 	// sources holds the subject digest of every local workload this plan was
-	// compiled with as a caller, by membership reference.
+	// compiled with as a caller, by membership reference. External callers
+	// are not listed; plan digest changes cover them.
 	sources map[membership.Reference]string
 }
 
 func newEffectivePolicyOwner(log *slog.Logger, registry *membership.Registry, endpoints endpointLookup, policies *AuthorizationPolicies,
 	cluster cmtypes.ClusterInfo, trustDomain string, metrics *Metrics) *effectivePolicyOwner {
 	return &effectivePolicyOwner{log: log, registry: registry, endpoints: endpoints, policies: policies, cluster: cluster,
-		trustDomain: trustDomain, metrics: metrics, interval: time.Second, trigger: make(chan struct{}, 1),
+		trustDomain: trustDomain, metrics: metrics, clock: time.Now, interval: time.Second, trigger: make(chan struct{}, 1),
 		published: make(map[membership.Reference]publishedPolicy), ineligible: make(map[membership.Reference]string)}
 }
 
@@ -152,6 +162,7 @@ func (o *effectivePolicyOwner) kick() {
 }
 
 func (o *effectivePolicyOwner) run(ctx context.Context) {
+	o.sources.watch(ctx, o.kick)
 	ticker := time.NewTicker(o.interval)
 	defer ticker.Stop()
 	for {
@@ -223,6 +234,8 @@ func (o *effectivePolicyOwner) reconcile() {
 	defer o.logIneligible(reasons)
 	o.pruneRetired()
 	all := o.candidates(reasons)
+	external := o.externalSubjects(all, o.clock())
+	o.logSources(external, len(all))
 	// Publish every plan first, then release: a workload that is a caller in
 	// other plans is released only once those plans reflect it (see
 	// callerPlansCurrent).
@@ -232,7 +245,7 @@ func (o *effectivePolicyOwner) reconcile() {
 			reasons[dst.ref] = "workload Address is not acknowledged on the current ADS stream"
 			continue
 		}
-		sources := make([]policy.ZtunnelPolicySubject, 0, len(all)-1)
+		sources := make([]policy.ZtunnelPolicySubject, 0, len(all)-1+len(external.admitted))
 		sourceDigests := make(map[membership.Reference]string, len(all)-1)
 		for j, src := range all {
 			if j != i {
@@ -240,6 +253,9 @@ func (o *effectivePolicyOwner) reconcile() {
 				sourceDigests[src.ref] = subjectDigest(src.subject)
 			}
 		}
+		// External callers carry no local release gate; the plan digest covers
+		// their content, so any change to one republishes this plan.
+		sources = append(sources, external.admitted...)
 		key, err := effectivePolicyKey(dst.subject.Namespace, dst.ref.Key.NamespaceUID, dst.ref.Key.PodUID)
 		if err != nil {
 			continue

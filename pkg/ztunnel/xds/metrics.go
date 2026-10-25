@@ -33,6 +33,9 @@ type Metrics struct {
 	// EffectivePolicyEvents counts effective policy publication and
 	// quarantine release events by event.
 	EffectivePolicyEvents metric.Vec[metric.Counter]
+	// EffectivePolicySources is the number of callers the last reconcile
+	// admitted into effective plans, by origin (node, cluster, peer).
+	EffectivePolicySources metric.Vec[metric.Gauge]
 }
 
 // Enable enables XDS metrics for Prometheus scraping.
@@ -45,6 +48,7 @@ func (m *Metrics) Enable() {
 	m.RemoteProjectionEvents.SetEnabled(true)
 	m.RemoteWorkloads.SetEnabled(true)
 	m.EffectivePolicyEvents.SetEnabled(true)
+	m.EffectivePolicySources.SetEnabled(true)
 }
 
 // NewMetrics creates a new Metrics instance for XDS enrollment failures
@@ -55,6 +59,11 @@ func NewMetrics() *Metrics {
 			Name: "effective_policy_events_total",
 			Help: "Effective ztunnel policy events (published, acknowledged, compile_failed, released, release_refused); acknowledgments are ztunnel ACKs on the current stream, not traffic evidence",
 		}, []string{"event"}),
+		EffectivePolicySources: metric.NewGaugeVec(metric.GaugeOpts{
+			Disabled: true, Namespace: metrics.Namespace, Subsystem: subsystem,
+			Name: "effective_policy_sources",
+			Help: "Callers admitted into effective ztunnel plans by the last reconcile, by origin (node: this node's captured workloads; cluster: this cluster's other nodes; peer: ClusterMesh peers); admission, not traffic evidence",
+		}, []string{"origin"}),
 		RemoteProjectionEvents: metric.NewCounterVec(metric.CounterOpts{
 			Disabled: true, Namespace: metrics.Namespace, Subsystem: subsystem,
 			Name: "remote_projection_events_total",

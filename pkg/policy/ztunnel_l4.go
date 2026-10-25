@@ -204,6 +204,13 @@ type ZtunnelPolicySubject struct {
 	Policy          *ZtunnelL4Snapshot
 }
 
+// ValidateZtunnelSubject applies the checks CompileZtunnelTCP applies to every
+// subject. A caller that admits sources from outside its own node uses it to
+// leave out one invalid source, since any invalid source fails the whole plan.
+func ValidateZtunnelSubject(info cmtypes.ClusterInfo, s ZtunnelPolicySubject) error {
+	return validateZtunnelSubject(info, s)
+}
+
 func validateZtunnelSubject(info cmtypes.ClusterInfo, s ZtunnelPolicySubject) error {
 	if s.ClusterID == 0 || s.EndpointID == 0 || s.ClusterName == "" || s.NamespaceUID == "" || s.PodUID == "" ||
 		s.Namespace == "" || s.ServiceAccount == "" || s.TrustDomain == "" || s.Policy == nil ||

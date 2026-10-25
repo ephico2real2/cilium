@@ -12,6 +12,7 @@ import (
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/endpointmanager"
+	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
@@ -64,6 +65,10 @@ type xdsServerParams struct {
 	RemotePeers *remote.PeerSnapshotStore `optional:"true"`
 	// Registry is the native capture/ZDS membership of local workloads.
 	Registry *membership.Registry `optional:"true"`
+	// LocalSources holds this cluster's leased workloads of other nodes.
+	LocalSources *remote.LocalSourceMailbox `optional:"true"`
+	// IPCache is the address-to-identity view the datapath enforces with.
+	IPCache *ipcache.IPCache `optional:"true"`
 }
 
 func NewServer(params xdsServerParams) *Server {
@@ -109,6 +114,12 @@ func NewServer(params xdsServerParams) *Server {
 	if params.Config.RequireMTLS && params.Config.EffectivePolicyQuarantine && params.Registry != nil {
 		server.policyOwner = newEffectivePolicyOwner(params.Logger, params.Registry, managerLookup{manager: params.EPManager}, server.authorizations,
 			params.ClusterInfo, params.Config.SpiffeTrustDomain, params.Metrics)
+		// Callers from other nodes and clusters need explicit remote membership
+		// and the ipcache to check each one's address binding against.
+		if params.Config.EnableRemoteWorkloadMembership && params.IPCache != nil {
+			server.policyOwner.sources = externalSources{cluster: params.LocalSources, peers: server.remotePeers,
+				trust: server.remoteTrust, nodes: server.nodeNames, addresses: ipcacheAddressView{ipc: params.IPCache}}
+		}
 	}
 
 	params.Lifecycle.Append(cell.Hook{

@@ -879,6 +879,22 @@ func (ipc *IPCache) LookupByIP(IP string) (Identity, bool) {
 	return ipc.lookupByIPRLocked(IP)
 }
 
+// LookupWorkloadByIP returns the security identity and Kubernetes metadata of
+// an endpoint IP, read under one lock so both describe the same entry.
+func (ipc *IPCache) LookupWorkloadByIP(ip netip.Addr) (Identity, *K8sMetadata, bool) {
+	if !ip.IsValid() {
+		return Identity{}, nil, false
+	}
+	key := ip.String()
+	ipc.mutex.RLock()
+	defer ipc.mutex.RUnlock()
+	id, ok := ipc.lookupByIPRLocked(key)
+	if !ok {
+		return Identity{}, nil, false
+	}
+	return id, ipc.getK8sMetadata(key), true
+}
+
 // lookupByIPRLocked returns the corresponding security identity that endpoint IP maps
 // to within the provided IPCache, as well as if the corresponding entry exists
 // in the IPCache.
