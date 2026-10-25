@@ -104,6 +104,24 @@ func (s *ZtunnelL4Snapshot) VerifyNativeMap(actual policyTypes.MapStateMap) erro
 	return nil
 }
 
+// Egress returns the snapshot restricted to its egress entries: the only part
+// a remote destination compiles a source with. An egress lookup never reaches
+// an ingress key: the traffic direction is always the first bit of the LPM
+// prefix, and keys of opposite directions share no prefix
+// (types.LPMKey.CommonPrefix), so every egress verdict is unchanged. Revisions are kept; the digests describe the restricted content.
+func (s *ZtunnelL4Snapshot) Egress() (*ZtunnelL4Snapshot, error) {
+	if s == nil {
+		return nil, fmt.Errorf("native policy snapshot unavailable")
+	}
+	egress := newMapState(s.state.logger, MapStateSizes{}, allFeatures, s.state.clusterInfo)
+	for key, entry := range s.state.entries {
+		if key.TrafficDirection() == trafficdirection.Egress {
+			egress.upsert(key, NewMapStateEntry(entry.MapStateEntry))
+		}
+	}
+	return cloneZtunnelL4Snapshot(egress, s.revision, s.selectorRevision)
+}
+
 // MarshalNative exports only a previously captured native snapshot. The digest
 // is an integrity/content binding, NOT a signature, source lease or grant.
 // Wire values are deterministic fixed-width big-endian fields, bounded to4096

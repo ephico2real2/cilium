@@ -17,6 +17,7 @@ import (
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/identity"
+	"github.com/cilium/cilium/pkg/policy/trafficdirection"
 	policyTypes "github.com/cilium/cilium/pkg/policy/types"
 )
 
@@ -267,4 +268,48 @@ func TestNativeZtunnelCaptureRejectsUnsupportedCIDRPassAndMalformedWildcards(t *
 			require.Nil(t, snapshot)
 		})
 	}
+}
+
+// A remote destination compiles a source with its egress entries only; every
+// egress verdict, the wire round trip and the compiled plan must not change.
+func TestNativeZtunnelEgressSnapshotKeepsEveryEgressVerdict(t *testing.T) {
+	snapshot, _, _ := nativeWireSnapshot(t)
+	egress, err := snapshot.Egress()
+	require.NoError(t, err)
+	require.Equal(t, snapshot.Owner(), egress.Owner())
+	require.Equal(t, snapshot.Revision(), egress.Revision())
+	require.Equal(t, snapshot.SelectorRevision(), egress.SelectorRevision())
+	require.Len(t, egress.state.entries, 2)
+	for key := range egress.state.entries {
+		require.Equal(t, trafficdirection.Egress, key.TrafficDirection())
+	}
+	for _, id := range []identity.NumericIdentity{1<<16 | 1001, 1<<16 | 1002, 2<<16 | 1002, identity.ReservedIdentityWorld} {
+		for port := uint32(1); port <= 65535; port++ {
+			require.Equal(t, snapshot.permits(id, uint16(port), false), egress.permits(id, uint16(port), false), "id=%d port=%d", id, port)
+			require.False(t, egress.permits(id, uint16(port), true), "an egress snapshot permits no ingress")
+		}
+	}
+	wire, digest, err := egress.MarshalNative()
+	require.NoError(t, err)
+	restored, err := DecodeNativeZtunnelL4(hivetest.Logger(t), NativeZtunnelL4Expectation{Owner: egress.Owner(),
+		PolicyRevision: egress.Revision(), SelectorRevision: egress.SelectorRevision(), Digest: digest}, wire)
+	require.NoError(t, err)
+	require.Equal(t, egress.Digest(), restored.Digest())
+
+	// The compiled plan of a destination is the same with either snapshot of
+	// its source; only the digest, which binds the source content, differs.
+	destination := ztunnelTestSubject(t, 2, 1<<16|1001, "22222222-2222-4222-8222-222222222222", "10.0.0.2", map[Key]MapStateEntry{
+		IngressKey().WithIdentity(identity.ReservedIdentityAggregateCluster): policyTypes.AllowEntry()})
+	full := ztunnelTestSubject(t, 3, 1<<16|1003, "33333333-3333-4333-8333-333333333333", "10.0.0.3", nil)
+	full.Policy = snapshot
+	remote := full
+	remote.Policy = restored
+	info := cmtypes.ClusterInfo{ID: 1, Name: "cluster-a", MaxConnectedClusters: 255}
+	fromFull, err := CompileZtunnelTCP(info, destination, []ZtunnelPolicySubject{full})
+	require.NoError(t, err)
+	fromRemote, err := CompileZtunnelTCP(info, destination, []ZtunnelPolicySubject{remote})
+	require.NoError(t, err)
+	require.NotEmpty(t, fromFull.ReviewAuthorization.Rules)
+	require.Equal(t, fromFull.ReviewAuthorization.Rules, fromRemote.ReviewAuthorization.Rules)
+	require.NotEqual(t, fromFull.Digest, fromRemote.Digest)
 }
