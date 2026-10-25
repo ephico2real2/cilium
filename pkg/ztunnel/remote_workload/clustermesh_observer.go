@@ -146,39 +146,41 @@ func (o *clusterMeshObserver) Register(mgr store.WatchStoreManager, _ kvstore.Ba
 		return
 	}
 
+	// Register runs once per ClusterMesh connection, each time with that
+	// connection's manager. The joiner and session outlive connections (the
+	// session pins the peer's identity and opens fresh watches on every run);
+	// the supervisor is registered again below on every call.
 	o.mu.Lock()
-	if o.originSession != nil {
-		if o.clusterID != cfg.ID {
+	if o.originSession != nil && o.clusterID != cfg.ID {
+		o.mu.Unlock()
+		o.disable("remote peer ClusterID changed; explicit observer replacement is required")
+		return
+	}
+	if o.originSession == nil {
+		joiner, err := NewSourceMembershipJoiner(o.cluster, cfg.ID, o.logger, o.sink)
+		if err != nil {
 			o.mu.Unlock()
-			o.disable("remote peer ClusterID changed; explicit observer replacement is required")
+			o.disable(err.Error())
 			return
 		}
-		o.mu.Unlock()
-		return
-	}
-	joiner, err := NewSourceMembershipJoiner(o.cluster, cfg.ID, o.logger, o.sink)
-	if err != nil {
-		o.mu.Unlock()
-		o.disable(err.Error())
-		return
-	}
-	joiner.SetOnReady(func() {
-		if o.onSync != nil {
-			o.syncOnce.Do(o.onSync)
+		joiner.SetOnReady(func() {
+			if o.onSync != nil {
+				o.syncOnce.Do(o.onSync)
+			}
+		})
+		o.joiner = joiner
+		o.clusterID = cfg.ID
+		o.originSession = &IPIdentityOriginWatchSession{
+			Factory: o.storeFactory, ClusterInfo: o.clusterInfo,
+			Logger: o.logger, Joiner: joiner,
+			OnInventory: func(inventory *Inventory, workloadWatch, sourceWatch store.WatchStore) {
+				o.mu.Lock()
+				o.inventory, o.watch, o.sourceWatch = inventory, workloadWatch, sourceWatch
+				o.mu.Unlock()
+			},
 		}
-	})
-	session := &IPIdentityOriginWatchSession{
-		Factory: o.storeFactory, ClusterInfo: o.clusterInfo,
-		Logger: o.logger, Joiner: joiner,
-		OnInventory: func(inventory *Inventory, workloadWatch, sourceWatch store.WatchStore) {
-			o.mu.Lock()
-			o.inventory, o.watch, o.sourceWatch = inventory, workloadWatch, sourceWatch
-			o.mu.Unlock()
-		},
 	}
-	o.joiner = joiner
-	o.clusterID = cfg.ID
-	o.originSession = session
+	session := o.originSession
 	o.mu.Unlock()
 
 	supervisor := &OriginPeerSupervisor{
@@ -189,8 +191,20 @@ func (o *clusterMeshObserver) Register(mgr store.WatchStoreManager, _ kvstore.Ba
 		Opener: PinnedEtcdOriginPeerOpener{Factory: o.remoteClientFactory, Logger: o.logger},
 		Watch:  session, Invalidator: o,
 	}
+	// Start once the peer's IP identities are synchronized: the same sync
+	// canary as the native ipcache watcher. Through KVStoreMesh that canary
+	// exists only for the cache prefix; the supervisor itself still reads the
+	// origin directly, never the cache.
+	syncPrefix := ipcache.IPIdentitiesPath
+	if cfg.Capabilities.Cached {
+		syncPrefix = kvstore.StateToCachePrefix(syncPrefix)
+	}
 	o.enabled.Store(true)
-	mgr.Register(ipcache.IPIdentitiesPath, func(ctx context.Context) {
+	o.logger.Info("Direct-origin membership supervisor registered",
+		logFieldStage, "origin-supervisor",
+		logfields.Prefix, syncPrefix)
+	mgr.Register(syncPrefix, func(ctx context.Context) {
+		o.logger.Info("Direct-origin membership supervisor started", logFieldStage, "origin-supervisor")
 		if err := supervisor.Run(ctx, o.cluster, cfg.ID); err != nil && ctx.Err() == nil {
 			o.logger.Error("Direct-origin membership supervisor stopped",
 				logFieldStage, "origin-supervisor",

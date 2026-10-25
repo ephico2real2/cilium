@@ -22,7 +22,8 @@ type WSMFunc func(context.Context)
 // the implementation).
 type WatchStoreManager interface {
 	// Register registers a function associated with a given kvstore prefix.
-	// It cannot be called once Run() has started.
+	// Several functions may wait for the same prefix; all of them start once
+	// it is synchronized. It cannot be called once Run() has started.
 	Register(prefix string, function WSMFunc)
 	// Run starts the manager, blocking until the context is closed and all
 	// started functions terminated.
@@ -32,7 +33,7 @@ type WatchStoreManager interface {
 // wsmCommon implements the common logic shared by WatchStoreManager implementations.
 type wsmCommon struct {
 	wg        sync.WaitGroup
-	functions map[string]WSMFunc
+	functions map[string][]WSMFunc
 
 	running atomic.Bool
 	log     *slog.Logger
@@ -40,7 +41,7 @@ type wsmCommon struct {
 
 func newWSMCommon(logger *slog.Logger) wsmCommon {
 	return wsmCommon{
-		functions: make(map[string]WSMFunc),
+		functions: make(map[string][]WSMFunc),
 		log:       logger,
 	}
 }
@@ -52,18 +53,22 @@ func (mgr *wsmCommon) Register(prefix string, function WSMFunc) {
 		logging.Panic(mgr.log, "Cannot call Register while the watch store manager is running")
 	}
 
-	mgr.functions[prefix] = function
+	// Appending, not replacing: a second consumer of the same sync canary
+	// would otherwise silently discard the first one's function.
+	mgr.functions[prefix] = append(mgr.functions[prefix], function)
 }
 
 func (mgr *wsmCommon) ready(ctx context.Context, prefix string) {
-	if fn := mgr.functions[prefix]; fn != nil {
-		mgr.log.Debug("Starting function for kvstore prefix", logfields.Prefix, prefix)
+	if fns := mgr.functions[prefix]; len(fns) > 0 {
+		mgr.log.Debug("Starting functions for kvstore prefix", logfields.Prefix, prefix, logfields.Count, len(fns))
 		delete(mgr.functions, prefix)
 
-		mgr.wg.Go(func() {
-			fn(ctx)
-			mgr.log.Debug("Function terminated for kvstore prefix", logfields.Prefix, prefix)
-		})
+		for _, fn := range fns {
+			mgr.wg.Go(func() {
+				fn(ctx)
+				mgr.log.Debug("Function terminated for kvstore prefix", logfields.Prefix, prefix)
+			})
+		}
 	} else {
 		mgr.log.Debug("Received sync event for unregistered prefix", logfields.Prefix, prefix)
 	}

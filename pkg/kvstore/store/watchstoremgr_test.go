@@ -74,6 +74,63 @@ func TestWatchStoreManager(t *testing.T) {
 	}))
 }
 
+// Two consumers waiting for the same synchronized prefix both start; the
+// second registration does not replace the first.
+func TestWatchStoreManagerSharedPrefix(t *testing.T) {
+	runnable := func(mgr func() WatchStoreManager) func(t *testing.T) {
+		return func(t *testing.T) {
+			ch := make(chan *KVPair, 3)
+			run := func(ctx context.Context, str string) {
+				ch <- NewKVPair(str, "")
+				<-ctx.Done()
+			}
+
+			mgr := mgr()
+			mgr.Register("bar", func(ctx context.Context) { run(ctx, "first") })
+			mgr.Register("bar", func(ctx context.Context) { run(ctx, "second") })
+			mgr.Register("qux", func(ctx context.Context) { run(ctx, "qux") })
+
+			ctx, cancel := context.WithCancel(context.Background())
+			completed := make(chan struct{})
+			go func() {
+				mgr.Run(ctx)
+				close(completed)
+			}()
+
+			defer func() {
+				cancel()
+
+				select {
+				case <-completed:
+				case <-time.After(100 * time.Millisecond):
+					require.Fail(t, "Manager didn't stop properly after closing the context")
+				}
+			}()
+
+			var started []string
+			for range 3 {
+				started = append(started, eventually(ch).Key)
+			}
+			require.ElementsMatch(t, started, []string{"first", "second", "qux"})
+		}
+	}
+
+	f, _ := GetFactory(t)
+	t.Run("sync", runnable(func() WatchStoreManager {
+		backend := NewFakeLWBackend(t, kvstore.SyncedPrefix+"/foo/", []kvstore.KeyValueEvent{
+			{Typ: kvstore.EventTypeListDone},
+			{Typ: kvstore.EventTypeCreate, Key: "bar"},
+			{Typ: kvstore.EventTypeCreate, Key: "qux"},
+		})
+
+		return f.NewWatchStoreManager(backend, "foo")
+	}))
+
+	t.Run("immediate", runnable(func() WatchStoreManager {
+		return NewWatchStoreManagerImmediate(hivetest.Logger(t))
+	}))
+}
+
 func TestWatchStoreManagerPanic(t *testing.T) {
 	runnable := func(mgr func() WatchStoreManager) func(t *testing.T) {
 		return func(t *testing.T) {
