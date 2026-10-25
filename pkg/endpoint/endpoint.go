@@ -324,7 +324,8 @@ type Endpoint struct {
 	// ztunnelMembership is process-local evidence. It is never serialized as
 	// endpoint configuration; restored endpoints must revalidate and receive a
 	// fresh ZDS acknowledgment before this can be republished.
-	ztunnelMembership atomic.Pointer[ZtunnelMembership]
+	ztunnelMembership       atomic.Pointer[ZtunnelMembership]
+	ztunnelSourceIPRequired atomic.Bool
 
 	// logLimiter rate limits potentially repeating warning logs
 	logLimiter logging.Limiter
@@ -906,6 +907,11 @@ func optionChanged(key string, value option.OptionSetting, data any) {
 // applyOptsLocked applies the given options to the endpoint's options and
 // returns true if there were any options changed.
 func (e *Endpoint) applyOptsLocked(opts option.OptionMap) bool {
+	if setting, ok := opts[option.SourceIPVerification]; ok && e.sourceIPDisableDeniedLocked(setting) {
+		e.Logger(subsystem).Warn("Refusing to disable source IP verification for ztunnel member")
+		opts = maps.Clone(opts)
+		delete(opts, option.SourceIPVerification)
+	}
 	changed := e.Options.ApplyValidated(opts, optionChanged, e) > 0
 	_, exists := opts[option.Debug]
 	if exists && changed {
@@ -921,6 +927,9 @@ func (e *Endpoint) ApplyOpts(opts option.OptionMap) (bool, error) {
 		return false, err
 	}
 	defer e.unlock()
+	if setting, ok := opts[option.SourceIPVerification]; ok && e.sourceIPDisableDeniedLocked(setting) {
+		return false, UpdateValidationError{"SourceIPVerification cannot be disabled while ztunnel membership is required"}
+	}
 	changed := e.applyOptsLocked(opts)
 	return changed, nil
 }
@@ -935,6 +944,10 @@ func (e *Endpoint) forcePolicyComputation() {
 func (e *Endpoint) SetDefaultOpts(opts *option.IntOptions) {
 	if opts != nil {
 		for k := range EndpointMutableOptionLibrary {
+			if k == option.SourceIPVerification && e.sourceIPDisableDeniedLocked(opts.GetValue(k)) {
+				e.Logger(subsystem).Warn("Preserving source IP verification for ztunnel member")
+				continue
+			}
 			e.Options.SetValidated(k, opts.GetValue(k))
 		}
 	}
@@ -1136,6 +1149,10 @@ func (e *Endpoint) Update(cfg *models.EndpointConfigurationSpec) error {
 
 	if err := e.lockAlive(); err != nil {
 		return err
+	}
+	if setting, ok := om[option.SourceIPVerification]; ok && e.sourceIPDisableDeniedLocked(setting) {
+		e.unlock()
+		return UpdateValidationError{"SourceIPVerification cannot be disabled while ztunnel membership is required"}
 	}
 
 	e.getLogger().Debug("updating endpoint configuration options", logfields.Config, cfg)
@@ -1889,6 +1906,10 @@ func (e *Endpoint) ApplySourceIPVerificationFromAnnotation(podAnnotations, nsAnn
 	e.unconditionalLock()
 	defer e.unlock()
 
+	if e.sourceIPDisableDeniedLocked(finalSetting) {
+		e.Logger(subsystem).Warn("Ignoring request to disable source IP verification for ztunnel member")
+		finalSetting = option.OptionEnabled
+	}
 	if currentSetting := e.Options.GetValue(option.SourceIPVerification); currentSetting != finalSetting {
 		e.Options.SetValidated(option.SourceIPVerification, finalSetting)
 		return true
@@ -2868,7 +2889,7 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
 		}
 
 		// Detach the endpoint program from any tc(x) hooks.
-		e.orchestrator.Unload(e.createEpInfoCache(""))
+		e.orchestrator.Unload(e.createEpInfoCache("", e.bpfHeaderfileHash))
 
 		// Delete the endpoint's entries from the global cilium_(egress)call_policy
 		// maps and remove per-endpoint cilium_calls_ and cilium_policy_ map pins.

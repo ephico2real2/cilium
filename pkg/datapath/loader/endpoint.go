@@ -81,6 +81,17 @@ func endpointMapRenames(ep endpoint.Config, lnc *config.Config) (renames []map[s
 // goroutine completes compilation of the template, all other CompileOrLoad
 // invocations will be released.
 func (l *loader) ReloadDatapath(ctx context.Context, ep endpoint.Endpoint, lnc *config.Config, stats *metrics.SpanStat) (string, error) {
+	var receiptGeneration uint64
+	if !ep.IsHost() && ep.GetID() <= 0xffff {
+		id := uint16(ep.GetID())
+		receiptGeneration = l.beginSourceIPReceiptGeneration(id)
+		if provider, ok := ep.(endpoint.SourceIPDatapathIdentityProvider); ok {
+			identity := provider.SourceIPDatapathIdentity()
+			if identity.ZtunnelRequired && !identity.SourceIPEnabled {
+				return "", fmt.Errorf("source IP verification is mandatory for required ztunnel membership")
+			}
+		}
+	}
 	dirs := directoryInfo{
 		Library: option.Config.BpfDir,
 		Runtime: option.Config.StateDir,
@@ -109,13 +120,18 @@ func (l *loader) ReloadDatapath(ctx context.Context, ep endpoint.Endpoint, lnc *
 
 	// Reload an lxc endpoint program.
 	stats.BpfLoadProg.Start()
-	err = reloadEndpoint(ctx, l.logger, l.registry, l.bpfCollectionLoader, l.db, l.devices, l.routeManager, ep, lnc, spec)
+	err = reloadEndpoint(ctx, l.logger, l.registry, l.bpfCollectionLoader, l.db, l.devices, l.routeManager, ep, lnc, spec, func(program *ebpf.Program) {
+		l.publishSourceIPReceipt(ctx, ep, lnc, receiptGeneration, spec, program)
+	})
 	stats.BpfLoadProg.End(err == nil)
 	return hash, err
 }
 
 // Unload removes the datapath specific program aspects
 func (l *loader) Unload(ep endpoint.Endpoint) {
+	if !ep.IsHost() && ep.GetID() <= 0xffff {
+		l.invalidateSourceIPReceipt(uint16(ep.GetID()))
+	}
 	if ep.RequireEndpointRoute() {
 		if ip := ep.IPv4Address(); ip.IsValid() {
 			removeEndpointRoute(ep, l.routeManager)
@@ -194,7 +210,7 @@ func defaultEndpointMapRenames(ep endpoint.Config, lnc *config.Config) map[strin
 // it if necessary.
 func reloadEndpoint(ctx context.Context, logger *slog.Logger, reg *registry.MapRegistry, collLoader *bpfCollectionLoader,
 	db *statedb.DB, devices statedb.Table[*tables.Device], rm *routeReconciler.DesiredRouteManager,
-	ep endpoint.Endpoint, lnc *config.Config, spec *ebpf.CollectionSpec) error {
+	ep endpoint.Endpoint, lnc *config.Config, spec *ebpf.CollectionSpec, onCommitted func(*ebpf.Program)) error {
 
 	var obj lxcObjects
 	commit, cleanup, err := collLoader.LoadAndAssign(ctx, logger, &obj, spec, &bpf.CollectionOptions{
@@ -270,6 +286,11 @@ func reloadEndpoint(ctx context.Context, logger *slog.Logger, reg *registry.MapR
 		}
 	}
 
+	// Observe the actual relocated program only after all load operations succeed.
+	// Its FD remains open until this function returns.
+	if onCommitted != nil {
+		onCommitted(obj.FromContainer)
+	}
 	return nil
 }
 

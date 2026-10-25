@@ -49,6 +49,11 @@ type epInfoCache struct {
 	properties             map[string]any
 	k8sNamespace           string
 	k8sPodName             string
+	k8sNamespaceUID        string
+	k8sPodUID              string
+	netNsPath              string
+	bpfConfigHash          string
+	ztunnelRequired        bool
 
 	// endpoint is used to get the endpoint's logger.
 	//
@@ -60,21 +65,27 @@ type epInfoCache struct {
 }
 
 // Must be called when endpoint is still locked.
-func (e *Endpoint) createEpInfoCache(epdir string) *epInfoCache {
+func (e *Endpoint) createEpInfoCache(epdir, bpfConfigHash string) *epInfoCache {
+	ztunnelRequired := e.ztunnelRequiresSourceIPLocked()
 	if e.isPropertyLocked(endpoint.PropertyAtHostNS) {
 		return &epInfoCache{
 			revision: e.desiredPolicyRevision,
 
-			id:           e.GetID(),
-			identity:     e.getIdentity(),
-			ifIndex:      e.GetIfIndex(),
-			mac:          e.GetNodeMAC(),
-			ipv4:         e.IPv4Address(),
-			ipv6:         e.IPv6Address(),
-			atHostNS:     true,
-			properties:   maps.Clone(e.properties),
-			k8sNamespace: e.GetK8sNamespace(),
-			k8sPodName:   e.GetK8sPodName(),
+			id:              e.GetID(),
+			identity:        e.getIdentity(),
+			ifIndex:         e.GetIfIndex(),
+			mac:             e.GetNodeMAC(),
+			ipv4:            e.IPv4Address(),
+			ipv6:            e.IPv6Address(),
+			atHostNS:        true,
+			properties:      maps.Clone(e.properties),
+			k8sNamespace:    e.GetK8sNamespace(),
+			k8sPodName:      e.GetK8sPodName(),
+			k8sNamespaceUID: e.GetK8sNamespaceUID(),
+			k8sPodUID:       e.GetK8sPodUID(),
+			netNsPath:       e.GetContainerNetnsPath(),
+			bpfConfigHash:   bpfConfigHash,
+			ztunnelRequired: ztunnelRequired,
 
 			endpoint: e,
 		}
@@ -103,6 +114,11 @@ func (e *Endpoint) createEpInfoCache(epdir string) *epInfoCache {
 		properties:             maps.Clone(e.properties),
 		k8sNamespace:           e.GetK8sNamespace(),
 		k8sPodName:             e.GetK8sPodName(),
+		k8sNamespaceUID:        e.GetK8sNamespaceUID(),
+		k8sPodUID:              e.GetK8sPodUID(),
+		netNsPath:              e.GetContainerNetnsPath(),
+		bpfConfigHash:          bpfConfigHash,
+		ztunnelRequired:        ztunnelRequired,
 
 		endpoint: e,
 	}
@@ -149,6 +165,23 @@ func (ep *epInfoCache) GetIdentity() identity.NumericIdentity {
 // GetEndpointNetNsCookie returns the network namespace cookie for the endpoint
 func (ep *epInfoCache) GetEndpointNetNsCookie() uint64 {
 	return ep.netNsCookie
+}
+
+func (ep *epInfoCache) SourceIPDatapathIdentity() endpoint.SourceIPDatapathIdentity {
+	return endpoint.SourceIPDatapathIdentity{
+		EndpointID:      uint16(ep.id),
+		NamespaceUID:    ep.k8sNamespaceUID,
+		PodUID:          ep.k8sPodUID,
+		NetNSPath:       ep.netNsPath,
+		NetNSCookie:     ep.netNsCookie,
+		Interface:       ep.ifName,
+		IfIndex:         ep.ifIndex,
+		ConfigHash:      ep.bpfConfigHash,
+		IPv4:            ep.ipv4,
+		IPv6:            ep.ipv6,
+		SourceIPEnabled: ep.options != nil && ep.options.IsEnabled(option.SourceIPVerification),
+		ZtunnelRequired: ep.ztunnelRequired,
+	}
 }
 
 // Logger returns the logger for the endpoint that is being cached.

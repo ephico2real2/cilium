@@ -22,6 +22,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/endpointstate"
+	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/maps/callsmap"
 	"github.com/cilium/cilium/pkg/maps/registry"
 	"github.com/cilium/cilium/pkg/node/manager"
@@ -58,6 +59,11 @@ type loader struct {
 	db           *statedb.DB
 	devices      statedb.Table[*tables.Device]
 	routeManager *routeReconciler.DesiredRouteManager
+
+	sourceIPReceiptMu          lock.RWMutex
+	sourceIPReceipts           map[uint16]sourceIPReceipt
+	sourceIPReceiptGenerations map[uint16]uint64
+	sourceIPReceiptExhausted   map[uint16]struct{}
 }
 
 type Params struct {

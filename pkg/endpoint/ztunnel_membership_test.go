@@ -10,7 +10,7 @@ import (
 )
 
 func TestZtunnelMembershipRejectsDelayedCapturedPublicationAfterRevocation(t *testing.T) {
-	ep := &Endpoint{}
+	ep := sourceIPGuardTestEndpoint(true)
 	captured := ZtunnelMembership{Version: 1, Revision: 2, Epoch: "agent-a", Generation: 7, State: ZtunnelMembershipCaptured, NamespaceUID: "ns", NodeName: "node-a", ServiceAccount: "api"}
 	require.True(t, ep.SetZtunnelMembership(captured))
 	start := make(chan struct{})

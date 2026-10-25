@@ -431,7 +431,7 @@ func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint
 		}
 		dir = datapathRegenCtxt.nextDir
 	}
-	datapathRegenCtxt.epInfoCache = e.createEpInfoCache(dir)
+	datapathRegenCtxt.epInfoCache = e.createEpInfoCache(dir, datapathRegenCtxt.bpfHeaderfilesHash)
 	e.unlock()
 
 	// No need to compile BPF in dry mode. Also, in lb-only mode we do not
@@ -737,7 +737,7 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (pr
 	if e.isPropertyLocked(endpointtypes.PropertySkipBPFPolicy) {
 		// Ingress endpoint needs epInfoCache for endpointmap population
 		if e.isPropertyLocked(endpointtypes.PropertyAtHostNS) {
-			datapathRegenCtxt.epInfoCache = e.createEpInfoCache(currentDir)
+			datapathRegenCtxt.epInfoCache = e.createEpInfoCache(currentDir, e.bpfHeaderfileHash)
 		}
 
 		if e.isPropertyLocked(endpointtypes.PropertyFakeEndpoint) {

@@ -43,6 +43,10 @@ func (e *Endpoint) SetZtunnelMembership(m ZtunnelMembership) bool {
 	if m.State == ZtunnelMembershipCaptured && (m.Revision == 0 || m.Epoch == "" || m.Generation == 0) {
 		return false
 	}
+	if m.State != ZtunnelMembershipUnenrolled && (e.Options == nil || !e.Options.IsEnabled(option.SourceIPVerification)) {
+		e.Logger(subsystem).Warn("Refusing ztunnel membership without source IP verification")
+		return false
+	}
 	if previous := e.ztunnelMembership.Load(); previous != nil {
 		if previous.Epoch != "" && previous.Epoch != m.Epoch {
 			return false
@@ -50,6 +54,9 @@ func (e *Endpoint) SetZtunnelMembership(m ZtunnelMembership) bool {
 		if previous.Revision > 0 && m.Revision <= previous.Revision {
 			return *previous == m
 		}
+	}
+	if m.State != ZtunnelMembershipUnenrolled {
+		e.ztunnelSourceIPRequired.Store(true)
 	}
 	copy := m
 	e.ztunnelMembership.Store(&copy)
