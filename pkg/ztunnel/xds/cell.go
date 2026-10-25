@@ -4,6 +4,7 @@
 package xds
 
 import (
+	"context"
 	"log/slog"
 
 	"github.com/cilium/hive/cell"
@@ -16,6 +17,7 @@ import (
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
+	remote "github.com/cilium/cilium/pkg/ztunnel/remote_workload"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 )
 
@@ -57,6 +59,8 @@ type xdsServerParams struct {
 	IssuerProfile          *issuerProfileSource
 	// Nodes is Cilium's native node table (Kubernetes Node discovery).
 	Nodes statedb.Table[*node.Node]
+	// RemotePeers holds authenticated remote ClusterMesh workload snapshots.
+	RemotePeers *remote.PeerSnapshotStore `optional:"true"`
 }
 
 func NewServer(params xdsServerParams) *Server {
@@ -88,11 +92,28 @@ func NewServer(params xdsServerParams) *Server {
 		server.nodeNames = names
 	}
 
+	// Remote workloads are projected only with explicit remote membership,
+	// and only for peers whose trust domain the validated issuer profile
+	// approves; without a profile every peer stays withdrawn.
+	var stopTrust context.CancelFunc
+	if params.Config.EnableRemoteWorkloadMembership && params.RemotePeers != nil {
+		server.remotePeers = params.RemotePeers
+		server.remoteTrust = newRemoteTrustAuthority(params.Logger, params.IssuerProfile, params.ClusterInfo.Name, params.Config.SpiffeTrustDomain)
+	}
+
 	params.Lifecycle.Append(cell.Hook{
 		OnStart: func(_ cell.HookContext) error {
+			if server.remoteTrust != nil {
+				var ctx context.Context
+				ctx, stopTrust = context.WithCancel(context.Background())
+				go server.remoteTrust.run(ctx)
+			}
 			return server.Serve()
 		},
 		OnStop: func(_ cell.HookContext) error {
+			if stopTrust != nil {
+				stopTrust()
+			}
 			server.GracefulStop()
 			return nil
 		},

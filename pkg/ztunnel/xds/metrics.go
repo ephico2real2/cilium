@@ -24,6 +24,12 @@ type Metrics struct {
 	EnrollmentFailures metric.Vec[metric.Counter]
 	// AuthorizationEvents counts protocol events, not policy enforcement.
 	AuthorizationEvents metric.Vec[metric.Counter]
+	// RemoteProjectionEvents counts remote workload projection changes on
+	// ztunnel streams by event.
+	RemoteProjectionEvents metric.Vec[metric.Counter]
+	// RemoteWorkloads is the number of remote workloads last published by a
+	// stream, by peer cluster. Absent before the first projection.
+	RemoteWorkloads metric.Vec[metric.Gauge]
 }
 
 // Enable enables XDS metrics for Prometheus scraping.
@@ -33,11 +39,23 @@ func (m *Metrics) Enable() {
 	}
 	m.EnrollmentFailures.SetEnabled(true)
 	m.AuthorizationEvents.SetEnabled(true)
+	m.RemoteProjectionEvents.SetEnabled(true)
+	m.RemoteWorkloads.SetEnabled(true)
 }
 
 // NewMetrics creates a new Metrics instance for XDS enrollment failures
 func NewMetrics() *Metrics {
 	return &Metrics{
+		RemoteProjectionEvents: metric.NewCounterVec(metric.CounterOpts{
+			Disabled: true, Namespace: metrics.Namespace, Subsystem: subsystem,
+			Name: "remote_projection_events_total",
+			Help: "Remote workload projection events on ztunnel xDS streams (projected, withdrawn, withdrawn_local_collision, stream_reset_for_recovery); discovery only, not authorization",
+		}, []string{"event"}),
+		RemoteWorkloads: metric.NewGaugeVec(metric.GaugeOpts{
+			Disabled: true, Namespace: metrics.Namespace, Subsystem: subsystem,
+			Name: "remote_workloads",
+			Help: "Remote workloads last published to ztunnel by peer cluster; zero after withdrawal",
+		}, []string{"peer_cluster"}),
 		AuthorizationEvents: metric.NewCounterVec(metric.CounterOpts{
 			Disabled: true, Namespace: metrics.Namespace, Subsystem: subsystem,
 			Name: "authorization_events_total",

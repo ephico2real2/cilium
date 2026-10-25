@@ -247,6 +247,16 @@ func createTestEndpointWithLabels(id uint16, namespace, podName, netnsPath strin
 	return ep
 }
 
+// requiredTestEndpoint is a Required endpoint as the agent creates it: source
+// IP verification is enabled, so captured membership can be published.
+func requiredTestEndpoint(id uint16, namespace, podName, netnsPath string) *endpoint.Endpoint {
+	ep := createTestEndpointWithLabels(id, namespace, podName, netnsPath, labels.Labels{})
+	lib := option.GetEndpointMutableOptionLibrary()
+	ep.Options = option.NewIntOptions(&lib)
+	ep.Options.SetBool(option.SourceIPVerification, true)
+	return ep
+}
+
 // setupTest creates a test environment with mock dependencies and returns
 // the database, table, mocks, and reconciler instance.
 func setupTest(t *testing.T) (*statedb.DB, statedb.RWTable[*table.EnrolledNamespace], *testendpointmanager.MockEndpointManager, *MockEndpointEnroller, *EnrollmentReconciler, chan *xds.EndpointEvent) {
@@ -819,7 +829,7 @@ func TestStrictDeletionUsesCleanerWithoutNamespaceOrProxyLabelExemption(t *testi
 func TestStrictEndpointDeleteRevokesPublishedMembershipBeforeCleanup(t *testing.T) {
 	_, _, _, _, ops, _ := setupTest(t)
 	ops.strictCreationAdmission = true
-	ep := createTestEndpointWithLabels(78, "orders", "api", "/runtime/netns/api", labels.Labels{})
+	ep := requiredTestEndpoint(78, "orders", "api", "/runtime/netns/api")
 	ep.K8sUID = "pod-incarnation-a"
 	ref, err := ops.membership.Require("namespace-incarnation-a", ep.K8sUID, ep.GetID16(), ep.GetContainerNetnsPath())
 	require.NoError(t, err)
@@ -827,10 +837,10 @@ func TestStrictEndpointDeleteRevokesPublishedMembershipBeforeCleanup(t *testing.
 	require.True(t, ok)
 	require.True(t, ops.membership.MarkCaptured(ref, generation))
 	require.True(t, ops.membership.AcknowledgeZDS(ref, generation))
-	ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
+	require.True(t, ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
 		Version: 1, Revision: 1, Epoch: ref.Epoch, Generation: generation,
 		State: endpoint.ZtunnelMembershipCaptured, NamespaceUID: ref.Key.NamespaceUID,
-	})
+	}), "the fixture publishes captured membership")
 
 	ops.EndpointDeleted(ep, endpoint.DeleteConfig{})
 
@@ -846,7 +856,7 @@ func TestStrictEndpointDeleteRevokesPublishedMembershipBeforeCleanup(t *testing.
 func TestStrictNamespaceUnenrollmentRevokesRemoteMembershipAndRetainsCapture(t *testing.T) {
 	_, _, mockEndpointManager, mockEnroller, ops, _ := setupTest(t)
 	ops.strictCreationAdmission = true
-	ep := createTestEndpointWithLabels(79, "orders", "api", "/runtime/netns/api", labels.Labels{})
+	ep := requiredTestEndpoint(79, "orders", "api", "/runtime/netns/api")
 	ep.K8sUID = "pod-incarnation-b"
 	mockEndpointManager.Endpoints = []*endpoint.Endpoint{ep}
 	ref, err := ops.membership.Require("namespace-incarnation-b", ep.K8sUID, ep.GetID16(), ep.GetContainerNetnsPath())
@@ -855,10 +865,10 @@ func TestStrictNamespaceUnenrollmentRevokesRemoteMembershipAndRetainsCapture(t *
 	require.True(t, ok)
 	require.True(t, ops.membership.MarkCaptured(ref, generation))
 	require.True(t, ops.membership.AcknowledgeZDS(ref, generation))
-	ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
+	require.True(t, ep.SetZtunnelMembership(endpoint.ZtunnelMembership{
 		Version: 1, Revision: 1, Epoch: ref.Epoch, Generation: generation,
 		State: endpoint.ZtunnelMembershipCaptured, NamespaceUID: ref.Key.NamespaceUID,
-	})
+	}), "the fixture publishes captured membership")
 
 	err = ops.Delete(t.Context(), ops.db.ReadTxn(), 1, &table.EnrolledNamespace{Name: "orders", UID: ref.Key.NamespaceUID})
 	require.ErrorIs(t, err, zds.ErrStrictLiveUnenrollment)

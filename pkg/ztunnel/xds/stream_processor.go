@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"sort"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -24,6 +25,8 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/watchers"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/time"
+	remote "github.com/cilium/cilium/pkg/ztunnel/remote_workload"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 )
 
@@ -56,6 +59,11 @@ type StreamProcessorParams struct {
 	IssuerProfile             *issuerProfileSource
 	// NodeNames binds Kubernetes Node names from native node discovery.
 	NodeNames nodeNameResolver
+	// RemotePeers holds authenticated remote ClusterMesh workload snapshots
+	// (nil: remote workloads are not projected). RemoteTrust binds each peer
+	// to its trust domain from the validated issuer profile.
+	RemotePeers *remote.PeerSnapshotStore
+	RemoteTrust *remoteTrustAuthority
 }
 
 // StreamProcessor implements the logic for handling xDS streams to zTunnel.
@@ -87,6 +95,14 @@ type StreamProcessor struct {
 	nodeNameWatch        <-chan struct{}
 	pendingNodeNames     map[string]nodeBinding
 	pendingNodeNameWatch <-chan struct{}
+	// Remote workload projection (one per stream) and the stream's index of
+	// published local workload addresses.
+	remotePeers        *remote.PeerSnapshotStore
+	remoteTrust        *remoteTrustAuthority
+	remote             *remoteStreamState
+	remoteInitial      *remoteDelta
+	remoteInitialTrust remoteTrustView
+	localAddresses     map[netip.Addr]string
 }
 
 // CiliumEndpointsWatcher defines the interface for watching CiliumEndpoints and CiliumEndpointSlices.
@@ -153,6 +169,8 @@ func NewStreamProcessor(params *StreamProcessorParams) *StreamProcessor {
 		effectivePolicyQuarantine: params.EffectivePolicyQuarantine,
 		issuerProfile:             params.IssuerProfile,
 		nodeNames:                 params.NodeNames,
+		remotePeers:               params.RemotePeers,
+		remoteTrust:               params.RemoteTrust,
 	}
 	sp.endpointSource = NewEndpointSource(params.K8sCiliumEndpointsWatcher, sp)
 	return sp
@@ -595,6 +613,16 @@ func (sp *StreamProcessor) handleAddressTypeURL(req *v3.DeltaDiscoveryRequest) e
 		)
 		return fmt.Errorf("failed to build workload Address response: %w", err)
 	}
+	if sp.remoteEnabled() {
+		if _, err := sp.addInitialRemote(resp, time.Now()); err != nil {
+			sp.log.Error("Rejecting merged local and remote workload Address snapshot",
+				logStage, "xds-address-snapshot",
+				logfields.Resource, xdsTypeURLAddress,
+				logfields.Error, err,
+			)
+			return fmt.Errorf("failed to merge remote workloads: %w", err)
+		}
+	}
 	if sp.requireMTLS {
 		if err := addStrictInitialRemovals(resp, req); err != nil {
 			return fmt.Errorf("failed to reconcile retained workload resources: %w", err)
@@ -602,6 +630,12 @@ func (sp *StreamProcessor) handleAddressTypeURL(req *v3.DeltaDiscoveryRequest) e
 	}
 	if err := sp.sendAddressResponse(resp, "xds-address-snapshot"); err != nil {
 		return err
+	}
+	if sp.remoteEnabled() {
+		if err := sp.updateLocalAddresses(resp); err != nil {
+			return err
+		}
+		sp.commitInitialRemote(time.Now())
 	}
 
 	sp.log.Debug("initialized new stream for resource", logfields.Resource, xdsTypeURLAddress)
@@ -663,6 +697,24 @@ func (sp *StreamProcessor) sendAddressResponse(response *v3.DeltaDiscoveryRespon
 		}
 		return fmt.Errorf("Kubernetes node binding changed before publication: %w", err)
 	}
+	if err := sp.sendAddressMessage(response, stage); err != nil {
+		return err
+	}
+	sp.commitNodeNames()
+	return nil
+}
+
+// sendAddressMessage sends one Address response on the serialized stream and
+// registers its nonce. Local publications use sendAddressResponse, which also
+// re-verifies and commits their Kubernetes node bindings; remote-only deltas
+// carry no local node binding.
+func (sp *StreamProcessor) sendAddressMessage(response *v3.DeltaDiscoveryResponse, stage string) error {
+	if response == nil || response.Nonce == "" {
+		return wrapValidationError(errInvalidDiscoveryState, "cannot send an empty workload Address response or nonce")
+	}
+	if sp.stream == nil {
+		return wrapValidationError(errInvalidDiscoveryState, "cannot send workload Address response without an xDS stream")
+	}
 	if err := sp.stream.SendMsg(response); err != nil {
 		if sp.metrics != nil {
 			sp.metrics.EnrollmentFailures.WithLabelValues("send_failed").Inc()
@@ -680,7 +732,6 @@ func (sp *StreamProcessor) sendAddressResponse(response *v3.DeltaDiscoveryRespon
 		sp.expectedNonce = make(map[string]struct{})
 	}
 	sp.expectedNonce[response.Nonce] = struct{}{}
-	sp.commitNodeNames()
 	return nil
 }
 
@@ -748,8 +799,21 @@ func (sp *StreamProcessor) handleEPEvent(epEvent *EndpointEvent) error {
 		)
 		return fmt.Errorf("failed to build workload Address event response: %w", err)
 	}
-
-	return sp.sendAddressResponse(resp, "xds-address-event")
+	if !sp.remoteEnabled() || sp.remote == nil {
+		return sp.sendAddressResponse(resp, "xds-address-event")
+	}
+	// A new local address owned by a published remote workload withdraws
+	// that peer in the same response.
+	if err := sp.withdrawCollidingRemote(resp); err != nil {
+		return err
+	}
+	if err := sp.sendAddressResponse(resp, "xds-address-event"); err != nil {
+		return err
+	}
+	if err := sp.updateLocalAddresses(resp); err != nil {
+		return err
+	}
+	return sp.syncRemote(time.Now())
 }
 
 func (sp *StreamProcessor) drainEndpointEvents(first *EndpointEvent) (EndpointEventCollection, error) {
@@ -913,6 +977,22 @@ func (sp *StreamProcessor) Start() error {
 			}
 		case <-sp.nodeNameWatch:
 			if err := sp.revalidateNodeNames(); err != nil {
+				return err
+			}
+		case <-sp.remoteViewWatch():
+			if err := sp.syncRemote(time.Now()); err != nil {
+				return err
+			}
+		case <-sp.remoteTrustWatch():
+			if err := sp.syncRemote(time.Now()); err != nil {
+				return err
+			}
+		case <-sp.remoteNodeWatch():
+			if err := sp.syncRemote(time.Now()); err != nil {
+				return err
+			}
+		case <-sp.remoteTimer():
+			if err := sp.syncRemote(time.Now()); err != nil {
 				return err
 			}
 		case ep, ok := <-sp.endpointRecv:

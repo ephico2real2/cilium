@@ -18,6 +18,7 @@ import (
 	"github.com/cilium/cilium/pkg/ztunnel/ca"
 	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/pb"
+	remote "github.com/cilium/cilium/pkg/ztunnel/remote_workload"
 	"github.com/cilium/cilium/pkg/ztunnel/table"
 
 	v3 "github.com/envoyproxy/go-control-plane/envoy/service/discovery/v3"
@@ -64,6 +65,8 @@ type Server struct {
 	effectivePolicyQuarantine bool
 	issuerProfile             *issuerProfileSource
 	nodeNames                 nodeNameResolver
+	remotePeers               *remote.PeerSnapshotStore
+	remoteTrust               *remoteTrustAuthority
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -220,6 +223,8 @@ func (x *Server) DeltaAggregatedResources(stream v3.AggregatedDiscoveryService_D
 		EffectivePolicyQuarantine: x.effectivePolicyQuarantine,
 		IssuerProfile:             x.issuerProfile,
 		NodeNames:                 x.nodeNames,
+		RemotePeers:               x.remotePeers,
+		RemoteTrust:               x.remoteTrust,
 	}
 
 	x.log.Debug("begin processing DeltaAggregatedResources stream")

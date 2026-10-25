@@ -28,10 +28,14 @@ const logFieldStage = "stage"
 // observer per ClusterMesh peer. The sink stores complete replacement
 // snapshots; it must not translate them to local endpoint/IPIdentity APIs.
 type FactoryParams struct {
-	Logger                 *slog.Logger
-	StoreFactory           store.Factory
-	ClusterInfo            cmtypes.ClusterInfo
-	Sink                   SnapshotSink
+	Logger       *slog.Logger
+	StoreFactory store.Factory
+	ClusterInfo  cmtypes.ClusterInfo
+	Sink         SnapshotSink
+	// SinkForCluster, when set, allocates the sink of each new observer
+	// incarnation for its peer (PeerSnapshotStore.NewWriter). It takes
+	// precedence over Sink.
+	SinkForCluster         func(cluster string) SnapshotSink
 	EnableZTunnel          bool
 	EnableSourceMembership bool
 	OriginConfigDirectory  string
@@ -45,12 +49,16 @@ type FactoryParams struct {
 // routing cache as source provenance and never changes the route backend.
 func NewClusterMeshObserverFactory(params FactoryParams) cmobserver.Factory {
 	return func(cluster string, onSync func()) cmobserver.Observer {
+		sink := params.Sink
+		if params.SinkForCluster != nil {
+			sink = params.SinkForCluster(cluster)
+		}
 		return &clusterMeshObserver{
 			logger:                 params.Logger.With(logfields.ClusterName, cluster),
 			cluster:                cluster,
 			storeFactory:           params.StoreFactory,
 			clusterInfo:            params.ClusterInfo,
-			sink:                   params.Sink,
+			sink:                   sink,
 			enableZTunnel:          params.EnableZTunnel,
 			enableSourceMembership: params.EnableSourceMembership,
 			originConfigDirectory:  params.OriginConfigDirectory,

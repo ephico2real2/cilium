@@ -33,6 +33,9 @@ type nodeNameResolver interface {
 	// changed, disappeared or became ambiguous, and returns the watch of that
 	// same read.
 	verify(map[string]nodeBinding) (<-chan struct{}, error)
+	// localNames returns the Kubernetes Node names of the local cluster from
+	// one read of the native table, and that read's watch.
+	localNames() (map[string]bool, <-chan struct{}, error)
 }
 
 // nativeNodeNames reads Cilium's native node table. That table is fed by
@@ -81,6 +84,18 @@ func (r *nativeNodeNames) snapshot() (map[netip.Addr]string, map[netip.Addr]bool
 		}
 	}
 	return byAddress, ambiguous, watch, nil
+}
+
+func (r *nativeNodeNames) localNames() (map[string]bool, <-chan struct{}, error) {
+	byAddress, _, watch, err := r.snapshot()
+	if err != nil {
+		return nil, nil, err
+	}
+	names := make(map[string]bool, len(byAddress))
+	for _, name := range byAddress {
+		names[name] = true
+	}
+	return names, watch, nil
 }
 
 func (r *nativeNodeNames) lookup(byAddress map[netip.Addr]string, ambiguous map[netip.Addr]bool, ip netip.Addr) (string, error) {
