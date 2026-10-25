@@ -15,16 +15,24 @@ import (
 	"github.com/cilium/cilium/pkg/node"
 )
 
+// nodeBinding is the node address and Kubernetes Node name published for one
+// workload (keyed by its immutable Pod UID).
+type nodeBinding struct {
+	address netip.Addr
+	name    string
+}
+
 // nodeNameResolver binds the Kubernetes Node metadata.name of each workload's
 // node into an Address batch. ztunnel compares Workload.Node with its own
 // NODE_NAME (spec.nodeName), so the value is the API Node name, never an IP.
 type nodeNameResolver interface {
 	// bind returns copies of the CREATE events with NodeName set, the
-	// address-to-name pairs it used, and a watch from the same read.
-	bind(EndpointEventCollection) (EndpointEventCollection, map[netip.Addr]string, <-chan struct{}, error)
-	// verify re-reads previously bound pairs in one read. It fails if any pair
-	// changed, disappeared or became ambiguous, and returns a fresh watch.
-	verify(map[netip.Addr]string) (<-chan struct{}, error)
+	// per-Pod-UID bindings it created and the Pod UIDs of REMOVED events.
+	bind(EndpointEventCollection) (EndpointEventCollection, map[string]nodeBinding, []string, error)
+	// verify re-reads every binding in one read. It fails if any binding
+	// changed, disappeared or became ambiguous, and returns the watch of that
+	// same read.
+	verify(map[string]nodeBinding) (<-chan struct{}, error)
 }
 
 // nativeNodeNames reads Cilium's native node table. That table is fed by
@@ -87,26 +95,38 @@ func (r *nativeNodeNames) lookup(byAddress map[netip.Addr]string, ambiguous map[
 	return name, nil
 }
 
-func (r *nativeNodeNames) bind(events EndpointEventCollection) (EndpointEventCollection, map[netip.Addr]string, <-chan struct{}, error) {
-	byAddress, ambiguous, watch, err := r.snapshot()
+func (r *nativeNodeNames) bind(events EndpointEventCollection) (EndpointEventCollection, map[string]nodeBinding, []string, error) {
+	byAddress, ambiguous, _, err := r.snapshot()
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	bound := make(map[netip.Addr]string)
+	created := make(map[string]nodeBinding)
+	var removed []string
 	result := make(EndpointEventCollection, 0, len(events))
 	for i, event := range events {
 		if event == nil {
 			return nil, nil, nil, wrapValidationError(errInvalidWorkloadData, "workload event %d is nil", i)
 		}
-		if event.Err != nil || event.Type == REMOVED {
+		if event.Err != nil {
 			// A source rejection is reported, and fails the batch, in the
-			// strict converter. A removal names only the original Pod UID;
-			// its node may be gone.
+			// strict converter.
+			result = append(result, event)
+			continue
+		}
+		if event.Type == REMOVED {
+			// A removal names only the original Pod UID; its node may be gone.
+			if uid := event.getPodUID(); uid != "" {
+				removed = append(removed, uid)
+			}
 			result = append(result, event)
 			continue
 		}
 		if event.Type != CREATE || event.CiliumEndpoint == nil || event.Networking == nil {
 			return nil, nil, nil, wrapValidationError(errInvalidWorkloadData, "workload event %d has no endpoint networking", i)
+		}
+		uid := event.getPodUID()
+		if uid == "" {
+			return nil, nil, nil, wrapValidationError(errInvalidWorkloadData, "workload event %d has no Pod UID", i)
 		}
 		ip, err := netip.ParseAddr(event.Networking.NodeIP)
 		if err != nil {
@@ -119,50 +139,80 @@ func (r *nativeNodeNames) bind(events EndpointEventCollection) (EndpointEventCol
 		copy := *event
 		copy.NodeName = name
 		result = append(result, &copy)
-		bound[ip.Unmap()] = name
+		created[uid] = nodeBinding{address: ip.Unmap(), name: name}
 	}
-	return result, bound, watch, nil
+	return result, created, removed, nil
 }
 
-func (r *nativeNodeNames) verify(bound map[netip.Addr]string) (<-chan struct{}, error) {
+func (r *nativeNodeNames) verify(bindings map[string]nodeBinding) (<-chan struct{}, error) {
 	byAddress, ambiguous, watch, err := r.snapshot()
 	if err != nil {
 		return nil, err
 	}
-	for ip, want := range bound {
-		got, err := r.lookup(byAddress, ambiguous, ip)
+	for _, b := range bindings {
+		got, err := r.lookup(byAddress, ambiguous, b.address)
 		if err != nil {
 			return nil, err
 		}
-		if got != want {
-			return nil, wrapValidationError(errInvalidWorkloadData, "Kubernetes node for address %s changed from %q to %q", ip, want, got)
+		if got != b.name {
+			return nil, wrapValidationError(errInvalidWorkloadData, "Kubernetes node for address %s changed from %q to %q", b.address, b.name, got)
 		}
 	}
 	return watch, nil
 }
 
 // bindNodeNames is the common boundary for initial replay, CEP/CES updates and
-// namespace enrollment. It records what this stream has published so a later
-// node-only change (with no endpoint event) still invalidates the stream.
+// namespace enrollment. It stages the stream's complete retained binding set
+// (earlier published workloads minus removals plus this batch) and verifies
+// ALL of it in one read. The watch comes from that same read, so a node change
+// that closed the previous watch can never be hidden by an unrelated batch.
+// The staged set is committed only after the response is sent.
 func (sp *StreamProcessor) bindNodeNames(collection EndpointEventCollection) (EndpointEventCollection, error) {
 	if sp.nodeNames == nil {
 		return nil, wrapValidationError(errInvalidWorkloadData, "Kubernetes node discovery is not configured")
 	}
-	bound, pairs, watch, err := sp.nodeNames.bind(collection)
+	bound, created, removed, err := sp.nodeNames.bind(collection)
 	if err != nil {
 		return nil, err
 	}
-	if sp.boundNodeNames == nil {
-		sp.boundNodeNames = make(map[netip.Addr]string)
+	retained := maps.Clone(sp.boundNodeNames)
+	if retained == nil {
+		retained = make(map[string]nodeBinding)
 	}
-	for ip, name := range pairs {
-		if previous, found := sp.boundNodeNames[ip]; found && previous != name {
-			return nil, wrapValidationError(errInvalidWorkloadData, "node address %s was published as %q and is now %q", ip, previous, name)
-		}
+	for _, uid := range removed {
+		delete(retained, uid)
 	}
-	maps.Copy(sp.boundNodeNames, pairs)
-	sp.nodeNameWatch = watch
+	maps.Copy(retained, created)
+	watch, err := sp.nodeNames.verify(retained)
+	if err != nil {
+		return nil, err
+	}
+	sp.pendingNodeNames = retained
+	sp.pendingNodeNameWatch = watch
 	return bound, nil
+}
+
+// checkNodeNamesBeforeSend re-verifies the staged bindings immediately before
+// publication, so a change observed during conversion is not published. This
+// is request-time consistency against the node table, not an API transaction.
+func (sp *StreamProcessor) checkNodeNamesBeforeSend() error {
+	if sp.pendingNodeNames == nil {
+		return wrapValidationError(errInvalidDiscoveryState, "workload Address response has no staged Kubernetes node binding")
+	}
+	watch, err := sp.nodeNames.verify(sp.pendingNodeNames)
+	if err != nil {
+		return err
+	}
+	sp.pendingNodeNameWatch = watch
+	return nil
+}
+
+// commitNodeNames records the bindings of a response that was sent.
+func (sp *StreamProcessor) commitNodeNames() {
+	sp.boundNodeNames = sp.pendingNodeNames
+	sp.nodeNameWatch = sp.pendingNodeNameWatch
+	sp.pendingNodeNames = nil
+	sp.pendingNodeNameWatch = nil
 }
 
 // revalidateNodeNames runs when the native node table changes. Unchanged

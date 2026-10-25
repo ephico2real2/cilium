@@ -6,6 +6,7 @@ package xds
 import (
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/netip"
 	"testing"
 
@@ -105,13 +106,16 @@ func TestNativeNodeNameUsesKubernetesNameNotAddress(t *testing.T) {
 	require.NoError(t, err)
 
 	event := nodeTestEvent("11111111-1111-4111-8111-111111111111", "172.18.0.2")
-	bound, pairs, watch, err := names.bind(EndpointEventCollection{event})
+	bound, created, removed, err := names.bind(EndpointEventCollection{event})
 	require.NoError(t, err)
-	require.NotNil(t, watch)
+	require.Empty(t, removed)
 	require.Equal(t, "cmtc-a-worker", bound[0].NodeName)
 	require.NotEqual(t, bound[0].Networking.NodeIP, bound[0].NodeName, "the node name is never the node IP")
 	require.Empty(t, event.NodeName, "input events are not mutated")
-	require.Equal(t, map[netip.Addr]string{netip.MustParseAddr("172.18.0.2"): "cmtc-a-worker"}, pairs)
+	require.Equal(t, map[string]nodeBinding{"11111111-1111-4111-8111-111111111111": {address: netip.MustParseAddr("172.18.0.2"), name: "cmtc-a-worker"}}, created)
+	watch, err := names.verify(created)
+	require.NoError(t, err)
+	require.NotNil(t, watch)
 
 	address, err := bound[0].ToXDSAddress()
 	require.NoError(t, err)
@@ -192,25 +196,57 @@ func TestNativeNodeNameRepeatedNamesInDifferentClusters(t *testing.T) {
 	require.ErrorContains(t, err, "no Kubernetes node name", "cmtc-b's identical row must not substitute")
 }
 
-// A node-only change (no endpoint event) must invalidate the active stream;
-// unrelated node writes re-arm the watch without closing it.
-func TestNativeNodeNameWatchInvalidatesStreamOnNodeChange(t *testing.T) {
+// publish runs one batch through the real boundary as a stream would:
+// bind/stage, re-verify before send, commit after a successful send.
+func publish(t *testing.T, sp *StreamProcessor, events ...*EndpointEvent) error {
+	t.Helper()
+	if _, err := sp.bindNodeNames(EndpointEventCollection(events)); err != nil {
+		return err
+	}
+	if err := sp.checkNodeNamesBeforeSend(); err != nil {
+		return err
+	}
+	sp.commitNodeNames()
+	return nil
+}
+
+func twoNodeStream(t *testing.T) (*statedb.DB, statedb.RWTable[*node.Node], *StreamProcessor) {
 	db, nodes := testNodeTable(t, false,
 		testNodeRow{name: "cmtc-a-worker", cluster: "cmtc-a", clusterID: 1, addresses: []string{"172.18.0.2"}},
 		testNodeRow{name: "cmtc-a-control-plane", cluster: "cmtc-a", clusterID: 1, addresses: []string{"172.18.0.3"}},
 	)
 	names, err := newNativeNodeNames(db, nodes, testLocalCluster)
 	require.NoError(t, err)
-	sp := &StreamProcessor{log: slog.New(slog.DiscardHandler), nodeNames: names}
-	bound, err := sp.bindNodeNames(EndpointEventCollection{nodeTestEvent("11111111-1111-4111-8111-111111111111", "172.18.0.2")})
+	return db, nodes, &StreamProcessor{log: slog.New(slog.DiscardHandler), nodeNames: names}
+}
+
+func renameWorker(t *testing.T, db *statedb.DB, nodes statedb.RWTable[*node.Node]) {
+	txn := db.WriteTxn(nodes)
+	_, _, err := nodes.Delete(txn, &node.Node{Node: nodetypes.Node{Name: "cmtc-a-worker", Cluster: "cmtc-a"}})
 	require.NoError(t, err)
-	require.Equal(t, "cmtc-a-worker", bound[0].NodeName)
+	_, _, err = nodes.Insert(txn, &node.Node{Node: nodetypes.Node{Name: "cmtc-a-renamed", Cluster: "cmtc-a", ClusterID: 1,
+		IPAddresses: []nodetypes.Address{nodetypes.NewAddress(addressing.NodeInternalIP, netip.MustParseAddr("172.18.0.2"))}}})
+	require.NoError(t, err)
+	txn.Commit()
+}
+
+const (
+	uidWorker1 = "11111111-1111-4111-8111-111111111111"
+	uidWorker2 = "22222222-2222-4222-8222-222222222222"
+	uidCP      = "33333333-3333-4333-8333-333333333333"
+)
+
+// A node-only change (no endpoint event) must invalidate the active stream;
+// unrelated node writes re-arm the watch without closing it.
+func TestNativeNodeNameWatchInvalidatesStreamOnNodeChange(t *testing.T) {
+	db, nodes, sp := twoNodeStream(t)
+	require.NoError(t, publish(t, sp, nodeTestEvent(uidWorker1, "172.18.0.2")))
 	watch := sp.nodeNameWatch
 	require.NotNil(t, watch)
 
 	// Unrelated node write: watch fires, binding unchanged, stream survives.
 	txn := db.WriteTxn(nodes)
-	_, _, err = nodes.Insert(txn, &node.Node{Node: nodetypes.Node{Name: "cmtc-a-extra", Cluster: "cmtc-a", ClusterID: 1,
+	_, _, err := nodes.Insert(txn, &node.Node{Node: nodetypes.Node{Name: "cmtc-a-extra", Cluster: "cmtc-a", ClusterID: 1,
 		IPAddresses: []nodetypes.Address{nodetypes.NewAddress(addressing.NodeInternalIP, netip.MustParseAddr("172.18.0.9"))}}})
 	require.NoError(t, err)
 	txn.Commit()
@@ -226,15 +262,84 @@ func TestNativeNodeNameWatchInvalidatesStreamOnNodeChange(t *testing.T) {
 	txn.Commit()
 	<-watch
 	require.ErrorContains(t, sp.revalidateNodeNames(), "Kubernetes node binding changed")
+}
 
-	// A name change for an address already published is refused at bind time.
-	db2, nodes2 := testNodeTable(t, false, testNodeRow{name: "renamed", cluster: "cmtc-a", clusterID: 1, addresses: []string{"172.18.0.3"}})
-	names2, err := newNativeNodeNames(db2, nodes2, testLocalCluster)
+// Grok/primary P0: a later batch for an unchanged node must not hide an
+// earlier node change whose watch already closed.
+func TestNativeNodeNameLaterBatchRejectsAnEarlierNodeChange(t *testing.T) {
+	db, nodes, sp := twoNodeStream(t)
+	require.NoError(t, publish(t, sp, nodeTestEvent(uidWorker1, "172.18.0.2")))
+	stale := sp.nodeNameWatch
+	published := maps.Clone(sp.boundNodeNames)
+
+	renameWorker(t, db, nodes)
+	<-stale
+
+	bound, err := sp.bindNodeNames(EndpointEventCollection{nodeTestEvent(uidCP, "172.18.0.3")})
+	require.Nil(t, bound)
+	require.ErrorContains(t, err, "172.18.0.2")
+	require.Equal(t, published, sp.boundNodeNames, "a rejected batch leaves the published set unchanged")
+	require.Equal(t, stale, sp.nodeNameWatch, "the closed watch is not replaced")
+}
+
+// A change between conversion and publication withholds the response.
+func TestNativeNodeNameChangeBeforeSendWithholdsResponse(t *testing.T) {
+	db, nodes, sp := twoNodeStream(t)
+	stream := &MockStream{}
+	sent := 0
+	stream.OnSendMsg = func(any) error { sent++; return nil }
+	sp.stream = stream
+	sp.expectedNonce = make(map[string]struct{})
+
+	response, err := sp.addressResponse(EndpointEventCollection{nodeTestEvent(uidWorker1, "172.18.0.2")})
 	require.NoError(t, err)
-	sp.nodeNames = names2
-	sp.boundNodeNames = map[netip.Addr]string{netip.MustParseAddr("172.18.0.3"): "cmtc-a-control-plane"}
-	_, err = sp.bindNodeNames(EndpointEventCollection{nodeTestEvent("33333333-3333-4333-8333-333333333333", "172.18.0.3")})
-	require.ErrorContains(t, err, "was published as")
+	renameWorker(t, db, nodes)
+	require.ErrorContains(t, sp.sendAddressResponse(response, "test"), "before publication")
+	require.Zero(t, sent)
+	require.Empty(t, sp.expectedNonce)
+	require.Nil(t, sp.boundNodeNames, "nothing was published, so nothing is committed")
+}
+
+// Bindings are tracked by Pod UID: removing one Pod keeps the dependency of
+// another Pod on the same node, and removing the last one retires it so that
+// address reuse under a new name succeeds.
+func TestNativeNodeNameRemovalRetiresExactPodUID(t *testing.T) {
+	db, nodes, sp := twoNodeStream(t)
+	require.NoError(t, publish(t, sp,
+		nodeTestEvent(uidWorker1, "172.18.0.2"), nodeTestEvent(uidWorker2, "172.18.0.2"), nodeTestEvent(uidCP, "172.18.0.3")))
+	require.Len(t, sp.boundNodeNames, 3)
+
+	removed := &EndpointEvent{Type: REMOVED, CiliumEndpoint: nodeTestEvent(uidWorker1, "172.18.0.2").CiliumEndpoint}
+	require.NoError(t, publish(t, sp, removed))
+	require.NotContains(t, sp.boundNodeNames, uidWorker1)
+	require.Contains(t, sp.boundNodeNames, uidWorker2, "another Pod on the same node keeps the dependency")
+
+	renameWorker(t, db, nodes)
+	_, err := sp.bindNodeNames(EndpointEventCollection{nodeTestEvent(uidCP, "172.18.0.3")})
+	require.ErrorContains(t, err, "172.18.0.2", "the remaining worker Pod still depends on the old name")
+
+	// Retire the last worker Pod in the same batch as a new Pod on the
+	// renamed node: the old binding is gone and the new name is published.
+	removed2 := &EndpointEvent{Type: REMOVED, CiliumEndpoint: nodeTestEvent(uidWorker2, "172.18.0.2").CiliumEndpoint}
+	replacement := nodeTestEvent("44444444-4444-4444-8444-444444444444", "172.18.0.2")
+	require.NoError(t, publish(t, sp, removed2, replacement))
+	require.Equal(t, "cmtc-a-renamed", sp.boundNodeNames["44444444-4444-4444-8444-444444444444"].name)
+	require.NotContains(t, sp.boundNodeNames, uidWorker2)
+}
+
+// A failed send must not commit the staged bindings.
+func TestNativeNodeNameFailedSendDoesNotCommit(t *testing.T) {
+	_, _, sp := twoNodeStream(t)
+	stream := &MockStream{}
+	stream.OnSendMsg = func(any) error { return errInvalidDiscoveryState }
+	sp.stream = stream
+	sp.expectedNonce = make(map[string]struct{})
+	sp.metrics = NewMetrics()
+	response, err := sp.addressResponse(EndpointEventCollection{nodeTestEvent(uidWorker1, "172.18.0.2")})
+	require.NoError(t, err)
+	require.Error(t, sp.sendAddressResponse(response, "test"))
+	require.Nil(t, sp.boundNodeNames)
+	require.Nil(t, sp.nodeNameWatch)
 }
 
 // REMOVED events name only the Pod UID; they must work after the node is gone.

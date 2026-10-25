@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/netip"
 	"sort"
 
 	corev3 "github.com/envoyproxy/go-control-plane/envoy/config/core/v3"
@@ -81,10 +80,13 @@ type StreamProcessor struct {
 	quarantineResources       map[string]string
 	issuerProfile             *issuerProfileSource
 	nodeNames                 nodeNameResolver
-	// Node bindings published on this stream and the native table watch from
-	// the read that produced the latest binding.
-	boundNodeNames map[netip.Addr]string
-	nodeNameWatch  <-chan struct{}
+	// Node bindings published on this stream (by Pod UID) and the native
+	// table watch from the read that last verified all of them. The pending
+	// pair is staged by bindNodeNames and committed after a successful send.
+	boundNodeNames       map[string]nodeBinding
+	nodeNameWatch        <-chan struct{}
+	pendingNodeNames     map[string]nodeBinding
+	pendingNodeNameWatch <-chan struct{}
 }
 
 // CiliumEndpointsWatcher defines the interface for watching CiliumEndpoints and CiliumEndpointSlices.
@@ -651,6 +653,16 @@ func (sp *StreamProcessor) sendAddressResponse(response *v3.DeltaDiscoveryRespon
 	if sp.stream == nil {
 		return wrapValidationError(errInvalidDiscoveryState, "cannot send workload Address response without an xDS stream")
 	}
+	if err := sp.checkNodeNamesBeforeSend(); err != nil {
+		if sp.log != nil {
+			sp.log.Warn("Withholding workload Address response after a Kubernetes node binding changed",
+				logStage, stage,
+				logfields.Resource, xdsTypeURLAddress,
+				logfields.Error, err,
+			)
+		}
+		return fmt.Errorf("Kubernetes node binding changed before publication: %w", err)
+	}
 	if err := sp.stream.SendMsg(response); err != nil {
 		if sp.metrics != nil {
 			sp.metrics.EnrollmentFailures.WithLabelValues("send_failed").Inc()
@@ -668,6 +680,7 @@ func (sp *StreamProcessor) sendAddressResponse(response *v3.DeltaDiscoveryRespon
 		sp.expectedNonce = make(map[string]struct{})
 	}
 	sp.expectedNonce[response.Nonce] = struct{}{}
+	sp.commitNodeNames()
 	return nil
 }
 
