@@ -4,6 +4,7 @@
 package policymap
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -99,7 +100,12 @@ type policyMap struct {
 	epID  uint16
 }
 
+// ErrKernelMapIDUnavailable means the map implementation is not backed by a
+// live kernel map. Callers must treat the missing ID as unavailable evidence.
+var ErrKernelMapIDUnavailable = errors.New("kernel policy map ID unavailable")
+
 type PolicyMap interface {
+	KernelMapID() (uint32, error)
 	Update(key *PolicyKey, entry *PolicyEntry) error
 	DeleteKey(key PolicyKey) error
 	DeleteEntry(entry *PolicyEntryDump) error
@@ -110,6 +116,35 @@ type PolicyMap interface {
 
 	MaxEntries() uint32
 	Close() error
+}
+
+// KernelMapID returns the current kernel ID for this policy map. Duplicate
+// the wrapped FD because the BPF map wrapper retains ownership of its FD.
+func (pm *policyMap) KernelMapID() (uint32, error) {
+	if pm == nil || pm.Map == nil {
+		return 0, ErrKernelMapIDUnavailable
+	}
+	fd, err := unix.Dup(pm.FD())
+	if err != nil {
+		return 0, fmt.Errorf("duplicate policy map FD: %w", err)
+	}
+	attached, err := ebpf.NewMapFromFD(fd)
+	if err != nil {
+		return 0, fmt.Errorf("open duplicated policy map FD: %w", err)
+	}
+	defer attached.Close()
+	info, err := attached.Info()
+	if err != nil {
+		return 0, fmt.Errorf("read policy map info: %w", err)
+	}
+	if info.Type != ebpf.LPMTrie {
+		return 0, fmt.Errorf("unexpected endpoint policy map type %s", info.Type)
+	}
+	id, ok := info.ID()
+	if !ok || id == 0 {
+		return 0, ErrKernelMapIDUnavailable
+	}
+	return uint32(id), nil
 }
 
 func (pe PolicyEntry) IsDeny() bool {

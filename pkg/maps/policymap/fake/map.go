@@ -95,3 +95,6 @@ func (pm *fakePolicyMap) DumpToMapStateMap() (MapStateMap, error) {
 
 func (pm *fakePolicyMap) MaxEntries() uint32 { return 1024 }
 func (pm *fakePolicyMap) Close() error       { return nil }
+func (pm *fakePolicyMap) KernelMapID() (uint32, error) {
+	return 0, policymap.ErrKernelMapIDUnavailable
+}

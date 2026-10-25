@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/cilium/ebpf"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/cilium/hive/hivetest"
 	"github.com/stretchr/testify/require"
@@ -84,6 +85,26 @@ func TestPrivilegedPolicyMapDumpToSlice(t *testing.T) {
 	dump, err = testMap.DumpToSlice()
 	require.NoError(t, err)
 	require.Len(t, dump, 2)
+}
+
+func TestPrivilegedPolicyMapKernelIDReturnsLiveKernelID(t *testing.T) {
+	testMap := setupPolicyMapPrivilegedTestSuite(t)
+	got, err := testMap.KernelMapID()
+	require.NoError(t, err)
+	require.NotZero(t, got)
+
+	concrete, ok := testMap.(*policyMap)
+	require.True(t, ok)
+	fd, err := unix.Dup(concrete.FD())
+	require.NoError(t, err)
+	mapFromFD, err := ebpf.NewMapFromFD(fd)
+	require.NoError(t, err)
+	t.Cleanup(func() { require.NoError(t, mapFromFD.Close()) })
+	info, err := mapFromFD.Info()
+	require.NoError(t, err)
+	want, ok := info.ID()
+	require.True(t, ok)
+	require.Equal(t, uint32(want), got)
 }
 
 func TestPrivilegedDeleteNonexistentKey(t *testing.T) {

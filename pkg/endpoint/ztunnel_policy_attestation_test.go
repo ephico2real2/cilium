@@ -49,6 +49,10 @@ func (m *nativeObservationMap) DumpToMapStateMap() (policyTypes.MapStateMap, err
 	}
 	return maps.Clone(m.entries), nil
 }
+
+func (m *nativeObservationMap) KernelMapID() (uint32, error) {
+	return 0, policymap.ErrKernelMapIDUnavailable
+}
 func nativeObservationEndpoint(t *testing.T) (*Endpoint, *nativeObservationMap) {
 	t.Helper()
 	previous := policy.GetPolicyEnabled()
@@ -103,6 +107,9 @@ func TestNativePolicyMapObservationUsesActualMapsAndReturnsDefensivePublicState(
 	require.Equal(t, uint64(12345), snapshot.NetNSCookie())
 	require.Equal(t, "/proc/fixture/ns/net", snapshot.NetNSPath())
 	require.Equal(t, uint32(10), snapshot.InterfaceIndex())
+	require.Zero(t, snapshot.KernelPolicyMapID(), "test policy maps must not fabricate a kernel ID")
+	_, err = snapshot.ReachabilityIdentity()
+	require.Error(t, err, "in-memory policy-map snapshots cannot become kernel reachability evidence")
 	require.Equal(t, "node-a", snapshot.NodeName())
 	require.Len(t, snapshot.Digest(), 64)
 	subject := snapshot.Subject()

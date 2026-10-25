@@ -67,6 +67,10 @@ func setupCompilationDirectories(tb testing.TB) {
 }
 
 func newTestLoader(tb testing.TB) *loader {
+	return newTestLoaderWithConfigWriter(tb, configWriterForTest(tb))
+}
+
+func newTestLoaderWithConfigWriter(tb testing.TB, writer linuxConfig.Writer) *loader {
 	setupCompilationDirectories(tb)
 
 	var l *loader
@@ -92,7 +96,7 @@ func newTestLoader(tb testing.TB) *loader {
 			resolver, promise := promise.New[endpointstate.Restorer]()
 			resolver.Resolve(&FakeRestorer{})
 			return sysctl.NewDirectSysctl(afero.NewOsFs(), "/proc"),
-				configWriterForTest(tb),
+				writer,
 				&manager.NodeConfigNotifier{},
 				promise,
 				&FakePreFilter{}

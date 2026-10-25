@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 
 	endpointtypes "github.com/cilium/cilium/pkg/endpoint/types"
+	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/policy"
 )
 
@@ -28,15 +29,19 @@ var ErrZtunnelPolicyMapBusy = errors.New("native policy map observation unavaila
 // A producer must join the exact tuple/digest to a current kernel loader
 // receipt and independently authenticated Registry.Reference before publication.
 type ZtunnelPolicyMapObservation struct {
-	subject        policy.ZtunnelPolicySubject
-	wire           []byte
-	wireDigest     string
-	nodeName       string
-	containerID    string
-	netNSCookie    uint64
-	netNSPath      string
-	interfaceIndex uint32
-	digest         string
+	subject            policy.ZtunnelPolicySubject
+	wire               []byte
+	wireDigest         string
+	nodeName           string
+	containerID        string
+	interfaceName      string
+	datapathConfigHash string
+	netNSCookie        uint64
+	netNSPath          string
+	interfaceIndex     uint32
+	policyMapID        uint32
+	requireToContainer bool
+	digest             string
 }
 
 func (o *ZtunnelPolicyMapObservation) Subject() policy.ZtunnelPolicySubject {
@@ -89,11 +94,45 @@ func (o *ZtunnelPolicyMapObservation) InterfaceIndex() uint32 {
 	}
 	return o.interfaceIndex
 }
+func (o *ZtunnelPolicyMapObservation) KernelPolicyMapID() uint32 {
+	if o == nil {
+		return 0
+	}
+	return o.policyMapID
+}
 func (o *ZtunnelPolicyMapObservation) Digest() string {
 	if o == nil {
 		return ""
 	}
 	return o.digest
+}
+
+// ReachabilityIdentity converts the endpoint snapshot into the exact inputs
+// needed by the loader's live BPF map/program-array inspection. A zero map ID
+// (for example, a unit-test fake) is deliberately rejected.
+func (o *ZtunnelPolicyMapObservation) ReachabilityIdentity() (endpointtypes.ZtunnelPolicyMapReachabilityIdentity, error) {
+	if o == nil {
+		return endpointtypes.ZtunnelPolicyMapReachabilityIdentity{}, fmt.Errorf("nil native policy-map observation")
+	}
+	identity := endpointtypes.ZtunnelPolicyMapReachabilityIdentity{
+		EndpointID: uint16(o.subject.EndpointID), NamespaceUID: o.subject.NamespaceUID,
+		PodUID: o.subject.PodUID, NetNSPath: o.netNSPath, NetNSCookie: o.netNSCookie,
+		Interface: o.interfaceName, IfIndex: int(o.interfaceIndex), PolicyMapID: o.policyMapID,
+		PolicyDigest: o.digest, DatapathConfigHash: o.datapathConfigHash,
+		RequireToContainer: o.requireToContainer,
+	}
+	for _, address := range o.subject.Addresses {
+		if address.Is4() {
+			identity.IPv4 = true
+		}
+		if address.Is6() {
+			identity.IPv6 = true
+		}
+	}
+	if err := identity.Validate(); err != nil {
+		return endpointtypes.ZtunnelPolicyMapReachabilityIdentity{}, err
+	}
+	return identity, nil
 }
 
 // SnapshotZtunnelPolicyMap does not wait behind regeneration or endpoint
@@ -194,6 +233,15 @@ func (e *Endpoint) SnapshotZtunnelPolicyMap(ctx context.Context) (*ZtunnelPolicy
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	policyMapID, err := e.policyMap.KernelMapID()
+	if err != nil && !errors.Is(err, policymap.ErrKernelMapIDUnavailable) {
+		return nil, fmt.Errorf("read native endpoint policy map kernel ID: %w", err)
+	}
+	if errors.Is(err, policymap.ErrKernelMapIDUnavailable) {
+		// Keep in-memory policy tests usable, but never allow this observation to
+		// become a reachability receipt: ReachabilityIdentity rejects ID zero.
+		policyMapID = 0
+	}
 	var addresses []netip.Addr
 	families := map[bool]bool{}
 	for _, ip := range []netip.Addr{e.IPv4, e.IPv6} {
@@ -219,7 +267,9 @@ func (e *Endpoint) SnapshotZtunnelPolicyMap(ctx context.Context) (*ZtunnelPolicy
 	}
 	out := &ZtunnelPolicyMapObservation{subject: subject, wire: wire, wireDigest: wireDigest,
 		nodeName: pod.Spec.NodeName, containerID: containerID,
-		netNSCookie: e.NetNsCookie, netNSPath: e.containerNetnsPath, interfaceIndex: uint32(e.ifIndex)}
+		interfaceName: e.ifName, datapathConfigHash: e.bpfHeaderfileHash,
+		netNSCookie: e.NetNsCookie, netNSPath: e.containerNetnsPath, interfaceIndex: uint32(e.ifIndex),
+		policyMapID: policyMapID, requireToContainer: e.RequireEgressProg()}
 	h := sha256.New()
 	put := func(value string) {
 		encoded := binary.BigEndian.AppendUint32(nil, uint32(len(value)))
@@ -232,7 +282,8 @@ func (e *Endpoint) SnapshotZtunnelPolicyMap(ctx context.Context) (*ZtunnelPolicy
 	for _, value := range []string{owner.Name, fmt.Sprint(owner.ID), fmt.Sprint(owner.MaxConnectedClusters),
 		fmt.Sprint(e.ID), e.K8sNamespace, namespaceUID, podUID, pod.Spec.ServiceAccountName,
 		fmt.Sprint(e.SecurityIdentity.ID), out.nodeName, containerID, fmt.Sprint(out.netNSCookie),
-		fmt.Sprint(out.interfaceIndex), out.netNSPath, wireDigest} {
+		fmt.Sprint(out.interfaceIndex), out.interfaceName, out.datapathConfigHash,
+		fmt.Sprint(out.policyMapID), fmt.Sprint(out.requireToContainer), out.netNSPath, wireDigest} {
 		put(value)
 	}
 	for _, ip := range addresses {
