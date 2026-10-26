@@ -45,6 +45,14 @@ const maxProbePins = 16 * 1024
 const issuerProfileLogComponent = "component"
 const issuerProfileLogStage = "stage"
 
+// Approval source succession record keys.
+const (
+	issuerProfileLogPredecessorSourceUID  = "predecessorSourceUID"
+	issuerProfileLogPredecessorGeneration = "predecessorGeneration"
+	issuerProfileLogSourceUID             = "sourceUID"
+	issuerProfileLogGeneration            = "generation"
+)
+
 type IssuerProfileProbeConfig struct {
 	IssuerProfileProbePins string `mapstructure:"ztunnel-issuer-profile-probe-pins"`
 }
@@ -250,10 +258,11 @@ type issuerProfileSnapshot struct {
 func (s *issuerProfileSource) snapshot(ctx context.Context) (issuerProfileSnapshot, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	body, err := issuerprofile.ReadAndProject(ctx, s.core, s.pins, s.clock)
+	projection, err := issuerprofile.ReadProjection(ctx, s.core, s.pins, s.clock)
 	if err != nil {
 		return issuerProfileSnapshot{}, err
 	}
+	body := projection.Body
 	var wire issuerprofile.DERProfile
 	if err = json.Unmarshal(body, &wire); err != nil {
 		return issuerProfileSnapshot{}, err
@@ -272,10 +281,28 @@ func (s *issuerProfileSource) snapshot(ctx context.Context) (issuerProfileSnapsh
 	}
 	// These process-local floors prevent within-process rollback. They are NOT
 	// durable trust state and cannot permit the proxy to ACK or admit traffic.
+	// The accepted approval object binds the generation floor only: a successor
+	// object needs a strictly greater generation. UIDs are compared; the name is
+	// known only from a published profile and is kept for the record.
+	if projection.AcceptedSourceUID != s.pins.SourceUID && s.log != nil {
+		s.log.Info("Issuer-profile approval source succession followed; floors carried",
+			issuerProfileLogComponent, "ztunnel-xds",
+			issuerProfileLogStage, "issuer-profile-source-succession",
+			issuerProfileLogPredecessorSourceUID, s.pins.SourceUID,
+			issuerProfileLogPredecessorGeneration, s.pins.MinimumGeneration,
+			issuerProfileLogSourceUID, projection.AcceptedSourceUID,
+			issuerProfileLogGeneration, generation,
+			logfields.Version, wire.Sequence+"/"+wire.PublicationDigest,
+		)
+	}
 	s.pins.MinimumSequence = sequence
 	s.pins.PublicationDigestAtMinimum = wire.PublicationDigest
 	s.pins.MinimumGeneration = generation
 	s.pins.ApprovalDigestAtMinimum = wire.ApprovalDigest
+	s.pins.SourceUID = projection.AcceptedSourceUID
+	if wire.State == "published" {
+		s.pins.SourceName = wire.SourceName
+	}
 	return issuerProfileSnapshot{body: body, version: wire.Sequence + "/" + wire.PublicationDigest, state: wire.State, until: time.Unix(until, 0)}, nil
 }
 func (s *issuerProfileSource) checkNode(node *corev3.Node) error {

@@ -369,3 +369,138 @@ func TestDeliveryReasonsDoNotInventPermanentRevocation(t *testing.T) {
 		}
 	}
 }
+
+// successorFixture is an approval object that succeeds the fixture's pinned
+// source: a new name and UID in the pinned namespace that approves the same
+// issuers under the same pinned root at generation, and its publication at
+// sequence on the pinned output object.
+func successorFixture(t *testing.T, f publicFixture, e Install, o *corev1.ConfigMap, now time.Time, name string, generation, sequence uint64) (*corev1.ConfigMap, *corev1.ConfigMap) {
+	t.Helper()
+	var a Approval
+	require.NoError(t, json.Unmarshal([]byte(f.ApprovalJSON), &a))
+	a.Generation = generation
+	raw, err := json.Marshal(a)
+	require.NoError(t, err)
+	valid, err := Validate(raw, e.RootPins, e.Cluster, now)
+	require.NoError(t, err)
+	p, err := DecodePublication([]byte(o.Data[DataKey]))
+	require.NoError(t, err)
+	uid := name + "-uid"
+	p.Sequence = sequence
+	p.ExpectedSourceUID, p.AcceptedSourceUID = uid, uid
+	p.Source = Source{Namespace: e.SourceNamespace, Name: name, UID: uid, ResourceVersion: "31", Generation: generation}
+	p.AcceptedGeneration = generation
+	p.AcceptedApprovalDigest, p.ApprovalDigest = valid.Digest, valid.Digest
+	p.Approval = &valid.Approval
+	body, err := Encode(*p)
+	require.NoError(t, err)
+	immutable := true
+	source := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: e.SourceNamespace, Name: name, UID: types.UID(uid), ResourceVersion: "31"}, Immutable: &immutable, Data: map[string]string{ApprovalKey: string(raw)}}
+	output := o.DeepCopy()
+	output.ResourceVersion = "32"
+	output.Data[DataKey] = string(body)
+	return source, output
+}
+
+// Approvals are immutable, so a new approval generation is a new object. A
+// successor in the pinned namespace, under the pinned roots, with a strictly
+// greater generation is projected with the UNCHANGED installation pins: the
+// pins bind the source object only at their own floor generation. A restarted
+// agent reads exactly these pins, so this is also the restart case.
+func TestSuccessorApprovalSourceWithGreaterGenerationIsProjected(t *testing.T) {
+	f, e, s, o, n := fixture(t)
+	e.ApprovalDigestAtMinimum = f.Wire.ApprovalDigest
+	e.PublicationDigestAtMinimum = f.Wire.PublicationDigest
+	successor, published := successorFixture(t, f, e, o, n, "issuer-approval-g8", 8, 11)
+	for _, objects := range [][]runtime.Object{{s, successor, published}, {successor, published}} {
+		// The predecessor object is not needed once its successor is published.
+		client := fake.NewClientset(objects...)
+		body, err := ReadAndProject(context.Background(), client.CoreV1(), e, func() time.Time { return n })
+		require.NoError(t, err)
+		var wire DERProfile
+		require.NoError(t, json.Unmarshal(body, &wire))
+		require.Equal(t, []string{"issuer-approval-g8", "issuer-approval-g8-uid", "11", "8"}, []string{wire.SourceName, wire.SourceUID, wire.Sequence, wire.Generation})
+		require.Equal(t, f.Wire.RootSHA256, wire.RootSHA256)
+		require.Len(t, wire.Clusters, 2)
+		require.NotEqual(t, f.Wire.ApprovalDigest, wire.ApprovalDigest)
+	}
+}
+
+func TestSuccessorApprovalSourceNeedsGreaterGenerationPinnedNamespaceAndRoots(t *testing.T) {
+	for _, name := range []string{"same-generation", "lower-generation", "foreign-namespace", "unpinned-root", "live-uid-differs", "output-object", "output-uid", "withdrawn-same-generation"} {
+		t.Run(name, func(t *testing.T) {
+			f, e, s, o, n := fixture(t)
+			e.ApprovalDigestAtMinimum = f.Wire.ApprovalDigest
+			generation := uint64(8)
+			switch name {
+			case "same-generation", "withdrawn-same-generation":
+				// Identical approved content: only the object differs.
+				generation = 7
+			case "lower-generation":
+				generation = 6
+			}
+			successor, published := successorFixture(t, f, e, o, n, "issuer-approval-g8", generation, 11)
+			p, err := DecodePublication([]byte(published.Data[DataKey]))
+			require.NoError(t, err)
+			switch name {
+			case "same-generation":
+				require.Equal(t, f.Wire.ApprovalDigest, p.ApprovalDigest)
+			case "foreign-namespace":
+				successor.Namespace, p.Source.Namespace = "other-system", "other-system"
+			case "unpinned-root":
+				e.RootPins = []string{SHA([]byte("unapproved root"))}
+			case "live-uid-differs":
+				successor.UID = "replacement-uid"
+			case "output-object":
+				p.Source.Name = e.OutputName
+			case "output-uid":
+				p.Source.UID, p.ExpectedSourceUID, p.AcceptedSourceUID = e.OutputUID, e.OutputUID, e.OutputUID
+			case "withdrawn-same-generation":
+				p.State, p.Reason, p.Approval, p.ApprovalDigest, p.ValidUntil = "withdrawn", "SourceUnavailable", nil, "", p.PublishedAt
+			}
+			body, err := Encode(*p)
+			require.NoError(t, err)
+			published.Data[DataKey] = string(body)
+			client := fake.NewClientset(s, successor, published)
+			body, err = ReadAndProject(context.Background(), client.CoreV1(), e, func() time.Time { return n })
+			require.Error(t, err)
+			require.Nil(t, body)
+		})
+	}
+}
+
+// After a succession, floors bind the successor at its generation. Here the
+// advanced Install models the agent's process-local floors: the predecessor's
+// publication is a rollback at any sequence, a third object at the accepted
+// generation is a substitution, and the successor's renewal continues.
+func TestSourceSuccessionFloorsRefuseRollbackAndSubstitution(t *testing.T) {
+	f, e, s, o, n := fixture(t)
+	successor, published := successorFixture(t, f, e, o, n, "issuer-approval-g8", 8, 11)
+	accepted, err := DecodePublication([]byte(published.Data[DataKey]))
+	require.NoError(t, err)
+	floors := e
+	floors.MinimumSequence, floors.PublicationDigestAtMinimum = 11, accepted.Digest
+	floors.MinimumGeneration, floors.ApprovalDigestAtMinimum = 8, accepted.AcceptedApprovalDigest
+	floors.SourceName, floors.SourceUID = accepted.Source.Name, accepted.AcceptedSourceUID
+	read := func(objects ...runtime.Object) ([]byte, error) {
+		return ReadAndProject(context.Background(), fake.NewClientset(objects...).CoreV1(), floors, func() time.Time { return n })
+	}
+	rollback, err := DecodePublication([]byte(o.Data[DataKey]))
+	require.NoError(t, err)
+	rollback.Sequence = 12
+	body, err := Encode(*rollback)
+	require.NoError(t, err)
+	predecessor := o.DeepCopy()
+	predecessor.Data[DataKey] = string(body)
+	body, err = read(s, successor, predecessor)
+	require.Error(t, err, "the predecessor's generation is a rollback at any sequence")
+	require.Nil(t, body)
+	third, thirdOutput := successorFixture(t, f, e, o, n, "issuer-approval-other", 8, 12)
+	body, err = read(s, successor, third, thirdOutput)
+	require.Error(t, err, "another object cannot supply the accepted generation")
+	require.Nil(t, body)
+	_, renewal := successorFixture(t, f, e, o, n, "issuer-approval-g8", 8, 12)
+	body, err = read(successor, renewal)
+	require.NoError(t, err)
+	require.NotNil(t, body)
+}

@@ -20,6 +20,8 @@ import (
 
 // Install is supplied independently by the Cilium installation, never read
 // from the profile objects. Its floors MUST be durable before runtime use.
+// Expected.SourceName and SourceUID name the approval object accepted at
+// MinimumGeneration; they bind only that generation (see VerifyCurrent).
 type Install struct {
 	Expected
 	OutputNamespace, OutputName, Node string
@@ -114,96 +116,140 @@ func sameObject(a, b *corev1.ConfigMap) bool {
 	return a != nil && b != nil && a.UID == b.UID && a.ResourceVersion == b.ResourceVersion && b.DeletionTimestamp == nil
 }
 
-// ReadAndProject uses the real CoreV1Interface implemented by Cilium's injected
+// Projection is one coherent API observation projected for ztunnel.
+type Projection struct {
+	Body []byte
+	// AcceptedSourceUID is the approval object whose material is the projected
+	// generation. A caller that keeps floors binds it at that generation only.
+	AcceptedSourceUID string
+}
+
+// ReadAndProject returns ReadProjection's ztunnel wire body.
+func ReadAndProject(ctx context.Context, core typedcore.CoreV1Interface, e Install, clock func() time.Time) ([]byte, error) {
+	projection, err := ReadProjection(ctx, core, e, clock)
+	if err != nil {
+		return nil, err
+	}
+	return projection.Body, nil
+}
+
+// ReadProjection uses the real CoreV1Interface implemented by Cilium's injected
 // client.Clientset.CoreV1(). It neither caches nor watches resources. GETs are
 // current API reads through that client's configured Kubernetes TLS/RBAC. Tests
 // may inject the existing client-go fake. A hostile implementation is not an
 // authenticated API client; this pure seam cannot attest its caller.
 //
+// The approval object is data in the pinned namespace, not installation scope.
+// Approvals are immutable, so each new approval generation is a new object: a
+// publication from a successor object is followed when its accepted generation
+// is strictly greater than the floor, and the live successor is read by the
+// name the publication gives and must have its UID.
+//
 // No callbacks to trust-policy/TLS code occur here. Any error must fence future
 // runtime delivery; retaining the last good projection is NOT a permitted fallback.
-func ReadAndProject(ctx context.Context, core typedcore.CoreV1Interface, e Install, clock func() time.Time) ([]byte, error) {
+func ReadProjection(ctx context.Context, core typedcore.CoreV1Interface, e Install, clock func() time.Time) (Projection, error) {
+	body, accepted, err := readAndProject(ctx, core, e, clock)
+	if err != nil {
+		return Projection{}, err
+	}
+	return Projection{Body: body, AcceptedSourceUID: accepted}, nil
+}
+
+func readAndProject(ctx context.Context, core typedcore.CoreV1Interface, e Install, clock func() time.Time) ([]byte, string, error) {
 	if err := e.validate(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if core == nil || clock == nil {
-		return nil, errors.New("explicit API client and clock required")
+		return nil, "", errors.New("explicit API client and clock required")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	output, err := core.ConfigMaps(e.OutputNamespace).Get(ctx, e.OutputName, metav1.GetOptions{})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if err = checkOutput(output, e); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	p, err := DecodePublication([]byte(output.Data[DataKey]))
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	if p.OutputUID != e.OutputUID || p.ExpectedSourceUID != e.SourceUID || p.Source.Namespace != e.SourceNamespace || p.Source.Name != e.SourceName || p.ProducerCluster != e.Cluster || p.Sequence < e.MinimumSequence || p.AcceptedGeneration < e.MinimumGeneration {
-		return nil, errors.New("publication origin/floor mismatch")
+	if p.OutputUID != e.OutputUID || p.Source.Namespace != e.SourceNamespace || p.ProducerCluster != e.Cluster || p.Sequence < e.MinimumSequence || p.AcceptedGeneration < e.MinimumGeneration {
+		return nil, "", errors.New("publication origin/floor mismatch")
+	}
+	// The configured and the accepted approval objects must be distinct from
+	// the pinned output object.
+	if len(validation.IsDNS1123Subdomain(p.Source.Name)) != 0 || p.Source.Name == e.OutputName || p.ExpectedSourceUID == e.OutputUID || p.AcceptedSourceUID == e.OutputUID {
+		return nil, "", errors.New("publication approval source is not a distinct object in the pinned namespace")
 	}
 	if p.Sequence == e.MinimumSequence && e.PublicationDigestAtMinimum != "" && p.Digest != e.PublicationDigestAtMinimum {
-		return nil, errors.New("same-sequence publication substitution")
+		return nil, "", errors.New("same-sequence publication substitution")
 	}
 	if p.AcceptedGeneration == e.MinimumGeneration && e.ApprovalDigestAtMinimum != "" && p.AcceptedApprovalDigest != e.ApprovalDigestAtMinimum {
-		return nil, errors.New("same-generation authority substitution")
+		return nil, "", errors.New("same-generation authority substitution")
 	}
-	if p.AcceptedSourceUID != e.SourceUID {
-		return nil, errors.New("accepted history source mismatch")
+	// The floor object is the only source of the floor generation's material.
+	// A successor object needs a strictly greater accepted generation.
+	if p.AcceptedGeneration == e.MinimumGeneration && p.AcceptedSourceUID != e.SourceUID {
+		return nil, "", errors.New("accepted history source mismatch")
 	}
 	// A tombstone clears all anchors. Missing/replaced source is deliberately
 	// not an obstacle to withdrawal; it cannot be used as a published profile.
 	if p.State == "published" {
-		source, readErr := core.ConfigMaps(e.SourceNamespace).Get(ctx, e.SourceName, metav1.GetOptions{})
+		// DecodePublication binds Source.UID to ExpectedSourceUID and
+		// AcceptedSourceUID for a published profile.
+		source, readErr := core.ConfigMaps(e.SourceNamespace).Get(ctx, p.Source.Name, metav1.GetOptions{})
 		if readErr != nil {
-			return nil, readErr
+			return nil, "", readErr
 		}
-		if source.Namespace != e.SourceNamespace || source.Name != e.SourceName || source.DeletionTimestamp != nil || string(source.UID) != e.SourceUID || source.ResourceVersion != p.Source.ResourceVersion || source.Immutable == nil || !*source.Immutable || len(source.Data) != 1 || len(source.BinaryData) > 0 || len(source.OwnerReferences) > 0 {
-			return nil, errors.New("source not exact current immutable administrator approval")
+		if source.Namespace != e.SourceNamespace || source.Name != p.Source.Name || source.DeletionTimestamp != nil || string(source.UID) != p.Source.UID || source.ResourceVersion != p.Source.ResourceVersion || source.Immutable == nil || !*source.Immutable || len(source.Data) != 1 || len(source.BinaryData) > 0 || len(source.OwnerReferences) > 0 {
+			return nil, "", errors.New("source not exact current immutable administrator approval")
 		}
 		valid, verifyErr := Validate([]byte(source.Data[ApprovalKey]), e.RootPins, e.Cluster, clock())
 		if verifyErr != nil {
-			return nil, verifyErr
+			return nil, "", verifyErr
 		}
 		if valid.Digest != p.ApprovalDigest {
-			return nil, errors.New("live source differs from published approval")
+			return nil, "", errors.New("live source differs from published approval")
 		}
-		latest, readErr := core.ConfigMaps(e.SourceNamespace).Get(ctx, e.SourceName, metav1.GetOptions{})
+		latest, readErr := core.ConfigMaps(e.SourceNamespace).Get(ctx, p.Source.Name, metav1.GetOptions{})
 		if readErr != nil {
-			return nil, readErr
+			return nil, "", readErr
 		}
 		if !sameObject(source, latest) {
-			return nil, ErrSourceChanged
+			return nil, "", ErrSourceChanged
 		}
 	}
 	latest, err := core.ConfigMaps(e.OutputNamespace).Get(ctx, e.OutputName, metav1.GetOptions{})
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if !sameObject(output, latest) {
-		return nil, ErrOutputChanged
+		return nil, "", ErrOutputChanged
 	}
 	if err = checkOutput(latest, e); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	now := clock()
 	if p.State == "published" {
 		if _, err = VerifyCurrent([]byte(output.Data[DataKey]), e.Expected, now); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	} else {
 		at, _ := parseTime(p.PublishedAt)
 		if now.Before(at) {
-			return nil, errors.New("future withdrawal")
+			return nil, "", errors.New("future withdrawal")
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return project(p, e)
+	body, err := project(p, e)
+	if err != nil {
+		return nil, "", err
+	}
+	return body, p.AcceptedSourceUID, nil
 }
 
 // These reasons describe unavailable approval/delivery state. They do not
@@ -239,7 +285,10 @@ func project(p *Publication, e Install) ([]byte, error) {
 	if p.State == "withdrawn" && !until.Equal(at) {
 		return nil, errors.New("tombstone cannot retain a lease")
 	}
-	result := DERProfile{WireVersion: 1, Cluster: e.Cluster, Node: e.Node, SourceNamespace: e.SourceNamespace, SourceName: e.SourceName, SourceUID: e.SourceUID, OutputNamespace: e.OutputNamespace, OutputName: e.OutputName, OutputUID: e.OutputUID, Sequence: strconv.FormatUint(p.Sequence, 10), Generation: strconv.FormatUint(p.AcceptedGeneration, 10), ApprovalDigest: p.AcceptedApprovalDigest, PublicationDigest: p.Digest, State: p.State, Reason: p.Reason, PublishedUnix: strconv.FormatInt(at.Unix(), 10), ValidUntilUnix: strconv.FormatInt(until.Unix(), 10), Clusters: []DERCluster{}}
+	// The wire names the producer's configured approval object. For a
+	// published profile it is the accepted object; ztunnel binds it to the
+	// material generation in its durable checkpoint.
+	result := DERProfile{WireVersion: 1, Cluster: e.Cluster, Node: e.Node, SourceNamespace: e.SourceNamespace, SourceName: p.Source.Name, SourceUID: p.ExpectedSourceUID, OutputNamespace: e.OutputNamespace, OutputName: e.OutputName, OutputUID: e.OutputUID, Sequence: strconv.FormatUint(p.Sequence, 10), Generation: strconv.FormatUint(p.AcceptedGeneration, 10), ApprovalDigest: p.AcceptedApprovalDigest, PublicationDigest: p.Digest, State: p.State, Reason: p.Reason, PublishedUnix: strconv.FormatInt(at.Unix(), 10), ValidUntilUnix: strconv.FormatInt(until.Unix(), 10), Clusters: []DERCluster{}}
 	if p.State == "published" {
 		if p.Approval == nil || len(p.Approval.Roots) != 1 {
 			return nil, errors.New("single-root profile required")

@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright Authors of Cilium
 
-// Port of CMTC internal/trustprofile/profile.go at 7e606195f58359b0e0af82f219cafd5291268c67.
+// Port of CMTC internal/trustprofile/profile.go at 7e606195f58359b0e0af82f219cafd5291268c67,
+// with the CMTC approval source-succession contract of VerifyCurrent (2026-10-26).
 // Package issuerprofile validates explicitly administered PUBLIC issuer mappings.
 // It does not issue keys, attest endpoints, deliver xDS, or grant traffic.
 package issuerprofile
@@ -537,6 +538,13 @@ func DecodePublication(data []byte) (*Publication, error) {
 // VerifyCurrent is a pure consumer-side contract, not Cilium integration. A
 // future API-backed Cilium watcher must also prove authorized object origin,
 // maintain its own durable sequence floor, deliver xDS, ACK and drain on expiry.
+//
+// SourceName and SourceUID name the approval object accepted at
+// MinimumGeneration and bind only that generation. Approvals are immutable,
+// so each new approval generation is a new object: a successor object in
+// SourceNamespace is current when its generation is strictly greater. The UID
+// identifies the object; a caller that reads the live object by its name
+// proves that the name belongs to it.
 type Expected struct {
 	OutputUID, SourceUID, SourceNamespace, SourceName, Cluster string
 	MinimumGeneration, MinimumSequence                         uint64
@@ -548,8 +556,13 @@ func VerifyCurrent(data []byte, e Expected, now time.Time) (*Publication, error)
 	if err != nil {
 		return nil, err
 	}
-	if p.State != "published" || p.Reason != "Validated" || p.OutputUID != e.OutputUID || p.ExpectedSourceUID != e.SourceUID || p.Source.UID != e.SourceUID || p.Source.Namespace != e.SourceNamespace || p.Source.Name != e.SourceName || p.Source.ResourceVersion == "" || p.ProducerCluster != e.Cluster || p.AcceptedGeneration < e.MinimumGeneration || p.Sequence < e.MinimumSequence {
+	if p.State != "published" || p.Reason != "Validated" || p.OutputUID != e.OutputUID || p.Source.Namespace != e.SourceNamespace || p.Source.ResourceVersion == "" || p.ProducerCluster != e.Cluster || p.AcceptedGeneration < e.MinimumGeneration || p.Sequence < e.MinimumSequence {
 		return nil, errors.New("publication not authorized/current for configured source")
+	}
+	// DecodePublication binds Source.UID to ExpectedSourceUID and
+	// AcceptedSourceUID for a published profile.
+	if len(validation.IsDNS1123Subdomain(p.Source.Name)) != 0 || p.Source.UID == e.OutputUID || p.AcceptedGeneration == e.MinimumGeneration && p.Source.UID != e.SourceUID {
+		return nil, errors.New("publication approval source is neither the floor object nor a successor")
 	}
 	at, _ := parseTime(p.PublishedAt)
 	until, _ := parseTime(p.ValidUntil)

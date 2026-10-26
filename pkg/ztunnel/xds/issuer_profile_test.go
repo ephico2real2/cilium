@@ -450,3 +450,125 @@ func TestIssuerProfileNonRaceObservationFailureStillClosesSession(t *testing.T) 
 		t.Fatal("API observation failure was not logged")
 	}
 }
+
+// profilePublish replaces the pinned output's publication, as the producer does.
+func profilePublish(t *testing.T, s *issuerProfileSource, api *fake.Clientset, p issuerprofile.Publication) {
+	t.Helper()
+	body, err := issuerprofile.Encode(p)
+	require.NoError(t, err)
+	out, err := api.CoreV1().ConfigMaps(s.pins.OutputNamespace).Get(context.Background(), s.pins.OutputName, metav1.GetOptions{})
+	require.NoError(t, err)
+	out.Data[issuerprofile.DataKey] = string(body)
+	out.ResourceVersion = strconv.FormatUint(100+p.Sequence, 10)
+	_, err = api.CoreV1().ConfigMaps(out.Namespace).Update(context.Background(), out, metav1.UpdateOptions{})
+	require.NoError(t, err)
+}
+
+// profileFixturePublication is the shared fixture's generation-7 publication
+// from its pinned approval object, and that object's approval.
+func profileFixturePublication(t *testing.T) (*issuerprofile.Publication, string) {
+	t.Helper()
+	var f struct{ ApprovalJSON, PublicationJSON string }
+	raw, err := os.ReadFile("../issuerprofile/testdata/issuer-profile-v1.json")
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(raw, &f))
+	p, err := issuerprofile.DecodePublication([]byte(f.PublicationJSON))
+	require.NoError(t, err)
+	return p, f.ApprovalJSON
+}
+
+// profileSuccessor creates (once) an approval object that succeeds the
+// fixture's pinned source with the same issuers at generation, and publishes
+// its approval at sequence on the pinned output.
+func profileSuccessor(t *testing.T, s *issuerProfileSource, api *fake.Clientset, name string, generation, sequence uint64) issuerprofile.Publication {
+	t.Helper()
+	p, approvalJSON := profileFixturePublication(t)
+	var a issuerprofile.Approval
+	require.NoError(t, json.Unmarshal([]byte(approvalJSON), &a))
+	a.Generation = generation
+	approval, err := json.Marshal(a)
+	require.NoError(t, err)
+	valid, err := issuerprofile.Validate(approval, s.pins.RootPins, s.pins.Cluster, s.clock())
+	require.NoError(t, err)
+	uid := name + "-uid"
+	immutable := true
+	object := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: s.pins.SourceNamespace, Name: name, UID: types.UID(uid), ResourceVersion: "31"}, Immutable: &immutable, Data: map[string]string{issuerprofile.ApprovalKey: string(approval)}}
+	if _, err = api.CoreV1().ConfigMaps(s.pins.SourceNamespace).Get(context.Background(), name, metav1.GetOptions{}); err != nil {
+		require.NoError(t, api.Tracker().Add(object))
+	}
+	p.Sequence = sequence
+	p.ExpectedSourceUID, p.AcceptedSourceUID = uid, uid
+	p.Source = issuerprofile.Source{Namespace: s.pins.SourceNamespace, Name: name, UID: uid, ResourceVersion: "31", Generation: generation}
+	p.AcceptedGeneration = generation
+	p.AcceptedApprovalDigest, p.ApprovalDigest = valid.Digest, valid.Digest
+	p.Approval = &valid.Approval
+	profilePublish(t, s, api, *p)
+	return *p
+}
+
+// The agent's process-local floors follow a source succession: the successor
+// object (new name and UID, strictly greater generation) is projected without
+// a restart or new pins, its generation and source become the floor, the
+// predecessor's publication is then a rollback at any sequence, a third object
+// cannot supply the accepted generation, and the successor's renewal goes on.
+func TestIssuerProfileProcessFloorsFollowSourceSuccession(t *testing.T) {
+	source, api, _ := profileTestSource(t)
+	ctx := context.Background()
+	first, err := source.snapshot(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "published", first.state)
+
+	profileSuccessor(t, source, api, "issuer-approval-g8", 8, 11)
+	next, err := source.snapshot(ctx)
+	require.NoError(t, err, "a successor approval object with a greater generation must be followed")
+	require.NotEqual(t, first.version, next.version)
+	var wire issuerprofile.DERProfile
+	require.NoError(t, json.Unmarshal(next.body, &wire))
+	require.Equal(t, []string{"issuer-approval-g8", "issuer-approval-g8-uid", "8"}, []string{wire.SourceName, wire.SourceUID, wire.Generation})
+	require.Equal(t, []uint64{11, 8}, []uint64{source.pins.MinimumSequence, source.pins.MinimumGeneration})
+	require.Equal(t, "issuer-approval-g8-uid", source.pins.SourceUID)
+
+	predecessor, _ := profileFixturePublication(t)
+	predecessor.Sequence = 12
+	profilePublish(t, source, api, *predecessor)
+	_, err = source.snapshot(ctx)
+	require.Error(t, err, "the predecessor's generation is a rollback at any sequence")
+
+	profileSuccessor(t, source, api, "issuer-approval-other", 8, 13)
+	_, err = source.snapshot(ctx)
+	require.Error(t, err, "another object cannot supply the accepted generation")
+
+	profileSuccessor(t, source, api, "issuer-approval-g8", 8, 14)
+	renewed, err := source.snapshot(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "published", renewed.state)
+	require.Equal(t, uint64(14), source.pins.MinimumSequence)
+}
+
+// A withdrawal can be the first observation of a successor generation (the
+// agent was disconnected while it was published). The floor then binds the
+// accepted object by UID alone, as the withdrawal does not name it, and the
+// successor's published profile at that generation is still followed.
+func TestIssuerProfileWithdrawalFirstThenPublishedSuccessor(t *testing.T) {
+	source, api, _ := profileTestSource(t)
+	ctx := context.Background()
+	_, err := source.snapshot(ctx)
+	require.NoError(t, err)
+
+	withdrawn := profileSuccessor(t, source, api, "issuer-approval-g8", 8, 11)
+	withdrawn.Sequence = 12
+	withdrawn.State, withdrawn.Reason = "withdrawn", "SourceUnavailable"
+	withdrawn.Approval, withdrawn.ApprovalDigest, withdrawn.ValidUntil = nil, "", withdrawn.PublishedAt
+	profilePublish(t, source, api, withdrawn)
+	tombstone, err := source.snapshot(ctx)
+	require.NoError(t, err)
+	require.Equal(t, "withdrawn", tombstone.state)
+	require.Equal(t, uint64(8), source.pins.MinimumGeneration)
+	require.Equal(t, "issuer-approval-g8-uid", source.pins.SourceUID)
+
+	profileSuccessor(t, source, api, "issuer-approval-g8", 8, 13)
+	published, err := source.snapshot(ctx)
+	require.NoError(t, err, "the accepted successor's profile at the floor generation must be followed")
+	require.Equal(t, "published", published.state)
+	require.Equal(t, "issuer-approval-g8", source.pins.SourceName)
+}
