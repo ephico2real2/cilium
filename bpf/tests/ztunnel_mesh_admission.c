@@ -145,13 +145,20 @@ int ztunnel_admission_decision_table(__maybe_unused struct __ctx_buff *ctx)
 		assert(ztunnel_mode_decide(true, false, true, QUARANTINED) == ZTUNNEL_MODE_QUARANTINED);
 	});
 
+	/* No resolver is approved in this object (empty map): DNS is dropped. */
 	TEST("verdicts: only TCP/15008 in either direction", {
-		assert(ztunnel_hbone_egress_verdict(IPPROTO_TCP, HBONE_PORT) == CTX_ACT_OK);
-		assert(ztunnel_hbone_egress_verdict(IPPROTO_TCP, APP_PORT) == DROP_POLICY);
-		assert(ztunnel_hbone_egress_verdict(IPPROTO_TCP, __bpf_htons(31337)) == DROP_POLICY);
-		assert(ztunnel_hbone_egress_verdict(IPPROTO_UDP, HBONE_PORT) == DROP_POLICY);
-		assert(ztunnel_hbone_egress_verdict(IPPROTO_UDP, __bpf_htons(53)) == DROP_POLICY);
-		assert(ztunnel_hbone_egress_verdict(IPPROTO_TCP, __bpf_htons(53)) == DROP_POLICY);
+		assert(ztunnel_hbone_egress_verdict(IPPROTO_TCP, HBONE_PORT, PEER_IDENTITY) ==
+		       CTX_ACT_OK);
+		assert(ztunnel_hbone_egress_verdict(IPPROTO_TCP, APP_PORT, PEER_IDENTITY) ==
+		       DROP_POLICY);
+		assert(ztunnel_hbone_egress_verdict(IPPROTO_TCP, __bpf_htons(31337), PEER_IDENTITY) ==
+		       DROP_POLICY);
+		assert(ztunnel_hbone_egress_verdict(IPPROTO_UDP, HBONE_PORT, PEER_IDENTITY) ==
+		       DROP_POLICY);
+		assert(ztunnel_hbone_egress_verdict(IPPROTO_UDP, __bpf_htons(53), PEER_IDENTITY) ==
+		       DROP_POLICY);
+		assert(ztunnel_hbone_egress_verdict(IPPROTO_TCP, __bpf_htons(53), PEER_IDENTITY) ==
+		       DROP_POLICY);
 		assert(ztunnel_hbone_ingress_verdict(IPPROTO_TCP, HBONE_PORT) == CTX_ACT_OK);
 		assert(ztunnel_hbone_ingress_verdict(IPPROTO_TCP, APP_PORT) == DROP_POLICY);
 		assert(ztunnel_hbone_ingress_verdict(IPPROTO_UDP, HBONE_PORT) == DROP_POLICY);
@@ -197,7 +204,9 @@ SETUP("tc", "ztunnel_05_egress_hbone_only_world_plaintext")
 int setup_05(struct __ctx_buff *ctx) { prepare(HBONE_ONLY, WORLD_ID); return pod_send_packet(ctx); }
 EXPECT("ztunnel_05_egress_hbone_only_world_plaintext", CTX_ACT_DROP, METRIC_EGRESS, 1)
 
-/* 6. HBONE-only: UDP/53 to an arbitrary workload is not a DNS exception. */
+/* 6. HBONE-only: UDP/53 to an arbitrary workload is not a DNS exception (no
+ * approved resolver; see ztunnel_dns_resolver.c for the approved cases).
+ */
 PKTGEN("tc", "ztunnel_06_egress_hbone_only_udp53")
 int pktgen_06(struct __ctx_buff *ctx) { return build_l4(ctx, true, POD_IP, PEER_IP, __bpf_htons(40006), __bpf_htons(53), true); }
 SETUP("tc", "ztunnel_06_egress_hbone_only_udp53")

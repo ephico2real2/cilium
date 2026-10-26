@@ -121,6 +121,7 @@ const (
 	CiliumThrottle                      = "cilium_throttle"
 	CiliumVTEPMap                       = "cilium_vtep_map"
 	CiliumXDPScratch                    = "cilium_xdp_scratch"
+	CiliumZtunnelDnsResolvers           = "cilium_ztunnel_dns_resolvers"
 )
 
 func newCiliumCallPolicySpec(btf *btf.Spec) *ebpf.MapSpec {
@@ -1280,6 +1281,20 @@ func newCiliumXDPScratchSpec(btf *btf.Spec) *ebpf.MapSpec {
 	}
 }
 
+func newCiliumZtunnelDnsResolversSpec(btf *btf.Spec) *ebpf.MapSpec {
+	return &ebpf.MapSpec{
+		Name:       CiliumZtunnelDnsResolvers,
+		Type:       ebpf.Hash,
+		KeySize:    4,
+		Key:        anyTypeByName(btf, "__u32"),
+		ValueSize:  1,
+		Value:      anyTypeByName(btf, "__u8"),
+		MaxEntries: 64,
+		Flags:      unix.BPF_F_NO_PREALLOC | unix.BPF_F_RDONLY_PROG,
+		Pinning:    ebpf.PinByName,
+	}
+}
+
 var _outer []newMapFn = []newMapFn{
 	newCiliumCallPolicySpec,
 	newCiliumCallsSpec,
@@ -1355,6 +1370,7 @@ var _outer []newMapFn = []newMapFn{
 	newCiliumThrottleSpec,
 	newCiliumVTEPMapSpec,
 	newCiliumXDPScratchSpec,
+	newCiliumZtunnelDnsResolversSpec,
 }
 
 //go:embed mapkv.btf

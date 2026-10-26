@@ -13,6 +13,7 @@ import (
 	"github.com/cilium/cilium/pkg/ztunnel/config"
 	"github.com/cilium/cilium/pkg/ztunnel/reconciler"
 	"github.com/cilium/cilium/pkg/ztunnel/remote_workload"
+	"github.com/cilium/cilium/pkg/ztunnel/resolver"
 	"github.com/cilium/cilium/pkg/ztunnel/xds"
 	"github.com/cilium/cilium/pkg/ztunnel/zds"
 )
@@ -32,6 +33,9 @@ var Cell = cell.Module(
 	zds.Cell,
 	admission.Cell,
 	reconciler.Cell,
+
+	// Approved DNS resolver identities for HBONE-only endpoints
+	resolver.Cell,
 )
 
 type ztunnelParams struct {

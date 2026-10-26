@@ -899,11 +899,13 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		 * bound for the host/outside, perform the CIDR policy check.
 		 */
 		/* A released Required endpoint sends only TCP/15008 (HBONE
-		 * transport shape; ztunnel authenticates). Native policy still
-		 * applies to the outer flow and is not widened here.
+		 * transport shape; ztunnel authenticates) and DNS to an
+		 * approved resolver identity. Native policy still applies to
+		 * both flows and is not widened here.
 		 */
 		if (ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_egress_verdict(tuple->nexthdr, tuple->dport);
+			verdict = ztunnel_hbone_egress_verdict(tuple->nexthdr, tuple->dport,
+							      *dst_sec_identity);
 			if (verdict != CTX_ACT_OK) {
 				send_policy_verdict_notify(ctx, *dst_sec_identity, tuple->dport,
 							   tuple->nexthdr, POLICY_EGRESS, 1,
@@ -1459,11 +1461,13 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		 * bound for the host/outside, perform the CIDR policy check.
 		 */
 		/* A released Required endpoint sends only TCP/15008 (HBONE
-		 * transport shape; ztunnel authenticates). Native policy still
-		 * applies to the outer flow and is not widened here.
+		 * transport shape; ztunnel authenticates) and DNS to an
+		 * approved resolver identity. Native policy still applies to
+		 * both flows and is not widened here.
 		 */
 		if (ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_egress_verdict(tuple->nexthdr, tuple->dport);
+			verdict = ztunnel_hbone_egress_verdict(tuple->nexthdr, tuple->dport,
+							      *dst_sec_identity);
 			if (verdict != CTX_ACT_OK) {
 				send_policy_verdict_notify(ctx, *dst_sec_identity, tuple->dport,
 							   tuple->nexthdr, POLICY_EGRESS, 0,
@@ -1853,10 +1857,12 @@ ipv6_policy(struct __ctx_buff *ctx, struct ipv6hdr *ip6, __u32 src_label,
 		/* Skip policy enforcement for return traffic. */
 
 		/* Replies into an HBONE-only endpoint must come from an HBONE
-		 * listener; an older plaintext CT entry cannot carry data.
+		 * listener or be a DNS answer from an approved resolver; an
+		 * older plaintext CT entry cannot carry data.
 		 */
 		if (ret == CT_REPLY && ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off);
+			verdict = ztunnel_hbone_ingress_reply_verdict(ctx, tuple->nexthdr, l4_off,
+								      src_label);
 			if (verdict != CTX_ACT_OK)
 				return verdict;
 		}
@@ -2163,10 +2169,12 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 		/* Skip policy enforcement for return traffic. */
 
 		/* Replies into an HBONE-only endpoint must come from an HBONE
-		 * listener; an older plaintext CT entry cannot carry data.
+		 * listener or be a DNS answer from an approved resolver; an
+		 * older plaintext CT entry cannot carry data.
 		 */
 		if (ret == CT_REPLY && ztunnel_own_mode() == ZTUNNEL_MODE_HBONE_ONLY) {
-			verdict = ztunnel_hbone_reply_verdict(ctx, tuple->nexthdr, l4_off);
+			verdict = ztunnel_hbone_ingress_reply_verdict(ctx, tuple->nexthdr, l4_off,
+								      src_label);
 			if (verdict != CTX_ACT_OK)
 				return verdict;
 		}

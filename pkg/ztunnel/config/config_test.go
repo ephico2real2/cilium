@@ -6,8 +6,13 @@ package config
 import (
 	"testing"
 
+	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/hivetest"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+
+	"github.com/cilium/cilium/pkg/hive"
+	"github.com/cilium/cilium/pkg/labels"
 )
 
 func TestCABackendConfiguration(t *testing.T) {
@@ -88,4 +93,55 @@ func TestRemoteWorkloadMembershipIsOptInAndRequiresStrictMTLS(t *testing.T) {
 	enabled, err := flags.GetBool("ztunnel-enable-remote-workload-membership")
 	require.NoError(t, err)
 	require.False(t, enabled)
+}
+
+func TestDNSResolverLabels(t *testing.T) {
+	cfg := DefaultConfig
+	require.Empty(t, cfg.DNSResolverLabels, "no resolver is approved by default")
+	sel, err := cfg.DNSResolverSelector()
+	require.NoError(t, err)
+	require.Empty(t, sel)
+
+	cfg.DNSResolverLabels = []string{"k8s:io.kubernetes.pod.namespace=kube-system"}
+	require.ErrorContains(t, cfg.Validate(), "requires enable-ztunnel")
+	cfg.EnableZTunnel = true
+	require.NoError(t, cfg.Validate())
+
+	for name, entries := range map[string][]string{
+		"no source":           {"io.kubernetes.pod.namespace=kube-system"},
+		"other source":        {"any:io.kubernetes.pod.namespace=kube-system"},
+		"no value":            {"k8s:io.kubernetes.pod.namespace", "k8s:k8s-app=kube-dns"},
+		"empty value":         {"k8s:io.kubernetes.pod.namespace=", "k8s:k8s-app=kube-dns"},
+		"no namespace":        {"k8s:k8s-app=kube-dns"},
+		"duplicate key":       {"k8s:io.kubernetes.pod.namespace=kube-system", "k8s:io.kubernetes.pod.namespace=default"},
+		"cluster label":       {"k8s:io.kubernetes.pod.namespace=kube-system", "k8s:io.cilium.k8s.policy.cluster=cmtc-a"},
+		"empty entry":         {"k8s:io.kubernetes.pod.namespace=kube-system", ""},
+		"reserved identity":   {"reserved:host"},
+		"namespace via other": {"k8s:io.cilium.k8s.namespace.labels.kubernetes.io/metadata.name=kube-system"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := cfg
+			c.DNSResolverLabels = entries
+			require.Error(t, c.Validate())
+		})
+	}
+
+	// The ConfigMap form: one comma-separated string.
+	var parsed Config
+	h := hive.New(
+		cell.Config(DefaultConfig),
+		cell.Invoke(func(c Config) { parsed = c }),
+	)
+	h.Viper().Set("enable-ztunnel", true)
+	h.Viper().Set("ztunnel-dns-resolver-labels",
+		"k8s:io.kubernetes.pod.namespace=kube-system,k8s:k8s-app=kube-dns,k8s:io.cilium.k8s.policy.serviceaccount=coredns")
+	require.NoError(t, h.Populate(hivetest.Logger(t)))
+	require.NoError(t, parsed.Validate())
+	sel, err = parsed.DNSResolverSelector()
+	require.NoError(t, err)
+	require.Equal(t, []labels.Label{
+		labels.NewLabel("io.kubernetes.pod.namespace", "kube-system", labels.LabelSourceK8s),
+		labels.NewLabel("k8s-app", "kube-dns", labels.LabelSourceK8s),
+		labels.NewLabel("io.cilium.k8s.policy.serviceaccount", "coredns", labels.LabelSourceK8s),
+	}, sel)
 }
