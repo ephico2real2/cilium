@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"slices"
+	"strings"
 
 	"github.com/coreos/go-iptables/iptables"
 	"github.com/vishvananda/netlink"
@@ -37,15 +38,27 @@ const (
 	ZtunnelInboundPort          = 15008
 	ZtunnelOutboundPort         = 15001
 	ZtunnelInboundPlaintextPort = 15006
+	// DNSPort is the resolver port. With approved resolvers configured, TCP to it leaves the Pod directly, as UDP
+	// does, and the BPF HBONE-only gate admits it only to an approved resolver identity (bpf/lib/ztunnel_admission.h).
+	DNSPort = 53
 
 	VersionSpecificPlaceholder = "<VERSION_SPECIFIC>"
 )
 
 // CreateInPodRules creates the iptables rules for ztunnels inpod mode.
 //
+// directResolverDNS is true when ztunnel-dns-resolver-labels approves at least
+// one resolver and the port this rule sees is the port on the wire (no
+// per-packet service translation; see zds.directResolverDNS). TCP DNS then
+// bypasses ztunnel, as UDP DNS always does: strict
+// outbound has no verified xDS workload for a resolver outside the mesh and
+// refuses the connection, so a truncated (TC=1) answer could never be retried
+// over TCP. When it is false, the bypass rule is removed if a previous
+// configuration installed it.
+//
 // Note that this function is supposed to be called from within the pods
 // network namespace.
-func CreateInPodRules(logger *slog.Logger, ipv4Enabled, ipv6Enabled bool) error {
+func CreateInPodRules(logger *slog.Logger, ipv4Enabled, ipv6Enabled, directResolverDNS bool) error {
 	if err := addLoopbackRoute(logger, ipv4Enabled, ipv6Enabled); err != nil {
 		return err
 	}
@@ -54,7 +67,7 @@ func CreateInPodRules(logger *slog.Logger, ipv4Enabled, ipv6Enabled bool) error 
 		return err
 	}
 
-	if err := addInPodRules(logger, ipv4Enabled, ipv6Enabled); err != nil {
+	if err := addInPodRules(logger, ipv4Enabled, ipv6Enabled, directResolverDNS); err != nil {
 		return err
 	}
 
@@ -131,6 +144,12 @@ type rule struct {
 	table      string
 	chain      string
 	parameters []string
+	// first keeps exactly one copy of the rule, at the head of its chain, instead of appending it. A rule added to
+	// the chain of a Pod enrolled by an earlier agent must still precede that chain's existing REDIRECT, and two
+	// concurrent installs (enrollment and snapshot replay) must not leave a second copy.
+	first bool
+	// absent removes every copy of the rule, so that disabling an option takes effect on enrolled Pods.
+	absent bool
 }
 
 type ruleManager struct {
@@ -141,11 +160,19 @@ type ruleManager struct {
 }
 
 func (m *ruleManager) add(table, chain string, parameters ...string) {
-	m.rules = append(m.rules, rule{"", "", table, chain, parameters})
+	m.rules = append(m.rules, rule{table: table, chain: chain, parameters: parameters})
 }
 
 func (m *ruleManager) addVersioned(ipv4, ipv6, table, chain string, parameters ...string) {
-	m.rules = append(m.rules, rule{ipv4, ipv6, table, chain, parameters})
+	m.rules = append(m.rules, rule{ipv4: ipv4, ipv6: ipv6, table: table, chain: chain, parameters: parameters})
+}
+
+func (m *ruleManager) addFirst(table, chain string, parameters ...string) {
+	m.rules = append(m.rules, rule{table: table, chain: chain, parameters: parameters, first: true})
+}
+
+func (m *ruleManager) remove(table, chain string, parameters ...string) {
+	m.rules = append(m.rules, rule{table: table, chain: chain, parameters: parameters, absent: true})
 }
 
 func replaceIPPlaceholder(args []string, ip string) []string {
@@ -164,36 +191,120 @@ func replaceIPPlaceholder(args []string, ip string) []string {
 func (m *ruleManager) install(ipv4Enabled, ipv6Enabled bool) error {
 	for _, rule := range m.rules {
 		if ipv4Enabled {
-			ruleSpec := replaceIPPlaceholder(rule.parameters, rule.ipv4)
-			// Check if rule exists
-			exists, err := m.ipt4.Exists(rule.table, rule.chain, ruleSpec...)
-			if err != nil {
-				return fmt.Errorf("failed to check iptables rule existence: %w", err)
-			}
-			if !exists {
-				// Rule doesn't exist, add it
-				if err := m.ipt4.Append(rule.table, rule.chain, ruleSpec...); err != nil {
-					return fmt.Errorf("failed to insert iptables rule (%s %s %v): %w", rule.table, rule.chain, ruleSpec, err)
-				}
+			if err := installRule(m.ipt4, "iptables", rule, replaceIPPlaceholder(rule.parameters, rule.ipv4)); err != nil {
+				return err
 			}
 		}
 
 		if ipv6Enabled && m.ipt6 != nil {
-			ruleSpec := replaceIPPlaceholder(rule.parameters, rule.ipv6)
-			// Check if rule exists
-			exists, err := m.ipt6.Exists(rule.table, rule.chain, ruleSpec...)
-			if err != nil {
-				return fmt.Errorf("failed to check ip6tables rule existence: %w", err)
-			}
-			if !exists {
-				// Rule doesn't exist, add it
-				if err := m.ipt6.Append(rule.table, rule.chain, ruleSpec...); err != nil {
-					return fmt.Errorf("failed to insert ip6tables rule (%s %s %v): %w", rule.table, rule.chain, ruleSpec, err)
-				}
+			if err := installRule(m.ipt6, "ip6tables", rule, replaceIPPlaceholder(rule.parameters, rule.ipv6)); err != nil {
+				return err
 			}
 		}
 	}
 	return nil
+}
+
+// installRule makes one rule present (appended, or alone at the head of its chain) or absent.
+func installRule(ipt *iptables.IPTables, name string, rule rule, ruleSpec []string) error {
+	switch {
+	case rule.absent:
+		return deleteAllCopies(ipt, name, rule, ruleSpec)
+	case rule.first:
+		return ensureFirst(ipt, name, rule, ruleSpec)
+	}
+	exists, err := ipt.Exists(rule.table, rule.chain, ruleSpec...)
+	if err != nil {
+		return fmt.Errorf("failed to check %s rule existence: %w", name, err)
+	}
+	if exists {
+		return nil
+	}
+	if err := ipt.Append(rule.table, rule.chain, ruleSpec...); err != nil {
+		return fmt.Errorf("failed to insert %s rule (%s %s %v): %w", name, rule.table, rule.chain, ruleSpec, err)
+	}
+	return nil
+}
+
+// ensureFirst leaves the chain with the rule as its first rule and no other copy. A chain that already has that
+// shape is not touched, so a repeated install never removes the rule even briefly. A repair deletes every copy
+// before it inserts one at the head: in between, TCP DNS meets the REDIRECT and is refused, which fails closed.
+// Two repairs racing on one chain can both insert, which leaves two copies at the head; both are ahead of the
+// REDIRECT, and the next install removes the extra one.
+func ensureFirst(ipt *iptables.IPTables, name string, rule rule, ruleSpec []string) error {
+	rules, err := listRules(ipt, name, rule)
+	if err != nil {
+		return err
+	}
+	want := ruleLine(rule, ruleSpec)
+	if len(rules) > 0 && rules[0] == want && !slices.Contains(rules[1:], want) {
+		return nil
+	}
+	if err := deleteCopies(ipt, name, rule, ruleSpec, countRule(rules, want)); err != nil {
+		return err
+	}
+	if err := ipt.Insert(rule.table, rule.chain, 1, ruleSpec...); err != nil {
+		return fmt.Errorf("failed to insert %s rule (%s %s %v): %w", name, rule.table, rule.chain, ruleSpec, err)
+	}
+	return nil
+}
+
+// deleteAllCopies removes every copy of the rule from its chain.
+func deleteAllCopies(ipt *iptables.IPTables, name string, rule rule, ruleSpec []string) error {
+	rules, err := listRules(ipt, name, rule)
+	if err != nil {
+		return err
+	}
+	return deleteCopies(ipt, name, rule, ruleSpec, countRule(rules, ruleLine(rule, ruleSpec)))
+}
+
+// deleteCopies deletes the rule as many times as the chain listed it (iptables -D removes one copy per call), then
+// checks that none is left. A copy left over was added by a concurrent writer; the error makes the caller retry.
+func deleteCopies(ipt *iptables.IPTables, name string, rule rule, ruleSpec []string, copies int) error {
+	for range copies {
+		if err := ipt.DeleteIfExists(rule.table, rule.chain, ruleSpec...); err != nil {
+			return fmt.Errorf("failed to delete %s rule (%s %s %v): %w", name, rule.table, rule.chain, ruleSpec, err)
+		}
+	}
+	exists, err := ipt.Exists(rule.table, rule.chain, ruleSpec...)
+	if err != nil {
+		return fmt.Errorf("failed to check %s rule existence: %w", name, err)
+	}
+	if exists {
+		return fmt.Errorf("%s rule (%s %s %v) still present after deleting the %d listed copies",
+			name, rule.table, rule.chain, ruleSpec, copies)
+	}
+	return nil
+}
+
+// listRules returns the chain's rules in iptables -S form, without its -N or -P line.
+func listRules(ipt *iptables.IPTables, name string, rule rule) ([]string, error) {
+	listed, err := ipt.List(rule.table, rule.chain)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list %s chain (%s %s): %w", name, rule.table, rule.chain, err)
+	}
+	var rules []string
+	for _, line := range listed {
+		if strings.HasPrefix(line, "-A ") {
+			rules = append(rules, line)
+		}
+	}
+	return rules, nil
+}
+
+// ruleLine is the rule as iptables -S lists it.
+func ruleLine(rule rule, ruleSpec []string) string {
+	return "-A " + rule.chain + " " + strings.Join(ruleSpec, " ")
+}
+
+func countRule(rules []string, want string) int {
+	n := 0
+	for _, r := range rules {
+		if r == want {
+			n++
+		}
+	}
+	return n
 }
 
 func (m *ruleManager) createChains(ipv4Enabled, ipv6Enabled bool) error {
@@ -248,6 +359,9 @@ func (m *ruleManager) createChains(ipv4Enabled, ipv6Enabled bool) error {
 //     plaintext port (15006), except for traffic already destined to port 15008
 //
 // Outbound Traffic (OUTPUT):
+//   - With approved DNS resolvers, TCP to port 53 is accepted first and leaves the Pod
+//     without ztunnel, as UDP does; the BPF HBONE-only gate admits it only to an
+//     approved resolver identity
 //   - Connmarks are restored to packet marks for connection tracking
 //   - Traffic with the tproxy mark (0x111) is allowed through (already processed by ztunnel)
 //   - Self-addressed traffic on loopback is allowed to bypass ztunnel
@@ -257,7 +371,7 @@ func (m *ruleManager) createChains(ipv4Enabled, ipv6Enabled bool) error {
 // The rules are created in custom chains (CILIUM_PREROUTING, CILIUM_OUTPUT) that are jumped
 // to from the standard PREROUTING and OUTPUT chains in both the mangle and nat tables.
 // This makes it easier to identify and manage Cilium-created rules.
-func addInPodRules(logger *slog.Logger, ipv4Enabled, ipv6Enabled bool) error {
+func addInPodRules(logger *slog.Logger, ipv4Enabled, ipv6Enabled, directResolverDNS bool) error {
 	var ipt4, ipt6 *iptables.IPTables
 	var err error
 
@@ -349,6 +463,17 @@ func addInPodRules(logger *slog.Logger, ipv4Enabled, ipv6Enabled bool) error {
 		"-o", "lo",
 		"-j", "ACCEPT",
 	)
+	// TCP DNS goes straight to the resolver, ahead of every other outbound rule. It is the first rule
+	// of the chain, so it also precedes the REDIRECT in the chain of a Pod enrolled before this rule existed.
+	// The rules ahead of the REDIRECT all ACCEPT, so the head of the chain changes no other verdict.
+	// -I CILIUM_OUTPUT 1 -p tcp -m tcp --dport 53 -j ACCEPT
+	dnsBypass := []string{"-p", "tcp", "-m", "tcp", "--dport", fmt.Sprint(DNSPort), "-j", "ACCEPT"}
+	if directResolverDNS {
+		rm.addFirst("nat", InpodOutputChain, dnsBypass...)
+	} else {
+		rm.remove("nat", InpodOutputChain, dnsBypass...)
+	}
+
 	// If this is outbound, not bound for localhost, and does not have our packet mark, redirect to ztunnel proxy <OUTPORT>
 	// -A CILIUM_OUTPUT ! -d 127.0.0.1/32 -p tcp -m mark ! --mark 0x539/0xfff -j REDIRECT --to-ports <OUTPORT>
 	rm.addVersioned("127.0.0.1/32", "::1/128",

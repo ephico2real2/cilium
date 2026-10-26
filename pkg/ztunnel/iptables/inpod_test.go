@@ -40,7 +40,7 @@ func TestPrivilegedCreateInPodRules(t *testing.T) {
 			}
 		}
 
-		err = CreateInPodRules(slog.Default(), true, true)
+		err = CreateInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err)
 
 		// Verify IPv4 rules
@@ -77,6 +77,187 @@ func TestPrivilegedCreateInPodRules(t *testing.T) {
 	})
 }
 
+// TestPrivilegedDirectResolverDNS checks the TCP DNS bypass: it is the first nat
+// OUTPUT rule when resolvers are approved, also on a Pod whose chain an earlier
+// agent built without it, it is installed once however often the rules are
+// applied, and it is removed again when no resolver is approved.
+func TestPrivilegedDirectResolverDNS(t *testing.T) {
+	testutils.PrivilegedTest(t)
+
+	bypass := "-A " + InpodOutputChain + " -p tcp -m tcp --dport 53 -j ACCEPT"
+	redirect := fmt.Sprintf("-j REDIRECT --to-ports %d", ZtunnelOutboundPort)
+	ns := netns.NewNetNS(t)
+	ns.Do(func() error {
+		link, err := safenetlink.LinkByName("lo")
+		require.NoError(t, err)
+		require.NoError(t, netlink.LinkSetUp(link))
+
+		// An agent without approved resolvers builds exactly the chain of the base agent (64a07d46a6).
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, false))
+		for cmd, local := range map[string]string{"iptables": "127.0.0.1/32", "ip6tables": "::1/128"} {
+			require.Equal(t, baseOutputChain(local), chainRules(t, cmd, "nat", InpodOutputChain), cmd)
+		}
+
+		// The upgraded agent re-applies the rules to the enrolled Pod, twice.
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, true))
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, true))
+		for _, cmd := range []string{"iptables", "ip6tables"} {
+			rules := chainRules(t, cmd, "nat", InpodOutputChain)
+			require.Equal(t, bypass, rules[0], "%s: the bypass must be the first rule:\n%s", cmd, strings.Join(rules, "\n"))
+			require.Equal(t, 1, countRule(rules, bypass), cmd)
+			require.Contains(t, rules[len(rules)-1], redirect, "%s: the REDIRECT stays last", cmd)
+			require.Len(t, rules, 4, cmd)
+		}
+
+		// Resolvers no longer approved: the bypass goes, the base chain stays.
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, false))
+		for cmd, local := range map[string]string{"iptables": "127.0.0.1/32", "ip6tables": "::1/128"} {
+			require.Equal(t, baseOutputChain(local), chainRules(t, cmd, "nat", InpodOutputChain), cmd)
+		}
+		return nil
+	})
+}
+
+// TestPrivilegedDirectResolverDNSFreshPod checks the bypass on a Pod enrolled
+// for the first time with resolvers approved.
+func TestPrivilegedDirectResolverDNSFreshPod(t *testing.T) {
+	testutils.PrivilegedTest(t)
+
+	ns := netns.NewNetNS(t)
+	ns.Do(func() error {
+		link, err := safenetlink.LinkByName("lo")
+		require.NoError(t, err)
+		require.NoError(t, netlink.LinkSetUp(link))
+
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, true))
+		for _, cmd := range []string{"iptables", "ip6tables"} {
+			rules := chainRules(t, cmd, "nat", InpodOutputChain)
+			require.Equal(t, "-A "+InpodOutputChain+" -p tcp -m tcp --dport 53 -j ACCEPT", rules[0], cmd)
+			require.Len(t, rules, 4, cmd)
+		}
+		// The inbound chain is unchanged: plaintext TCP to the Pod, port 53 included, still goes to ztunnel.
+		for cmd, local := range map[string]string{"iptables": "127.0.0.1/32", "ip6tables": "::1/128"} {
+			requireRule(t, getIPTablesRules(t, cmd, "nat"), "-A", InpodPreroutingChain, "!", "-d", local, "-p", "tcp", "-m", "tcp", "!", "--dport", fmt.Sprint(ZtunnelInboundPort), "-m", "mark", "!", "--mark", fmt.Sprintf("0x%x/0x%x", InpodMark, InpodMask), "-j", "REDIRECT", "--to-ports", fmt.Sprint(ZtunnelInboundPlaintextPort))
+		}
+		return nil
+	})
+}
+
+// TestPrivilegedDirectResolverDNSConverges checks that one install repairs a
+// chain left with duplicate or misplaced bypass rules (two concurrent installs,
+// or a rule appended by hand), that a correct chain is not rewritten, and that
+// one removal deletes every copy.
+func TestPrivilegedDirectResolverDNSConverges(t *testing.T) {
+	testutils.PrivilegedTest(t)
+
+	spec := []string{"-p", "tcp", "-m", "tcp", "--dport", "53", "-j", "ACCEPT"}
+	bypass := "-A " + InpodOutputChain + " " + strings.Join(spec, " ")
+	ns := netns.NewNetNS(t)
+	ns.Do(func() error {
+		link, err := safenetlink.LinkByName("lo")
+		require.NoError(t, err)
+		require.NoError(t, netlink.LinkSetUp(link))
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, false))
+
+		for _, cmd := range []string{"iptables", "ip6tables"} {
+			// A misplaced copy after the REDIRECT, and a duplicate at the head.
+			_, err = runIPTablesCommand(t, cmd, append([]string{"-w", "-t", "nat", "-A", InpodOutputChain}, spec...)...)
+			require.NoError(t, err)
+			_, err = runIPTablesCommand(t, cmd, append([]string{"-w", "-t", "nat", "-I", InpodOutputChain, "1"}, spec...)...)
+			require.NoError(t, err)
+			_, err = runIPTablesCommand(t, cmd, append([]string{"-w", "-t", "nat", "-I", InpodOutputChain, "1"}, spec...)...)
+			require.NoError(t, err)
+			require.Equal(t, 3, countRule(chainRules(t, cmd, "nat", InpodOutputChain), bypass), cmd)
+		}
+
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, true))
+		before := map[string][]string{}
+		for _, cmd := range []string{"iptables", "ip6tables"} {
+			rules := chainRules(t, cmd, "nat", InpodOutputChain)
+			require.Equal(t, bypass, rules[0], cmd)
+			require.Equal(t, 1, countRule(rules, bypass), cmd)
+			require.Len(t, rules, 4, cmd)
+			before[cmd] = rules
+		}
+
+		// A correct chain is left as it is: its packet counters survive a second install.
+		for _, cmd := range []string{"iptables", "ip6tables"} {
+			_, err = runIPTablesCommand(t, cmd, append([]string{"-w", "-t", "nat", "-R", InpodOutputChain, "1", "-c", "7", "700"}, spec...)...)
+			require.NoError(t, err)
+		}
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, true))
+		for _, cmd := range []string{"iptables", "ip6tables"} {
+			require.Equal(t, before[cmd], chainRules(t, cmd, "nat", InpodOutputChain), cmd)
+			out, err := runIPTablesCommand(t, cmd, "-w", "-t", "nat", "-S", InpodOutputChain, "1", "-v")
+			require.NoError(t, err)
+			require.Contains(t, string(out), "-c 7 700", "%s: the bypass was rewritten", cmd)
+		}
+
+		// Two copies again, then one removal leaves none.
+		for _, cmd := range []string{"iptables", "ip6tables"} {
+			_, err = runIPTablesCommand(t, cmd, append([]string{"-w", "-t", "nat", "-I", InpodOutputChain, "1"}, spec...)...)
+			require.NoError(t, err)
+		}
+		require.NoError(t, CreateInPodRules(slog.Default(), true, true, false))
+		for cmd, local := range map[string]string{"iptables": "127.0.0.1/32", "ip6tables": "::1/128"} {
+			require.Equal(t, baseOutputChain(local), chainRules(t, cmd, "nat", InpodOutputChain), cmd)
+		}
+		return nil
+	})
+}
+
+// TestPrivilegedDirectResolverDNSManyCopies repairs and removes any number of copies, including counts at and past
+// the bound the first removal loop had (16), which left none behind on an enabled chain.
+func TestPrivilegedDirectResolverDNSManyCopies(t *testing.T) {
+	testutils.PrivilegedTest(t)
+
+	spec := []string{"-p", "tcp", "-m", "tcp", "--dport", "53", "-j", "ACCEPT"}
+	bypass := "-A " + InpodOutputChain + " " + strings.Join(spec, " ")
+	for _, copies := range []int{15, 16, 17, 40} {
+		t.Run(fmt.Sprint(copies), func(t *testing.T) {
+			ns := netns.NewNetNS(t)
+			ns.Do(func() error {
+				link, err := safenetlink.LinkByName("lo")
+				require.NoError(t, err)
+				require.NoError(t, netlink.LinkSetUp(link))
+				require.NoError(t, CreateInPodRules(slog.Default(), true, true, false))
+
+				// Half the copies at the head, half after the REDIRECT, on top of those already present.
+				add := func() {
+					for _, cmd := range []string{"iptables", "ip6tables"} {
+						present := countRule(chainRules(t, cmd, "nat", InpodOutputChain), bypass)
+						for i := range copies {
+							op := []string{"-A", InpodOutputChain}
+							if i%2 == 0 {
+								op = []string{"-I", InpodOutputChain, "1"}
+							}
+							_, err := runIPTablesCommand(t, cmd, append(append([]string{"-w", "-t", "nat"}, op...), spec...)...)
+							require.NoError(t, err)
+						}
+						require.Equal(t, present+copies, countRule(chainRules(t, cmd, "nat", InpodOutputChain), bypass), cmd)
+					}
+				}
+
+				add()
+				require.NoError(t, CreateInPodRules(slog.Default(), true, true, true))
+				for _, cmd := range []string{"iptables", "ip6tables"} {
+					rules := chainRules(t, cmd, "nat", InpodOutputChain)
+					require.Equal(t, bypass, rules[0], cmd)
+					require.Equal(t, 1, countRule(rules, bypass), cmd)
+					require.Len(t, rules, 4, cmd)
+				}
+
+				add()
+				require.NoError(t, CreateInPodRules(slog.Default(), true, true, false))
+				for cmd, local := range map[string]string{"iptables": "127.0.0.1/32", "ip6tables": "::1/128"} {
+					require.Equal(t, baseOutputChain(local), chainRules(t, cmd, "nat", InpodOutputChain), cmd)
+				}
+				return nil
+			})
+		})
+	}
+}
+
 // TestPrivilegedCreateInPodRulesIdempotency tests that calling CreateInPodRules
 // multiple times with existing rules, routes, and chains doesn't cause errors.
 func TestPrivilegedCreateInPodRulesIdempotency(t *testing.T) {
@@ -89,15 +270,15 @@ func TestPrivilegedCreateInPodRulesIdempotency(t *testing.T) {
 		require.NoError(t, netlink.LinkSetUp(link))
 
 		// First call - creates all rules, routes, and chains
-		err = CreateInPodRules(slog.Default(), true, true)
+		err = CreateInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err, "First call to CreateInPodRules should succeed")
 
 		// Second call - should handle existing rules/routes/chains without error
-		err = CreateInPodRules(slog.Default(), true, true)
+		err = CreateInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err, "Second call to CreateInPodRules should succeed (idempotency)")
 
 		// Third call - verify it's truly idempotent
-		err = CreateInPodRules(slog.Default(), true, true)
+		err = CreateInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err, "Third call to CreateInPodRules should succeed (idempotency)")
 
 		return nil
@@ -253,11 +434,11 @@ func TestPrivilegedAddExistingIPTablesRules(t *testing.T) {
 		require.NoError(t, err)
 
 		// Install rules first time
-		err = addInPodRules(slog.Default(), true, true)
+		err = addInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err, "First call to addInPodRules should succeed")
 
 		// Install rules second time - should not error (rules already exist)
-		err = addInPodRules(slog.Default(), true, true)
+		err = addInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err, "Second call to addInPodRules should succeed")
 
 		// Verify that rules weren't duplicated
@@ -288,7 +469,7 @@ func TestPrivilegedDeleteInPodRules(t *testing.T) {
 		require.NoError(t, netlink.LinkSetUp(link))
 
 		// First create all rules
-		err = CreateInPodRules(slog.Default(), true, true)
+		err = CreateInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err, "CreateInPodRules should succeed")
 
 		// Verify rules exist before deletion
@@ -361,7 +542,7 @@ func TestPrivilegedDeleteInPodRulesIdempotency(t *testing.T) {
 		require.NoError(t, netlink.LinkSetUp(link))
 
 		// Create rules
-		err = CreateInPodRules(slog.Default(), true, true)
+		err = CreateInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err, "CreateInPodRules should succeed")
 
 		// First deletion - should succeed
@@ -495,7 +676,7 @@ func TestPrivilegedDeleteInPodChains(t *testing.T) {
 		require.NoError(t, netlink.LinkSetUp(link))
 
 		// Create chains and add some rules
-		err = addInPodRules(slog.Default(), true, true)
+		err = addInPodRules(slog.Default(), true, true, false)
 		require.NoError(t, err, "addInPodRules should succeed")
 
 		// Verify chains exist before deletion
@@ -544,6 +725,29 @@ func getIPTablesRules(t *testing.T, cmd, table string) []string {
 	out, err := runIPTablesCommand(t, cmd, "-w", "-t", table, "-S")
 	require.NoError(t, err, "Failed to get iptables rules for table %s", table)
 	return strings.Split(string(out), "\n")
+}
+
+// chainRules lists the rules of one chain, in order, without its -N line.
+func chainRules(t *testing.T, cmd, table, chain string) []string {
+	out, err := runIPTablesCommand(t, cmd, "-w", "-t", table, "-S", chain)
+	require.NoError(t, err, "Failed to list %s %s %s", cmd, table, chain)
+	var rules []string
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if strings.HasPrefix(line, "-A ") {
+			rules = append(rules, line)
+		}
+	}
+	return rules
+}
+
+// baseOutputChain is nat CILIUM_OUTPUT as the base agent (64a07d46a6) builds it, in iptables -S form.
+func baseOutputChain(local string) []string {
+	mark := fmt.Sprintf("0x%x/0x%x", InpodMark, InpodMask)
+	return []string{
+		fmt.Sprintf("-A %s -p tcp -m mark --mark 0x%x/0x%x -j ACCEPT", InpodOutputChain, InpodTProxyMark, InpodMask),
+		fmt.Sprintf("-A %s ! -d %s -o lo -j ACCEPT", InpodOutputChain, local),
+		fmt.Sprintf("-A %s ! -d %s -p tcp -m mark ! --mark %s -j REDIRECT --to-ports %d", InpodOutputChain, local, mark, ZtunnelOutboundPort),
+	}
 }
 
 func requireRule(t *testing.T, rules []string, expected ...string) {

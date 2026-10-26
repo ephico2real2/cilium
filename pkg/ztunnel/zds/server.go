@@ -20,6 +20,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/endpointmanager"
+	"github.com/cilium/cilium/pkg/kpr"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/netns"
@@ -216,6 +217,9 @@ type serverParams struct {
 
 	EndpointManager endpointmanager.EndpointManager
 
+	// KPRConfig decides, with Config, whether TCP DNS bypasses ztunnel. Absent, the bypass stays off.
+	KPRConfig kpr.KPRConfig `optional:"true"`
+
 	// ZDSUnixAddr overrides the default ZDS unix socket address.
 	// If empty, config.DefaultZtunnelUnixAddress is used.
 	// This field is intended for testing purposes only.
@@ -261,6 +265,9 @@ type Server struct {
 	updates               chan zdsUpdate // updates to send to ztunnel
 	initialSnapshotSeeded chan struct{}
 	metrics               *Metrics
+	// directResolverDNS: approved DNS resolvers are configured, so enrolled
+	// Pods send TCP DNS past ztunnel (iptables.CreateInPodRules).
+	directResolverDNS bool
 }
 
 type zdsUpdate struct {
@@ -291,6 +298,12 @@ func newZDSServer(p serverParams) serverOut {
 		metrics:                      p.Metrics,
 		strictDeletedEndpointCleanup: p.Config.RequireMTLS,
 	}
+	var reason string
+	server.directResolverDNS, reason = directResolverDNS(p.Config, p.KPRConfig, option.Config)
+	p.Logger.Info("TCP DNS from enrolled Pods",
+		logfields.Enabled, server.directResolverDNS,
+		logfields.Reason, reason,
+	)
 
 	zdsUnixAddr := defaultZDSUnixAddress
 	if p.ZDSUnixAddr != "" {
@@ -583,7 +596,7 @@ func (s *Server) EnrollEndpointForOwnerContext(ctx context.Context, owner, ep *e
 	}
 
 	if err = ns.Do(func() error {
-		return iptables.CreateInPodRules(s.logger, option.Config.EnableIPv4, option.Config.EnableIPv6)
+		return iptables.CreateInPodRules(s.logger, option.Config.EnableIPv4, option.Config.EnableIPv6, s.directResolverDNS)
 	}); err != nil {
 		s.metrics.EnrollmentFailures.WithLabelValues("iptables_failed").Inc()
 		return fmt.Errorf("unable to setup iptable rules for ztunnel inpod mode: %w", err)
@@ -876,7 +889,7 @@ func (s *Server) sendInitialSnapshot(zc *ztunnelConn) error {
 		}
 
 		if err = ns.Do(func() error {
-			return iptables.CreateInPodRules(s.logger, option.Config.EnableIPv4, option.Config.EnableIPv6)
+			return iptables.CreateInPodRules(s.logger, option.Config.EnableIPv4, option.Config.EnableIPv6, s.directResolverDNS)
 		}); err != nil {
 			ns.Close()
 			if s.strictDeletedEndpointCleanup {
