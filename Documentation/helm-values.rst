@@ -932,6 +932,10 @@
      - Extra IP addresses added to certificate when it's auto generated
      - list
      - ``[]``
+   * - :spelling:ignore:`clustermesh.apiserver.tls.auto.server.privateKey`
+     - Private key options for the server certificate only, when clustermesh.apiserver.tls.auto.method=certmanager. Each field set here replaces the same field of clustermesh.apiserver.tls.auto.privateKey; unset fields keep it. Use it to keep the server key on renewal (rotationPolicy: Never) where peers pin that key, while the client certificates keep rotating their keys. https://cert-manager.io/docs/reference/api-docs/#cert-manager.io/v1.CertificatePrivateKey
+     - object
+     - ``{}``
    * - :spelling:ignore:`clustermesh.apiserver.tls.auto.subject`
      - X509Subject Full X509 name specification used when clustermesh.apiserver.tls.auto.method=certmanager. https://cert-manager.io/docs/reference/api-docs/#cert-manager.io/v1.X509Subject
      - object
