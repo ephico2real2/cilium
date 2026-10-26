@@ -2001,6 +2001,34 @@
             "annotations": {
               "type": "object"
             },
+            "bootstrap": {
+              "properties": {
+                "certManager": {
+                  "properties": {
+                    "duration": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "issuerRef": {
+                      "type": "object"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "renewBefore": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "existingSecret": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
             "ca": {
               "properties": {
                 "externalExactRegistrar": {
@@ -2017,6 +2045,13 @@
             },
             "caAddress": {
               "type": "string"
+            },
+            "dnsResolverLabels": {
+              "items": {},
+              "type": "array"
+            },
+            "effectivePolicyQuarantine": {
+              "type": "boolean"
             },
             "extraEnv": {
               "items": {},
@@ -2059,6 +2094,33 @@
               },
               "type": "object"
             },
+            "issuerProfile": {
+              "properties": {
+                "checkpointBootstrap": {
+                  "type": "boolean"
+                },
+                "checkpointDirectory": {
+                  "type": "string"
+                },
+                "probePinsDirectory": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
+            "mesh": {
+              "properties": {
+                "clusters": {
+                  "items": {},
+                  "type": "array"
+                },
+                "exceptions": {
+                  "items": {},
+                  "type": "array"
+                }
+              },
+              "type": "object"
+            },
             "minReadySeconds": {
               "type": "integer"
             },
@@ -2096,6 +2158,47 @@
               },
               "type": "object"
             },
+            "remoteWorkloadMembership": {
+              "properties": {
+                "certManager": {
+                  "properties": {
+                    "duration": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "issuerRef": {
+                      "type": "object"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "renewBefore": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "clientCommonName": {
+                  "type": "string"
+                },
+                "configMapName": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "peers": {
+                  "items": {},
+                  "type": "array"
+                },
+                "secretName": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
             "requireMtls": {
               "type": "boolean"
             },
@@ -2126,9 +2229,49 @@
               },
               "type": "object"
             },
+            "sourceMembership": {
+              "properties": {
+                "certManager": {
+                  "properties": {
+                    "duration": {
+                      "type": "string"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "issuerRef": {
+                      "type": "object"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "renewBefore": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "configMapName": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "secretName": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            },
             "spire": {
               "properties": {
                 "containerRuntimeSocketPath": {
+                  "type": "string"
+                },
+                "delegatedSocketPath": {
+                  "type": "string"
+                },
+                "trustDomain": {
                   "type": "string"
                 }
               },

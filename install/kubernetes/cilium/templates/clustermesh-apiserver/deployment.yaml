@@ -79,6 +79,10 @@ spec:
         - --etcd-initial-cluster-token=$(INITIAL_CLUSTER_TOKEN)
         - --etcd-data-dir=/var/run/etcd
         - --etcd-create-shared-remote-user={{ ne .Values.clustermesh.apiserver.tls.authMode "cluster-strict" }}
+        {{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") .Values.encryption.ztunnel.sourceMembership.enabled }}
+        # The local writer and the remote clusters' origin readers of ztunnel workload membership.
+        - --etcd-create-ztunnel-membership-users=true
+        {{- end }}
         {{- with .Values.clustermesh.apiserver.etcd.init.extraArgs }}
         {{- toYaml . | trim | nindent 8 }}
         {{- end }}

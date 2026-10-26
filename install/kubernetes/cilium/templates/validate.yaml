@@ -264,9 +264,63 @@
   {{ fail ".Values.networkDriver.enabled requires kubernetes version 1.34 or greater" }}
 {{- end }}
 
-{{/* SPIRE credential delivery requires the agent/operator SPIRE integration. */}}
-{{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") (eq .Values.encryption.ztunnel.ca.type "spire") (not .Values.authentication.mutual.spire.enabled) }}
-  {{- fail "encryption.ztunnel.ca.type=spire requires authentication.mutual.spire.enabled=true" }}
+{{/* SPIRE credential delivery requires the agent/operator SPIRE integration, or ztunnel's own SPIRE settings. */}}
+{{- $ztunnelOn := and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") }}
+{{- $z := .Values.encryption.ztunnel }}
+{{- if ne (empty $z.spire.trustDomain) (empty $z.spire.delegatedSocketPath) }}
+  {{- fail "encryption.ztunnel.spire.trustDomain and encryption.ztunnel.spire.delegatedSocketPath are set together" }}
+{{- end }}
+{{- if and $ztunnelOn (eq $z.ca.type "spire") (not .Values.authentication.mutual.spire.enabled) (empty $z.spire.trustDomain) }}
+  {{- fail "encryption.ztunnel.ca.type=spire requires authentication.mutual.spire.enabled=true or encryption.ztunnel.spire.trustDomain and delegatedSocketPath" }}
+{{- end }}
+{{- if and $z.spire.trustDomain .Values.authentication.mutual.spire.enabled (ne $z.spire.trustDomain .Values.authentication.mutual.spire.trustDomain) }}
+  {{- fail "encryption.ztunnel.spire.trustDomain differs from authentication.mutual.spire.trustDomain" }}
+{{- end }}
+
+{{/* The CMTC ztunnel extensions build on strict mTLS with a SPIRE CA. */}}
+{{- $strict := and $ztunnelOn $z.requireMtls }}
+{{- if and (or $z.effectivePolicyQuarantine $z.mesh.clusters $z.sourceMembership.enabled $z.remoteWorkloadMembership.enabled $z.issuerProfile.probePinsDirectory) (not $strict) }}
+  {{- fail "encryption.ztunnel effectivePolicyQuarantine, mesh, sourceMembership, remoteWorkloadMembership and issuerProfile require encryption.enabled=true, encryption.type=ztunnel and encryption.ztunnel.requireMtls=true" }}
+{{- end }}
+{{- if and $z.bootstrap.existingSecret (or (not $ztunnelOn) (ne $z.ca.type "spire")) }}
+  {{- fail "encryption.ztunnel.bootstrap.existingSecret requires enabled ztunnel encryption with ca.type=spire" }}
+{{- end }}
+{{- if and $z.bootstrap.certManager.enabled (empty $z.bootstrap.existingSecret) }}
+  {{- fail "encryption.ztunnel.bootstrap.certManager.enabled requires encryption.ztunnel.bootstrap.existingSecret (the Secret it writes)" }}
+{{- end }}
+{{- if and (or $z.bootstrap.existingSecret $z.sourceMembership.enabled $z.remoteWorkloadMembership.enabled) (not .Values.tls.caBundle.enabled) }}
+  {{- fail "encryption.ztunnel bootstrap.existingSecret, sourceMembership and remoteWorkloadMembership verify peers against tls.caBundle; set tls.caBundle.enabled=true" }}
+{{- end }}
+{{- if and $z.sourceMembership.enabled (not .Values.clustermesh.useAPIServer) }}
+  {{- fail "encryption.ztunnel.sourceMembership requires clustermesh.useAPIServer=true (it publishes to the local clustermesh-apiserver etcd)" }}
+{{- end }}
+{{- if and $z.remoteWorkloadMembership.enabled (empty $z.remoteWorkloadMembership.peers) }}
+  {{- fail "encryption.ztunnel.remoteWorkloadMembership requires at least one peer" }}
+{{- end }}
+{{- range $z.remoteWorkloadMembership.peers }}
+  {{- if or (empty .name) (empty .clusterID) (empty .port) (empty .ips) (empty .spkiSha256) }}
+    {{- fail "each encryption.ztunnel.remoteWorkloadMembership.peers entry needs name, clusterID, port, ips and spkiSha256" }}
+  {{- end }}
+  {{- range .spkiSha256 }}
+    {{- if not (regexMatch "^[0-9a-f]{64}$" .) }}
+      {{- fail (printf "encryption.ztunnel.remoteWorkloadMembership.peers spkiSha256 %q is not a lowercase hex SHA-256" .) }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+{{- if $z.mesh.clusters }}
+  {{- $names := list }}
+  {{- range $z.mesh.clusters }}
+    {{- if or (empty .clusterId) (empty .trustDomain) (empty .podCidrs) }}
+      {{- fail "each encryption.ztunnel.mesh.clusters entry needs clusterId, trustDomain and podCidrs" }}
+    {{- end }}
+    {{- $names = append $names .clusterId }}
+  {{- end }}
+  {{- if not (has .Values.cluster.name $names) }}
+    {{- fail "encryption.ztunnel.mesh.clusters must include this cluster (cluster.name)" }}
+  {{- end }}
+{{- end }}
+{{- if and $z.issuerProfile.checkpointDirectory (empty $z.issuerProfile.probePinsDirectory) }}
+  {{- fail "encryption.ztunnel.issuerProfile.checkpointDirectory requires probePinsDirectory" }}
 {{- end }}
 
 {{- if and .Values.encryption.ztunnel.requireMtls (or (not .Values.encryption.enabled) (ne .Values.encryption.type "ztunnel")) }}

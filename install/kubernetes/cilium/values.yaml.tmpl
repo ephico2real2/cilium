@@ -1226,9 +1226,31 @@ encryption:
     # -- Experimental authenticated-only inbound TCP policy for enrolled workloads.
     # This does not establish fail-closed startup or platform probe compatibility.
     requireMtls: false
+    # -- Experimental: bind a deny-by-default policy quarantine to every enrolled
+    # workload until its effective policy is installed. Requires requireMtls.
+    effectivePolicyQuarantine: false
+    # -- Labels (`k8s:key=value`, one of them the Pod namespace) of the approved
+    # DNS resolver identities that enrolled workloads may query in plaintext on
+    # UDP/TCP 53. Empty approves none.
+    dnsResolverLabels: []
     spire:
       # -- Node CRI socket used to bind delegated SPIRE attestation to the workload PID.
       containerRuntimeSocketPath: /run/containerd/containerd.sock
+      # -- SPIFFE trust domain of ztunnel workloads. Set it with
+      # delegatedSocketPath to configure ztunnel's SPIRE CA without Cilium
+      # mutual authentication: the agent and the operator then mount no SPIRE
+      # socket and get no mesh-auth-spire settings.
+      trustDomain: ""
+      # -- Host path of the SPIRE agent's delegated identity socket. Only ztunnel mounts it.
+      delegatedSocketPath: ""
+    # -- Experimental: the ClusterMesh clusters whose Pod and Service ranges
+    # ztunnel must reach over HBONE only (REQUIRE_MESH_HBONE). Requires requireMtls.
+    mesh:
+      # -- One entry per cluster, this cluster included: clusterId (the
+      # cluster.name), trustDomain, podCidrs and serviceCidrs.
+      clusters: []
+      # -- Narrow plaintext exceptions: cidr, ports and reason.
+      exceptions: []
     # -- ztunnel container image.
     image:
       # @schema
@@ -1303,6 +1325,80 @@ encryption:
       # type: [null, string]
       # @schema
       bootstrapRootCert: ~
+    # -- Server certificate of the agent's xDS and CA endpoint that ztunnel connects to.
+    bootstrap:
+      # -- Name of a kubernetes.io/tls Secret (tls.crt, tls.key) that replaces
+      # cilium-ztunnel-secrets. ztunnel then verifies the endpoint against the
+      # tls.caBundle trust bundle. Requires ca.type=spire and tls.caBundle.enabled.
+      existingSecret: ""
+      certManager:
+        # -- Issue existingSecret with cert-manager: ECDSA P-256, a new key at each renewal.
+        enabled: false
+        # -- Name of the Certificate.
+        name: ztunnel-ads-server
+        # -- Issuer of the Certificate. Empty uses clustermesh.apiserver.tls.auto.certManagerIssuerRef.
+        issuerRef: {}
+        # -- Lifetime of the certificate.
+        duration: 24h
+        # -- Time before expiry at which cert-manager renews it.
+        renewBefore: 1h
+    # -- Experimental: publish this node's source workload membership over a
+    # dedicated client connection to the local clustermesh-apiserver etcd, as the
+    # etcd user ztunnel-membership-writer-<cluster.name>. The global kvstore stays
+    # disabled. Requires clustermesh.useAPIServer, requireMtls and tls.caBundle.enabled.
+    sourceMembership:
+      enabled: false
+      # -- ConfigMap with the etcd client configuration.
+      configMapName: ztunnel-membership-etcd
+      # -- kubernetes.io/tls Secret with the writer's client certificate.
+      secretName: ztunnel-membership-writer
+      certManager:
+        # -- Issue secretName with cert-manager: ECDSA P-256, a new key at each renewal.
+        enabled: false
+        # -- Name of the Certificate.
+        name: ztunnel-membership-writer
+        # -- Issuer of the Certificate. Empty uses clustermesh.apiserver.tls.auto.certManagerIssuerRef.
+        issuerRef: {}
+        # -- Lifetime of the certificate.
+        duration: 24h
+        # -- Time before expiry at which cert-manager renews it.
+        renewBefore: 1h
+    # -- Experimental: read the workload membership of remote clusters directly
+    # from their clustermesh-apiserver etcd, as the read-only etcd user
+    # clientCommonName. Requires requireMtls and tls.caBundle.enabled.
+    remoteWorkloadMembership:
+      enabled: false
+      # -- Common name of the read-only client certificate; the remote etcd user.
+      clientCommonName: ztunnel-origin-reader
+      # -- ConfigMap with one etcd client configuration per peer.
+      configMapName: ztunnel-origin-config
+      # -- kubernetes.io/tls Secret with the reader's client certificate.
+      secretName: ztunnel-origin-reader
+      certManager:
+        # -- Issue secretName with cert-manager: ECDSA P-256, a new key at each renewal.
+        enabled: false
+        # -- Name of the Certificate.
+        name: ztunnel-origin-reader
+        # -- Issuer of the Certificate. Empty uses clustermesh.apiserver.tls.auto.certManagerIssuerRef.
+        issuerRef: {}
+        # -- Lifetime of the certificate.
+        duration: 24h
+        # -- Time before expiry at which cert-manager renews it.
+        renewBefore: 1h
+      # -- Remote clusters to read: name (cluster.name of the peer), clusterID,
+      # port (its clustermesh-apiserver node port), ips (its node addresses, in
+      # the order to try) and spkiSha256 (SHA-256 pins of its server key).
+      peers: []
+    # -- Experimental issuer-profile admission (ztunnel and agent).
+    issuerProfile:
+      # -- Host directory with this node's issuer-profile pins (pins.json),
+      # written at node bootstrap. Mounted read-only into the agent and ztunnel.
+      probePinsDirectory: ""
+      # -- Host directory of ztunnel's issuer-profile checkpoint: durable
+      # anti-rollback state that must survive Pod and node restarts.
+      checkpointDirectory: ""
+      # -- Let ztunnel create the first checkpoint in an empty checkpointDirectory.
+      checkpointBootstrap: false
 endpointHealthChecking:
   # -- Enable connectivity health checking between virtual endpoints.
   enabled: true

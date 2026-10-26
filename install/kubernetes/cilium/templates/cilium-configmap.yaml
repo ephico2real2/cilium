@@ -788,6 +788,27 @@ data:
   ztunnel-ca-type: {{ .Values.encryption.ztunnel.ca.type | quote }}
   ztunnel-spire-external-exact-registrar: {{ .Values.encryption.ztunnel.ca.externalExactRegistrar | quote }}
   ztunnel-require-mtls: {{ .Values.encryption.ztunnel.requireMtls | quote }}
+    {{- if .Values.encryption.ztunnel.effectivePolicyQuarantine }}
+  ztunnel-effective-policy-quarantine: "true"
+    {{- end }}
+    {{- with .Values.encryption.ztunnel.dnsResolverLabels }}
+  ztunnel-dns-resolver-labels: {{ join "," . | quote }}
+    {{- end }}
+    {{- /* With mutual authentication, the mesh-auth block below writes the trust domain. */}}
+    {{- if and (eq .Values.encryption.ztunnel.ca.type "spire") .Values.encryption.ztunnel.spire.trustDomain (not .Values.authentication.mutual.spire.enabled) }}
+  mesh-auth-spiffe-trust-domain: {{ .Values.encryption.ztunnel.spire.trustDomain | quote }}
+    {{- end }}
+    {{- if .Values.encryption.ztunnel.sourceMembership.enabled }}
+  ztunnel-source-membership-etcd-config: /var/lib/cilium/ztunnel-membership/etcd.yaml
+    {{- end }}
+    {{- if .Values.encryption.ztunnel.remoteWorkloadMembership.enabled }}
+  ztunnel-enable-remote-workload-membership: "true"
+  ztunnel-remote-origin-config-dir: /var/lib/cilium/clustermesh-origin
+  ztunnel-remote-origin-client-common-name: {{ .Values.encryption.ztunnel.remoteWorkloadMembership.clientCommonName | quote }}
+    {{- end }}
+    {{- with .Values.encryption.ztunnel.issuerProfile.probePinsDirectory }}
+  ztunnel-issuer-profile-probe-pins: {{ printf "%s/pins.json" . | quote }}
+    {{- end }}
   {{- end }}
   {{- if .Values.encryption.nodeEncryption }}
   encrypt-node: {{ .Values.encryption.nodeEncryption | quote }}

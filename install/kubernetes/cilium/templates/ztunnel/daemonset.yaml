@@ -74,24 +74,25 @@ spec:
           env:
             - name: XDS_ADDRESS
               value: "https://localhost:15012"
+            {{- $rootCA := not (empty .Values.encryption.ztunnel.bootstrap.existingSecret) | ternary "/etc/ztunnel/bootstrap-ca.crt" "/etc/ztunnel/bootstrap-root.crt" }}
             - name: XDS_ROOT_CA
-              value: "/etc/ztunnel/bootstrap-root.crt"
+              value: {{ $rootCA | quote }}
             - name: CA_ROOT_CA
-              value: "/etc/ztunnel/bootstrap-root.crt"
+              value: {{ $rootCA | quote }}
             - name: CA_ADDRESS
               value: {{ .Values.encryption.ztunnel.caAddress | quote }}
             {{- if eq .Values.encryption.ztunnel.ca.type "spire" }}
             - name: SPIRE_ENABLED
               value: "true"
             - name: SPIRE_ADMIN_ENDPOINT_SOCKET
-              value: {{ printf "unix://%s" .Values.authentication.mutual.spire.adminSocketPath | quote }}
+              value: {{ printf "unix://%s" (include "cilium.ztunnel.spireSocketPath" .) | quote }}
             - name: CONTAINER_RUNTIME_SOCK_PATH
               value: {{ .Values.encryption.ztunnel.spire.containerRuntimeSocketPath | quote }}
             - name: TRUST_DOMAIN
-              value: {{ .Values.authentication.mutual.spire.trustDomain | quote }}
+              value: {{ include "cilium.ztunnel.spireTrustDomain" . | quote }}
             # The pinned SPIRE client selects its bundle using cluster_domain.
             - name: CLUSTER_DOMAIN
-              value: {{ .Values.authentication.mutual.spire.trustDomain | quote }}
+              value: {{ include "cilium.ztunnel.spireTrustDomain" . | quote }}
             {{- end }}
             - name: ISTIO_META_DNS_CAPTURE
               value: "false"
@@ -111,6 +112,30 @@ spec:
                   fieldPath: status.podIP
             - name: ISTIO_META_ENABLE_HBONE
               value: "true"
+            {{- if .Values.encryption.ztunnel.mesh.clusters }}
+            # Strict mesh: every non-exempt destination in these ranges is reached over HBONE only.
+            # REQUIRE_INBOUND_MTLS repeats proxy-mtls; it keeps the environment a complete record.
+            - name: CLUSTER_ID
+              value: {{ .Values.cluster.name | quote }}
+            - name: REQUIRE_INBOUND_MTLS
+              value: "true"
+            - name: REQUIRE_MESH_HBONE
+              value: "true"
+            - name: MESH_EGRESS_CONFIG
+              value: {{ include "cilium.ztunnel.meshEgressConfig" .Values.encryption.ztunnel.mesh | quote }}
+            {{- end }}
+            {{- with .Values.encryption.ztunnel.issuerProfile }}
+            {{- if .probePinsDirectory }}
+            - name: ISSUER_PROFILE_PROBE_PINS
+              value: {{ printf "%s/pins.json" .probePinsDirectory | quote }}
+            {{- end }}
+            {{- if .checkpointDirectory }}
+            - name: ISSUER_PROFILE_CHECKPOINT_DIR
+              value: {{ .checkpointDirectory | quote }}
+            - name: ISSUER_PROFILE_CHECKPOINT_BOOTSTRAP
+              value: {{ .checkpointBootstrap | quote }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.encryption.ztunnel.extraEnv }}
             {{- toYaml . | trim | nindent 12 }}
             {{- end }}
@@ -154,11 +179,22 @@ spec:
               readOnly: true
             {{- if eq .Values.encryption.ztunnel.ca.type "spire" }}
             - name: spire-agent-socket
-              mountPath: {{ dir .Values.authentication.mutual.spire.adminSocketPath }}
+              mountPath: {{ dir (include "cilium.ztunnel.spireSocketPath" .) }}
               readOnly: true
             - name: container-runtime-socket
               mountPath: {{ .Values.encryption.ztunnel.spire.containerRuntimeSocketPath | quote }}
               readOnly: true
+            {{- end }}
+            {{- with .Values.encryption.ztunnel.issuerProfile }}
+            {{- with .probePinsDirectory }}
+            - name: issuer-pins
+              mountPath: {{ . }}
+              readOnly: true
+            {{- end }}
+            {{- with .checkpointDirectory }}
+            - name: issuer-checkpoint
+              mountPath: {{ . }}
+            {{- end }}
             {{- end }}
             {{- with .Values.encryption.ztunnel.extraVolumeMounts }}
             {{- toYaml . | nindent 12 }}
@@ -190,6 +226,17 @@ spec:
             path: /var/run/cilium
             type: DirectoryOrCreate
         - name: cilium-ztunnel-secrets
+          {{- with .Values.encryption.ztunnel.bootstrap.existingSecret }}
+          projected:
+            defaultMode: 420
+            sources:
+              - secret:
+                  name: {{ . }}
+                  items:
+                    - key: tls.crt
+                      path: bootstrap-root.crt
+              {{- include "cilium.ztunnel.caBundleSource" (list $ "bootstrap-ca.crt") | nindent 14 }}
+          {{- else }}
           secret:
             secretName: cilium-ztunnel-secrets
             defaultMode: 420
@@ -197,15 +244,30 @@ spec:
               - key: bootstrap-root.crt
                 path: bootstrap-root.crt
                 mode: 420
+          {{- end }}
         {{- if eq .Values.encryption.ztunnel.ca.type "spire" }}
         - name: spire-agent-socket
           hostPath:
-            path: {{ dir .Values.authentication.mutual.spire.adminSocketPath }}
+            path: {{ dir (include "cilium.ztunnel.spireSocketPath" .) }}
             type: DirectoryOrCreate
         - name: container-runtime-socket
           hostPath:
             path: {{ .Values.encryption.ztunnel.spire.containerRuntimeSocketPath | quote }}
             type: Socket
+        {{- end }}
+        {{- with .Values.encryption.ztunnel.issuerProfile }}
+        {{- with .probePinsDirectory }}
+        - name: issuer-pins
+          hostPath:
+            path: {{ . }}
+            type: Directory
+        {{- end }}
+        {{- with .checkpointDirectory }}
+        - name: issuer-checkpoint
+          hostPath:
+            path: {{ . }}
+            type: Directory
+        {{- end }}
         {{- end }}
         {{- with .Values.encryption.ztunnel.extraVolumes }}
         {{- toYaml . | nindent 8 }}

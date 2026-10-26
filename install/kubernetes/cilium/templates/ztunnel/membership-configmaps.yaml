@@ -1,0 +1,62 @@
+{{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") }}
+{{- $z := .Values.encryption.ztunnel }}
+{{- if $z.sourceMembership.enabled }}
+---
+# etcd client configuration of the dedicated source-membership connection to the local
+# clustermesh-apiserver. The agent mounts it with the trust bundle and the writer certificate.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $z.sourceMembership.configMapName }}
+  namespace: {{ include "cilium.namespace" . }}
+  {{- with .Values.commonLabels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $z.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  etcd.yaml: |
+    endpoints:
+    - https://clustermesh-apiserver.{{ include "cilium.namespace" . }}.svc:{{ .Values.clustermesh.apiserver.service.port }}
+    trusted-ca-file: /var/lib/cilium/ztunnel-membership/ca.crt
+    cert-file: /var/lib/cilium/ztunnel-membership/tls.crt
+    key-file: /var/lib/cilium/ztunnel-membership/tls.key
+{{- end }}
+{{- if $z.remoteWorkloadMembership.enabled }}
+---
+# One etcd client configuration per remote cluster, for direct-origin membership reads.
+# Each peer's clustermesh-apiserver is reached by its <name>.mesh.cilium.io alias (a name
+# in its server certificate) at the listed node addresses; its server key is pinned.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $z.remoteWorkloadMembership.configMapName }}
+  namespace: {{ include "cilium.namespace" . }}
+  {{- with .Values.commonLabels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $z.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  {{- range $z.remoteWorkloadMembership.peers }}
+  {{ .name }}: |
+    endpoints:
+    - https://{{ .name }}.mesh.cilium.io:{{ .port }}
+    trusted-ca-file: /var/lib/cilium/clustermesh-origin/ca.crt
+    cert-file: /var/lib/cilium/clustermesh-origin/tls.crt
+    key-file: /var/lib/cilium/clustermesh-origin/tls.key
+    cilium-host-aliases:
+    - hostname: {{ .name }}.mesh.cilium.io
+      ips: {{ include "cilium.ztunnel.flowList" .ips }}
+    cilium-remote-peer:
+      cluster-id: {{ .clusterID }}
+      spki-sha256: {{ include "cilium.ztunnel.flowList" .spkiSha256 }}
+  {{- end }}
+{{- end }}
+{{- end }}

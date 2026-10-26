@@ -1,0 +1,54 @@
+{{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") }}
+{{- $z := .Values.encryption.ztunnel }}
+{{- /*
+The ztunnel certificates that cert-manager issues: the agent's xDS and CA server, and the
+source-membership writer and origin reader etcd clients. Each gets a new key at renewal.
+*/}}
+{{- $certs := list }}
+{{- if $z.bootstrap.certManager.enabled }}
+{{- $certs = append $certs (dict "spec" $z.bootstrap.certManager "secretName" $z.bootstrap.existingSecret "commonName" "localhost" "server" true) }}
+{{- end }}
+{{- if and $z.sourceMembership.enabled $z.sourceMembership.certManager.enabled }}
+{{- $certs = append $certs (dict "spec" $z.sourceMembership.certManager "secretName" $z.sourceMembership.secretName "commonName" (printf "ztunnel-membership-writer-%s" .Values.cluster.name) "server" false) }}
+{{- end }}
+{{- if and $z.remoteWorkloadMembership.enabled $z.remoteWorkloadMembership.certManager.enabled }}
+{{- $certs = append $certs (dict "spec" $z.remoteWorkloadMembership.certManager "secretName" $z.remoteWorkloadMembership.secretName "commonName" $z.remoteWorkloadMembership.clientCommonName "server" false) }}
+{{- end }}
+{{- range $certs }}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .spec.name }}
+  namespace: {{ include "cilium.namespace" $ }}
+  {{- with $.Values.commonLabels }}
+  labels:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with $z.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  secretName: {{ .secretName }}
+  commonName: {{ .commonName }}
+  {{- if .server }}
+  # ztunnel reaches the agent's xDS and CA server on the node's loopback.
+  dnsNames:
+    - localhost
+  ipAddresses:
+    - 127.0.0.1
+  {{- end }}
+  usages:
+    - digital signature
+    - {{ .server | ternary "server auth" "client auth" }}
+  duration: {{ .spec.duration | quote }}
+  renewBefore: {{ .spec.renewBefore | quote }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    {{- include "cilium.ztunnel.certManagerIssuerRef" (list .spec.issuerRef $) | nindent 4 }}
+{{- end }}
+{{- end }}

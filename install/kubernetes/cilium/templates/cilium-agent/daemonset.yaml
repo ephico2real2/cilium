@@ -391,6 +391,24 @@ spec:
         {{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") }}
         - name: cilium-ztunnel-secrets
           mountPath: /etc/ztunnel
+          {{- if .Values.encryption.ztunnel.bootstrap.existingSecret }}
+          readOnly: true
+          {{- end }}
+        {{- if .Values.encryption.ztunnel.sourceMembership.enabled }}
+        - name: ztunnel-membership
+          mountPath: /var/lib/cilium/ztunnel-membership
+          readOnly: true
+        {{- end }}
+        {{- if .Values.encryption.ztunnel.remoteWorkloadMembership.enabled }}
+        - name: ztunnel-origin
+          mountPath: /var/lib/cilium/clustermesh-origin
+          readOnly: true
+        {{- end }}
+        {{- with .Values.encryption.ztunnel.issuerProfile.probePinsDirectory }}
+        - name: ztunnel-issuer-pins
+          mountPath: {{ . }}
+          readOnly: true
+        {{- end }}
         {{- end }}
         {{- if .Values.kubeConfigPath }}
         - name: kube-config
@@ -1052,6 +1070,15 @@ spec:
       {{- if and .Values.encryption.enabled (eq .Values.encryption.type "ztunnel") }}
       - name: cilium-ztunnel-secrets
         secret:
+          {{- with .Values.encryption.ztunnel.bootstrap.existingSecret }}
+          secretName: {{ . }}
+          defaultMode: 0600
+          items:
+            - key: tls.key
+              path: bootstrap-private.key
+            - key: tls.crt
+              path: bootstrap-root.crt
+          {{- else }}
           secretName: cilium-ztunnel-secrets
           items:
             - key: bootstrap-private.key
@@ -1064,6 +1091,55 @@ spec:
             - key: ca-root.crt
               path: ca-root.crt
             {{- end }}
+          {{- end }}
+      {{- if .Values.encryption.ztunnel.sourceMembership.enabled }}
+      - name: ztunnel-membership
+        projected:
+          defaultMode: 0600
+          sources:
+            - configMap:
+                name: {{ .Values.encryption.ztunnel.sourceMembership.configMapName }}
+                items:
+                  - key: etcd.yaml
+                    path: etcd.yaml
+            {{- include "cilium.ztunnel.caBundleSource" (list $ "ca.crt") | nindent 12 }}
+            - secret:
+                name: {{ .Values.encryption.ztunnel.sourceMembership.secretName }}
+                items:
+                  - key: tls.crt
+                    path: tls.crt
+                  - key: tls.key
+                    path: tls.key
+      {{- end }}
+      {{- with .Values.encryption.ztunnel.remoteWorkloadMembership }}
+      {{- if .enabled }}
+      - name: ztunnel-origin
+        projected:
+          defaultMode: 0600
+          sources:
+            - configMap:
+                name: {{ .configMapName }}
+                items:
+                  {{- range .peers }}
+                  - key: {{ .name }}
+                    path: {{ .name }}
+                  {{- end }}
+            {{- include "cilium.ztunnel.caBundleSource" (list $ "ca.crt") | nindent 12 }}
+            - secret:
+                name: {{ .secretName }}
+                items:
+                  - key: tls.crt
+                    path: tls.crt
+                  - key: tls.key
+                    path: tls.key
+      {{- end }}
+      {{- end }}
+      {{- with .Values.encryption.ztunnel.issuerProfile.probePinsDirectory }}
+      - name: ztunnel-issuer-pins
+        hostPath:
+          path: {{ . }}
+          type: Directory
+      {{- end }}
       {{- end }}
       {{- if .Values.cni.configMap }}
       - name: cni-configuration
