@@ -66,26 +66,33 @@ jobs:
             sleep 10
           done
           exit 1
-      - name: Reuse complete native images already built locally from this source
+      # Each role is reused when its image of this source already exists, and only a missing role is built, so a
+      # published tag is never pushed again (adding a role to an existing source does not rebuild the others).
+      - name: Reuse native images already built from this source
         id: existing
         env:
           ARCH: ${{ matrix.arch }}
         run: |
-          reuse=true
+          missing=false
           for role in agent operator-generic clustermesh-apiserver hubble-relay; do
             image="$IMAGE_REPOSITORY:sha-$SOURCE_SHA-$role-$ARCH"
-            if ! docker pull "$image"; then reuse=false; break; fi
-            revision=$(docker inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
-            platform=$(docker inspect "$image" --format '{{.Os}}/{{.Architecture}}')
-            [ "$revision" = "$SOURCE_SHA" ] && [ "$platform" = "linux/$ARCH" ] || exit 1
+            build=false
+            if docker pull "$image"; then
+              revision=$(docker inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
+              platform=$(docker inspect "$image" --format '{{.Os}}/{{.Architecture}}')
+              [ "$revision" = "$SOURCE_SHA" ] && [ "$platform" = "linux/$ARCH" ] || exit 1
+            else
+              build=true missing=true
+            fi
+            echo "build-$role=$build" >> "$GITHUB_OUTPUT"
           done
-          if [ "$ARCH" = arm64 ] && [ "$REQUIRE_LOCAL_ARM64" = true ] && [ "$reuse" != true ]; then exit 1; fi
-          echo "reuse=$reuse" >> "$GITHUB_OUTPUT"
+          if [ "$ARCH" = arm64 ] && [ "$REQUIRE_LOCAL_ARM64" = true ] && [ "$missing" = true ]; then exit 1; fi
+          echo "missing=$missing" >> "$GITHUB_OUTPUT"
       - name: Prepare exact native build context
-        if: steps.existing.outputs.reuse != 'true'
+        if: steps.existing.outputs.missing == 'true'
         run: make -C source GIT_VERSION images/cilium/Dockerfile.dockerignore images/operator/Dockerfile.dockerignore images/clustermesh-apiserver/Dockerfile.dockerignore images/hubble-relay/Dockerfile.dockerignore
       - name: Build and push agent
-        if: steps.existing.outputs.reuse != 'true'
+        if: steps.existing.outputs.build-agent == 'true'
         uses: docker/build-push-action@v6
         with:
           context: source
@@ -100,7 +107,7 @@ jobs:
           cache-from: type=gha,scope=cmtc-agent-${{ matrix.arch }}
           cache-to: type=gha,scope=cmtc-agent-${{ matrix.arch }},mode=max
       - name: Build and push operator
-        if: steps.existing.outputs.reuse != 'true'
+        if: steps.existing.outputs.build-operator-generic == 'true'
         uses: docker/build-push-action@v6
         with:
           context: source
@@ -116,7 +123,7 @@ jobs:
           cache-from: type=gha,scope=cmtc-operator-generic-${{ matrix.arch }}
           cache-to: type=gha,scope=cmtc-operator-generic-${{ matrix.arch }},mode=max
       - name: Build and push ClusterMesh API server
-        if: steps.existing.outputs.reuse != 'true'
+        if: steps.existing.outputs.build-clustermesh-apiserver == 'true'
         uses: docker/build-push-action@v6
         with:
           context: source
@@ -131,7 +138,7 @@ jobs:
           cache-from: type=gha,scope=cmtc-clustermesh-apiserver-${{ matrix.arch }}
           cache-to: type=gha,scope=cmtc-clustermesh-apiserver-${{ matrix.arch }},mode=max
       - name: Build and push Hubble Relay
-        if: steps.existing.outputs.reuse != 'true'
+        if: steps.existing.outputs.build-hubble-relay == 'true'
         uses: docker/build-push-action@v6
         with:
           context: source
