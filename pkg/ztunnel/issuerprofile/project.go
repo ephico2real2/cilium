@@ -34,6 +34,8 @@ type DERIssuer struct {
 	CertificateDER []byte   `json:"certificateDER"`
 	SPKISHA256     string   `json:"spkiSHA256"`
 	LineageDER     [][]byte `json:"lineageDER,omitempty"`
+	// SignsSPIRECA: the pin is the cluster's SPIRE intermediate (see Issuer).
+	SignsSPIRECA bool `json:"signsSPIRECA,omitempty"`
 }
 type DERCluster struct {
 	ClusterID   string      `json:"clusterID"`
@@ -312,7 +314,7 @@ func project(p *Publication, e Install) ([]byte, error) {
 				if len(cert.Raw) > 24576 {
 					return nil, errors.New("issuer DER exceeds wire certificate bound")
 				}
-				projected := DERIssuer{CertificateDER: bytes.Clone(cert.Raw), SPKISHA256: SHA(cert.RawSubjectPublicKeyInfo)}
+				projected := DERIssuer{CertificateDER: bytes.Clone(cert.Raw), SPKISHA256: SHA(cert.RawSubjectPublicKeyInfo), SignsSPIRECA: issuer.SignsSPIRECA}
 				if issuer.ChainPEM != "" {
 					parent, err := oneCertificate(issuer.ChainPEM)
 					if err != nil {

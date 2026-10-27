@@ -4,6 +4,7 @@
 package issuerprofile
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -250,4 +251,99 @@ func reissueLineageParent(t *testing.T, old, parent *lineageTestCA) *lineageTest
 		t.Fatal(err)
 	}
 	return &lineageTestCA{cert: cert, key: old.key, pem: canonical(cert)}
+}
+
+// intermediateApproval pins each cluster's SPIRE intermediate (signsSPIRECA), as cert-manager issues it under the root.
+func intermediateApproval(t *testing.T, rootDepth, intermediateDepth int) (Approval, []string, time.Time, *lineageTestCA, []*lineageTestCA) {
+	t.Helper()
+	now := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC)
+	root := lineageCA(t, "mesh root", nil, now, rootDepth, nil)
+	a := Approval{SchemaVersion: 1, Generation: 8, ExpiresAt: Stamp(now.Add(time.Hour)), Roots: []Root{{CertificatePEM: root.pem, SHA256: SHA(root.cert.Raw)}}}
+	var intermediates []*lineageTestCA
+	for _, id := range []string{"cmtc-a", "cmtc-b"} {
+		intermediate := lineageCA(t, id+" SPIRE intermediate", root, now, intermediateDepth, nil)
+		intermediates = append(intermediates, intermediate)
+		a.Clusters = append(a.Clusters, Cluster{ClusterID: id, TrustDomain: id + ".mesh.example", Issuers: []Issuer{{CertificatePEM: intermediate.pem, SPKISHA256: SHA(intermediate.cert.RawSubjectPublicKeyInfo), RootSHA256: a.Roots[0].SHA256, SignsSPIRECA: true}}})
+	}
+	return a, []string{a.Roots[0].SHA256}, now, root, intermediates
+}
+
+func TestSPIREIntermediatePinIsApprovedAndBoundsTheApproval(t *testing.T) {
+	// -1 leaves the path length unset, as cert-manager does for the mesh root and the SPIRE intermediates.
+	a, pins, now, _, intermediates := intermediateApproval(t, -1, -1)
+	valid, err := checkLineage(t, a, pins, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := valid.Approval.Clusters[0].Issuers[0]
+	if !issuer.SignsSPIRECA || issuer.ChainPEM != "" || issuer.CertificatePEM != intermediates[0].pem {
+		t.Fatalf("intermediate pin not kept as approved: %+v", issuer)
+	}
+	plain, _, _, _, _ := intermediateApproval(t, -1, -1)
+	for i := range plain.Clusters {
+		plain.Clusters[i].Issuers[0].SignsSPIRECA = false
+	}
+	body, err := json.Marshal(plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, []byte("signsSPIRECA")) {
+		t.Fatal("an approval without the flag must encode as before, so its digest is unchanged")
+	}
+}
+
+func TestRejectSPIREIntermediatePinWithoutRoomForOneSPIRECA(t *testing.T) {
+	for name, change := range map[string]func(t *testing.T) (Approval, []string, time.Time){
+		"a chain as well": func(t *testing.T) (Approval, []string, time.Time) {
+			a, pins, now, root, _ := intermediateApproval(t, -1, -1)
+			parent := lineageCA(t, "extra parent", root, now, -1, nil)
+			intermediate := lineageCA(t, "cmtc-a SPIRE intermediate", parent, now, -1, nil)
+			a.Clusters[0].Issuers[0] = Issuer{CertificatePEM: intermediate.pem, ChainPEM: parent.pem, SPKISHA256: SHA(intermediate.cert.RawSubjectPublicKeyInfo), RootSHA256: a.Roots[0].SHA256, SignsSPIRECA: true}
+			return a, pins, now
+		},
+		"intermediate path length zero": func(t *testing.T) (Approval, []string, time.Time) {
+			a, pins, now, _, _ := intermediateApproval(t, -1, 0)
+			return a, pins, now
+		},
+		"root path length one": func(t *testing.T) (Approval, []string, time.Time) {
+			a, pins, now, _, _ := intermediateApproval(t, 1, -1)
+			return a, pins, now
+		},
+		"intermediate not signed by the root": func(t *testing.T) (Approval, []string, time.Time) {
+			a, pins, now, _, _ := intermediateApproval(t, -1, -1)
+			other := lineageCA(t, "other root", nil, now, -1, nil)
+			intermediate := lineageCA(t, "cmtc-a SPIRE intermediate", other, now, -1, nil)
+			a.Clusters[0].Issuers[0] = Issuer{CertificatePEM: intermediate.pem, SPKISHA256: SHA(intermediate.cert.RawSubjectPublicKeyInfo), RootSHA256: a.Roots[0].SHA256, SignsSPIRECA: true}
+			return a, pins, now
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, pins, now := change(t)
+			if _, err := checkLineage(t, a, pins, now); err == nil {
+				t.Fatal("accepted")
+			}
+		})
+	}
+}
+
+func TestSPIREIntermediatePinIsProjectedForZtunnel(t *testing.T) {
+	a, pins, now, _, _ := intermediateApproval(t, -1, -1)
+	valid, err := checkLineage(t, a, pins, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := &Publication{State: "published", Reason: "Validated", Approval: &valid.Approval, PublishedAt: Stamp(now), ValidUntil: Stamp(now.Add(MaxLease))}
+	body, err := project(p, Install{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wire DERProfile
+	if err = json.Unmarshal(body, &wire); err != nil {
+		t.Fatal(err)
+	}
+	for _, cluster := range wire.Clusters {
+		if len(cluster.Issuers) != 1 || !cluster.Issuers[0].SignsSPIRECA || len(cluster.Issuers[0].LineageDER) != 0 {
+			t.Fatalf("%s: the SPIRE intermediate pin must reach ztunnel with signsSPIRECA and no lineage", cluster.ClusterID)
+		}
+	}
 }

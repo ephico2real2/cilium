@@ -45,11 +45,18 @@ type Root struct {
 	CertificatePEM string `json:"certificatePEM"`
 	SHA256         string `json:"sha256"`
 }
+
+// Issuer pins one CA of a cluster. By default it is SPIRE's own signing CA,
+// which signs the SVIDs. With SignsSPIRECA it is the cluster's SPIRE
+// intermediate instead, directly under the root: SPIRE rotates its signing CA
+// below it, and ztunnel accepts exactly one CA between this pin and an SVID.
+// The field order matches the CMTC producer, so both compute the same digest.
 type Issuer struct {
 	CertificatePEM string `json:"certificatePEM"`
 	ChainPEM       string `json:"chainPEM,omitempty"`
 	SPKISHA256     string `json:"spkiSHA256"`
 	RootSHA256     string `json:"rootSHA256"`
+	SignsSPIRECA   bool   `json:"signsSPIRECA,omitempty"`
 }
 type Cluster struct {
 	ClusterID   string   `json:"clusterID"`
@@ -132,7 +139,7 @@ func decodeBounded(data []byte, out any, limit int) error {
 		return errors.New("bounded nonempty JSON required")
 	}
 	allowed := map[string]bool{}
-	for s := range strings.FieldsSeq("schemaVersion generation expiresAt roots clusters certificatePEM sha256 clusterID trustDomain issuers chainPEM spkiSHA256 rootSHA256 sequence state reason producerCluster outputUID expectedSourceUID source namespace name uid resourceVersion acceptedGeneration acceptedSourceUID acceptedApprovalDigest approvalDigest approval publishedAt validUntil digest") {
+	for s := range strings.FieldsSeq("schemaVersion generation expiresAt roots clusters certificatePEM sha256 clusterID trustDomain issuers chainPEM spkiSHA256 rootSHA256 signsSPIRECA sequence state reason producerCluster outputUID expectedSourceUID source namespace name uid resourceVersion acceptedGeneration acceptedSourceUID acceptedApprovalDigest approvalDigest approval publishedAt validUntil digest") {
 		allowed[s] = true
 	}
 	d := json.NewDecoder(bytes.NewReader(data))
@@ -370,6 +377,10 @@ func Validate(data []byte, rootPins []string, localCluster string, now time.Time
 			}
 			if e := caCurrentForDomain(cert, now, c.TrustDomain); e != nil {
 				return nil, invalid("SourceInvalid", e)
+			}
+			// The SVID path is root -> this intermediate -> SPIRE CA -> SVID.
+			if pin.SignsSPIRECA && (pin.ChainPEM != "" || !caDepthAllows(root, 2) || !caDepthAllows(cert, 1)) {
+				return nil, invalid("SourceInvalid", errors.New("SPIRE intermediate must be directly under the root, with path depth for one SPIRE CA"))
 			}
 
 			intermediatePool := x509.NewCertPool()
