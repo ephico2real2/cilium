@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Full fork commit to publish (agent, operator, mesh and matching chart)
+        description: Full fork commit to publish (agent, operator, mesh, Hubble Relay and matching chart)
         type: string
         required: true
         default: 93041b3f7ec55ff12c83ecd266f14fb392ea5c93
@@ -72,7 +72,7 @@ jobs:
           ARCH: ${{ matrix.arch }}
         run: |
           reuse=true
-          for role in agent operator-generic clustermesh-apiserver; do
+          for role in agent operator-generic clustermesh-apiserver hubble-relay; do
             image="$IMAGE_REPOSITORY:sha-$SOURCE_SHA-$role-$ARCH"
             if ! docker pull "$image"; then reuse=false; break; fi
             revision=$(docker inspect "$image" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')
@@ -83,7 +83,7 @@ jobs:
           echo "reuse=$reuse" >> "$GITHUB_OUTPUT"
       - name: Prepare exact native build context
         if: steps.existing.outputs.reuse != 'true'
-        run: make -C source GIT_VERSION images/cilium/Dockerfile.dockerignore images/operator/Dockerfile.dockerignore images/clustermesh-apiserver/Dockerfile.dockerignore
+        run: make -C source GIT_VERSION images/cilium/Dockerfile.dockerignore images/operator/Dockerfile.dockerignore images/clustermesh-apiserver/Dockerfile.dockerignore images/hubble-relay/Dockerfile.dockerignore
       - name: Build and push agent
         if: steps.existing.outputs.reuse != 'true'
         uses: docker/build-push-action@v6
@@ -130,18 +130,35 @@ jobs:
             org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
           cache-from: type=gha,scope=cmtc-clustermesh-apiserver-${{ matrix.arch }}
           cache-to: type=gha,scope=cmtc-clustermesh-apiserver-${{ matrix.arch }},mode=max
+      - name: Build and push Hubble Relay
+        if: steps.existing.outputs.reuse != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: source
+          file: source/images/hubble-relay/Dockerfile
+          target: release
+          platforms: linux/${{ matrix.arch }}
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:sha-${{ env.SOURCE_SHA }}-hubble-relay-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/ephico2real2/cilium
+            org.opencontainers.image.revision=${{ env.SOURCE_SHA }}
+          cache-from: type=gha,scope=cmtc-hubble-relay-${{ matrix.arch }}
+          cache-to: type=gha,scope=cmtc-hubble-relay-${{ matrix.arch }},mode=max
       - name: Verify published native images and binary version
         env:
           ARCH: ${{ matrix.arch }}
         run: |
           mkdir -p evidence
-          for role in agent operator-generic clustermesh-apiserver; do
+          for role in agent operator-generic clustermesh-apiserver hubble-relay; do
             image="$IMAGE_REPOSITORY:sha-$SOURCE_SHA-$role-$ARCH"
             docker pull "$image"
             docker inspect "$image" > "evidence/$role.json"
           done
           docker run --rm --entrypoint cilium-dbg "$IMAGE_REPOSITORY:sha-$SOURCE_SHA-agent-$ARCH" version | tee evidence/cilium-version.txt
           grep -F "${SOURCE_SHA:0:8}" evidence/cilium-version.txt
+          docker run --rm --entrypoint hubble-relay "$IMAGE_REPOSITORY:sha-$SOURCE_SHA-hubble-relay-$ARCH" version | tee evidence/hubble-relay-version.txt
+          grep -F "${SOURCE_SHA:0:8}" evidence/hubble-relay-version.txt
       - name: Retain native source and binary evidence
         uses: actions/upload-artifact@v4
         with:
@@ -167,7 +184,7 @@ jobs:
       - name: Publish multi-architecture source tags and immutable lock
         run: |
           mkdir -p bundle
-          for role in agent operator-generic clustermesh-apiserver; do
+          for role in agent operator-generic clustermesh-apiserver hubble-relay; do
             tag="$IMAGE_REPOSITORY:sha-$SOURCE_SHA-$role"
             docker buildx imagetools create --tag "$tag" \
               "$tag-amd64" "$tag-arm64"
@@ -177,7 +194,7 @@ jobs:
           import json,os,pathlib
           p=pathlib.Path('bundle');sha=os.environ['SOURCE_SHA'];repo=os.environ['IMAGE_REPOSITORY']
           images={}
-          for role in ('agent','operator-generic','clustermesh-apiserver'):
+          for role in ('agent','operator-generic','clustermesh-apiserver','hubble-relay'):
               manifest=json.loads((p/(role+'.json')).read_text())
               digest=manifest['digest']
               images[role]={'image':repo+'@'+digest,'tag':f'{repo}:sha-{sha}-{role}'}
