@@ -38,6 +38,8 @@ type originCertFixture struct {
 	caPath     string
 	certPath   string
 	keyPath    string
+	caKey      *ecdsa.PrivateKey
+	caCert     *x509.Certificate
 }
 
 func newOriginCertFixture(t *testing.T, leafNotAfter time.Time, eku []x509.ExtKeyUsage) originCertFixture {
@@ -62,19 +64,42 @@ func newOriginCertFixture(t *testing.T, leafNotAfter time.Time, eku []x509.ExtKe
 		t.Fatal(err)
 	}
 	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER})
+	caCert, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := originCertFixture{
+		dir:      dir,
+		caPath:   filepath.Join(dir, "ca.pem"),
+		certPath: filepath.Join(dir, "client.pem"),
+		keyPath:  filepath.Join(dir, "client-key.pem"),
+		caKey:    caKey,
+		caCert:   caCert,
+	}
+	writeOriginSecretFile(t, fixture.caPath, caPEM, 0o400)
+	renewOriginLeaf(t, fixture, leafNotAfter, eku)
+	fixture.configPath = filepath.Join(dir, "cluster-beta")
+	writeOriginEtcdConfig(t, fixture, "https://etcd.example.test:2379", 17, strings.Repeat("01", sha256.Size), nil)
+	return fixture
+}
+
+// renewOriginLeaf writes a new client certificate and key signed by the
+// fixture's CA: what cert-manager's renewal with rotationPolicy Always does.
+func renewOriginLeaf(t *testing.T, fixture originCertFixture, leafNotAfter time.Time, eku []x509.ExtKeyUsage) {
+	t.Helper()
 	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	leafTemplate := &x509.Certificate{
-		SerialNumber: big.NewInt(2),
+		SerialNumber: big.NewInt(time.Now().UnixNano()),
 		Subject:      pkix.Name{CommonName: "ztunnel-origin-reader"},
-		NotBefore:    now.Add(-time.Hour),
+		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     leafNotAfter,
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  eku,
 	}
-	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, caTemplate, &leafKey.PublicKey, caKey)
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, fixture.caCert, &leafKey.PublicKey, fixture.caKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,18 +109,8 @@ func newOriginCertFixture(t *testing.T, leafNotAfter time.Time, eku []x509.ExtKe
 		t.Fatal(err)
 	}
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
-	fixture := originCertFixture{
-		dir:      dir,
-		caPath:   filepath.Join(dir, "ca.pem"),
-		certPath: filepath.Join(dir, "client.pem"),
-		keyPath:  filepath.Join(dir, "client-key.pem"),
-	}
-	writeOriginSecretFile(t, fixture.caPath, caPEM, 0o400)
 	writeOriginSecretFile(t, fixture.certPath, certPEM, 0o400)
 	writeOriginSecretFile(t, fixture.keyPath, keyPEM, 0o400)
-	fixture.configPath = filepath.Join(dir, "cluster-beta")
-	writeOriginEtcdConfig(t, fixture, "https://etcd.example.test:2379", 17, strings.Repeat("01", sha256.Size), nil)
-	return fixture
 }
 
 func newOriginCertFixtureWithShortIntermediate(t *testing.T) (originCertFixture, time.Time) {
@@ -665,7 +680,25 @@ type testOriginBackend struct {
 	closeOnce    sync.Once
 	closeStarted chan struct{}
 	closeRelease chan struct{}
+	// refresh stands in for the etcd client's in-place TLS re-handshake.
+	refresh      func(ctx context.Context, grace time.Duration) (kvstore.RemotePeerEvidence, error)
+	refreshCalls atomic.Int32
 }
+
+func (b *testOriginBackend) RefreshRemotePeerTransport(ctx context.Context, grace time.Duration) (kvstore.RemotePeerEvidence, error) {
+	b.refreshCalls.Add(1)
+	if b.refresh == nil {
+		return nil, errors.New("test backend has no transport refresh")
+	}
+	return b.refresh(ctx, grace)
+}
+
+// plainOriginBackend cannot re-handshake in place (no RemotePeerTransportRefresher).
+type plainOriginBackend struct {
+	kvstore.BackendOperations
+}
+
+func (plainOriginBackend) Close() {}
 
 func (b *testOriginBackend) Close() {
 	b.closeOnce.Do(func() {
@@ -686,6 +719,9 @@ type fakeOriginOpener struct {
 	openErr    error
 	failNext   atomic.Int32
 	newBackend func() *testOriginBackend
+	// backendOps, when set, is the connection's backend instead of a
+	// testOriginBackend (for a backend without a transport refresh).
+	backendOps func() kvstore.BackendOperations
 }
 
 func (o *fakeOriginOpener) Open(context.Context, *slog.Logger, OriginPeerConfig) (*OriginPeerConnection, error) {
@@ -699,6 +735,10 @@ func (o *fakeOriginOpener) Open(context.Context, *slog.Logger, OriginPeerConfig)
 	evidence, err := o.evidence.CurrentRemotePeerEvidence()
 	if err != nil {
 		return nil, err
+	}
+	if o.backendOps != nil {
+		o.opens.Add(1)
+		return &OriginPeerConnection{Backend: o.backendOps(), Evidence: o.evidence, RemoteConfig: requiredRemoteClusterConfig(17), ProfileID: evidence.ProfileID(), IdentityEpoch: evidence.IdentityEpoch()}, nil
 	}
 	backend := &testOriginBackend{}
 	if o.newBackend != nil {
@@ -716,10 +756,16 @@ type blockingOriginWatch struct {
 	calls        atomic.Int32
 	ignoreCancel bool
 	release      chan struct{}
+	// listsOnStart reports a complete initial list as soon as Run starts.
+	listsOnStart bool
+	listed       atomic.Bool
 }
+
+func (w *blockingOriginWatch) Listed() bool { return w.listed.Load() }
 
 func (w *blockingOriginWatch) Run(ctx context.Context, _ OriginPeerConfig, _ *OriginPeerConnection) error {
 	call := int(w.calls.Add(1))
+	w.listed.Store(w.listsOnStart)
 	w.started <- call
 	if w.ignoreCancel {
 		<-w.release
@@ -732,12 +778,19 @@ func (w *blockingOriginWatch) Run(ctx context.Context, _ OriginPeerConfig, _ *Or
 type failFirstOriginWatch struct {
 	started chan int
 	calls   atomic.Int32
+	// listsBeforeFailing makes the first, failing run report a complete list.
+	listsBeforeFailing bool
+	listed             atomic.Bool
 }
+
+func (w *failFirstOriginWatch) Listed() bool { return w.listed.Load() }
 
 func (w *failFirstOriginWatch) Run(ctx context.Context, _ OriginPeerConfig, _ *OriginPeerConnection) error {
 	call := int(w.calls.Add(1))
+	w.listed.Store(false)
 	w.started <- call
 	if call == 1 {
+		w.listed.Store(w.listsBeforeFailing)
 		return errors.New("simulated origin watch disconnect")
 	}
 	<-ctx.Done()
@@ -1160,6 +1213,308 @@ func TestOriginEndpointValidationRejectsMalformedPorts(t *testing.T) {
 				t.Fatalf("invalid endpoint %q was accepted", endpoint)
 			}
 		})
+	}
+}
+
+func TestFilesystemOriginPeerConfigLoaderSeparatesTrustAndCredentialFingerprints(t *testing.T) {
+	eku := []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth}
+	fixture := newOriginCertFixture(t, time.Now().Add(time.Hour), eku)
+	loader := originTestConfigLoader(fixture.dir)
+	before, err := loader.Load("cluster-beta", 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.CredentialFingerprint == [sha256.Size]byte{} {
+		t.Fatal("credential fingerprint was not computed")
+	}
+
+	// A renewal (new certificate and key, same CA, same config) changes only
+	// the credential fingerprint and the credential end.
+	renewOriginLeaf(t, fixture, time.Now().Add(2*time.Hour), eku)
+	renewed, err := loader.Load("cluster-beta", 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.Fingerprint != before.Fingerprint {
+		t.Fatal("a renewed client certificate changed the trust fingerprint; the session would restart")
+	}
+	if renewed.CredentialFingerprint == before.CredentialFingerprint {
+		t.Fatal("a renewed client certificate did not change the credential fingerprint")
+	}
+	if !renewed.ClientCertificateEnd.After(before.ClientCertificateEnd) {
+		t.Fatalf("renewed credential end %s is not after %s", renewed.ClientCertificateEnd, before.ClientCertificateEnd)
+	}
+
+	// A change of the trusted CA bundle (a second root) is a trust change.
+	otherCA := newOriginCertFixture(t, time.Now().Add(time.Hour), eku)
+	otherPEM, err := os.ReadFile(otherCA.caPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownPEM, err := os.ReadFile(fixture.caPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeOriginSecretFile(t, fixture.caPath, append(ownPEM, otherPEM...), 0o400)
+	bundled, err := loader.Load("cluster-beta", 17)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundled.Fingerprint == renewed.Fingerprint {
+		t.Fatal("a changed trusted CA bundle did not change the trust fingerprint")
+	}
+	if bundled.CredentialFingerprint != renewed.CredentialFingerprint {
+		t.Fatal("a changed trusted CA bundle changed the credential fingerprint")
+	}
+}
+
+// renewedOriginProfile is validOriginProfile(trust) with a renewed client
+// credential: another credential fingerprint and a later chain end.
+func renewedOriginProfile(trust, credential byte, end time.Time) OriginPeerConfig {
+	profile := validOriginProfile(trust)
+	profile.CredentialFingerprint = [sha256.Size]byte{credential}
+	profile.ClientCertificateEnd = end
+	return profile
+}
+
+func waitForCount(t *testing.T, what string, counter *atomic.Int32, want int32) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for counter.Load() < want {
+		select {
+		case <-deadline:
+			t.Fatalf("%s: %d, want %d", what, counter.Load(), want)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+func TestOriginSupervisorKeepsSessionThroughCredentialOnlyChange(t *testing.T) {
+	loader := &mutableOriginLoader{profile: validOriginProfile(1)}
+	evidence := &mutableOriginEvidence{evidence: validOriginEvidence(1)}
+	backend := &testOriginBackend{}
+	backend.refresh = func(context.Context, time.Duration) (kvstore.RemotePeerEvidence, error) {
+		// The re-handshake sees the peer's renewed server leaf: same key,
+		// same epoch, later NotAfter.
+		renewed := validOriginEvidence(1)
+		renewed.notAfter = time.Now().Add(3 * time.Hour)
+		evidence.set(renewed)
+		return renewed, nil
+	}
+	opener := &fakeOriginOpener{evidence: evidence, newBackend: func() *testOriginBackend { return backend }}
+	watch := &blockingOriginWatch{started: make(chan int, 2)}
+	invalidator := &recordingOriginInvalidator{}
+	supervisor := newOriginSupervisor(loader, opener, watch, invalidator)
+	supervisor.RefreshRetry = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	run := make(chan error, 1)
+	go func() { run <- supervisor.Run(ctx, "cluster-beta", 17) }()
+	receiveWatchStart(t, watch.started, 1)
+
+	// cert-manager renews the client certificate: new certificate and key,
+	// the same CA, config and pin.
+	loader.set(renewedOriginProfile(1, 2, time.Now().Add(2*time.Hour)), nil)
+	waitForCount(t, "transport refreshes after a credential renewal", &backend.refreshCalls, 1)
+	// A few more polls: one renewal is one refresh.
+	time.Sleep(10 * supervisor.PollEvery)
+	cancel()
+	if err := receiveRunResult(t, run); err != nil {
+		t.Fatalf("normal cancellation returned an error: %v", err)
+	}
+	if got := backend.refreshCalls.Load(); got != 1 {
+		t.Fatalf("credential renewal refreshed the transport %d times, want 1", got)
+	}
+	if opener.opens.Load() != 1 || watch.calls.Load() != 1 {
+		t.Fatalf("credential renewal restarted the session: opens=%d watches=%d, want 1 and 1", opener.opens.Load(), watch.calls.Load())
+	}
+	if invalidator.contains(errOriginConfigChanged.Error()) || invalidator.contains("transport refresh failed") || invalidator.contains("lease expired") {
+		t.Fatalf("credential renewal withdrew the peer: %v", invalidator.reasons)
+	}
+	if backend.closed.Load() != 1 {
+		t.Fatalf("the one backend was closed %d times at shutdown, want 1", backend.closed.Load())
+	}
+}
+
+func TestOriginSupervisorRefreshesTransportBeforeTheLeaseEnds(t *testing.T) {
+	// The client credential lasts 5 h; the peer's server leaf ends in 1 h.
+	loader := &mutableOriginLoader{profile: renewedOriginProfile(1, 1, time.Now().Add(5*time.Hour))}
+	evidence := &mutableOriginEvidence{evidence: validOriginEvidence(1)}
+	backend := &testOriginBackend{}
+	backend.refresh = func(context.Context, time.Duration) (kvstore.RemotePeerEvidence, error) {
+		renewed := validOriginEvidence(1)
+		renewed.notAfter = time.Now().Add(3 * time.Hour)
+		evidence.set(renewed)
+		return renewed, nil
+	}
+	opener := &fakeOriginOpener{evidence: evidence, newBackend: func() *testOriginBackend { return backend }}
+	watch := &blockingOriginWatch{started: make(chan int, 2)}
+	invalidator := &recordingOriginInvalidator{}
+	supervisor := newOriginSupervisor(loader, opener, watch, invalidator)
+	// The lease (the server leaf, 1 h) is already inside the lead; the
+	// credential on disk does not change. After the refresh the lease is
+	// the renewed server leaf's (3 h), outside the lead: one refresh.
+	supervisor.RefreshLead = 2 * time.Hour
+	supervisor.RefreshRetry = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	run := make(chan error, 1)
+	go func() { run <- supervisor.Run(ctx, "cluster-beta", 17) }()
+	receiveWatchStart(t, watch.started, 1)
+	waitForCount(t, "transport refreshes before the lease end", &backend.refreshCalls, 1)
+	time.Sleep(10 * supervisor.PollEvery)
+	cancel()
+	if err := receiveRunResult(t, run); err != nil {
+		t.Fatalf("normal cancellation returned an error: %v", err)
+	}
+	if got := backend.refreshCalls.Load(); got != 1 {
+		t.Fatalf("lease-end refresh ran %d times, want 1 (the renewed server leaf moved the lease out of the lead)", got)
+	}
+	if opener.opens.Load() != 1 || invalidator.contains("lease expired") || invalidator.contains("identity epoch changed") {
+		t.Fatalf("lease-end refresh restarted or withdrew the session: opens=%d reasons=%v", opener.opens.Load(), invalidator.reasons)
+	}
+}
+
+func TestOriginSupervisorWithdrawsWhenTheTransportRefreshFails(t *testing.T) {
+	loader := &mutableOriginLoader{profile: validOriginProfile(1)}
+	evidence := &mutableOriginEvidence{evidence: validOriginEvidence(1)}
+	opener := &fakeOriginOpener{evidence: evidence, newBackend: func() *testOriginBackend {
+		return &testOriginBackend{refresh: func(context.Context, time.Duration) (kvstore.RemotePeerEvidence, error) {
+			return nil, errors.New("simulated: the peer refused the renewed client certificate")
+		}}
+	}}
+	watch := &blockingOriginWatch{started: make(chan int, 4)}
+	invalidator := &recordingOriginInvalidator{}
+	supervisor := newOriginSupervisor(loader, opener, watch, invalidator)
+	supervisor.RefreshRetry = time.Millisecond
+	ctx, cancel := context.WithCancel(context.Background())
+	run := make(chan error, 1)
+	go func() { run <- supervisor.Run(ctx, "cluster-beta", 17) }()
+	receiveWatchStart(t, watch.started, 1)
+	loader.set(renewedOriginProfile(1, 2, time.Now().Add(2*time.Hour)), nil)
+	// Fail closed: the old transport is gone and no handshake proved the
+	// peer, so the peer is withdrawn and a fresh session is opened.
+	receiveWatchStart(t, watch.started, 2)
+	cancel()
+	if err := receiveRunResult(t, run); err != nil {
+		t.Fatalf("normal cancellation returned an error: %v", err)
+	}
+	if !invalidator.contains("direct-origin transport refresh failed") {
+		t.Fatalf("failed refresh did not withdraw the peer: %v", invalidator.reasons)
+	}
+	if opener.opens.Load() != 2 {
+		t.Fatalf("failed refresh opened %d sessions, want 2", opener.opens.Load())
+	}
+	opener.mu.Lock()
+	defer opener.mu.Unlock()
+	if opener.backends[0].closed.Load() != 1 {
+		t.Fatal("the session whose refresh failed was not closed")
+	}
+}
+
+func TestOriginSupervisorWithdrawsAtTheLeaseEndWithoutARefresh(t *testing.T) {
+	start := time.Now()
+	var clock atomic.Pointer[time.Time]
+	clock.Store(&start)
+	now := func() time.Time { return *clock.Load() }
+
+	initial := validOriginProfile(1)
+	initial.ClientCertificateEnd = start.Add(time.Hour) // the credential the session handshook with
+	loader := &mutableOriginLoader{profile: initial}
+	peer := validOriginEvidence(1)
+	peer.notAfter = start.Add(5 * time.Hour)
+	peer.heartbeat = start
+	evidence := &mutableOriginEvidence{evidence: peer}
+	opener := &fakeOriginOpener{evidence: evidence, backendOps: func() kvstore.BackendOperations { return plainOriginBackend{} }}
+	watch := &blockingOriginWatch{started: make(chan int, 4)}
+	invalidator := &recordingOriginInvalidator{}
+	supervisor := newOriginSupervisor(loader, opener, watch, invalidator)
+	supervisor.Now = now
+	ctx, cancel := context.WithCancel(context.Background())
+	run := make(chan error, 1)
+	go func() { run <- supervisor.Run(ctx, "cluster-beta", 17) }()
+	receiveWatchStart(t, watch.started, 1)
+
+	// The credential is renewed on disk (valid for 4 h) but this backend
+	// cannot re-handshake in place. Two hours later the session's own
+	// credential has expired: the session must not outlive it.
+	loader.set(renewedOriginProfile(1, 2, start.Add(4*time.Hour)), nil)
+	later := start.Add(2 * time.Hour)
+	peer.heartbeat = later
+	evidence.set(peer)
+	clock.Store(&later)
+	receiveWatchStart(t, watch.started, 2)
+	cancel()
+	if err := receiveRunResult(t, run); err != nil {
+		t.Fatalf("normal cancellation returned an error: %v", err)
+	}
+	if !invalidator.contains("direct-origin session lease expired") {
+		t.Fatalf("expired session credential did not withdraw the peer: %v", invalidator.reasons)
+	}
+	if opener.opens.Load() != 2 {
+		t.Fatalf("lease expiry opened %d sessions, want 2", opener.opens.Load())
+	}
+}
+
+// lockedBuffer collects the supervisor's log lines across goroutines.
+type lockedBuffer struct {
+	mu  lock.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func TestOriginSupervisorRestartsBackoffAfterAListedSession(t *testing.T) {
+	restartDelay := func(t *testing.T, listed bool) string {
+		t.Helper()
+		logs := &lockedBuffer{}
+		loader := &mutableOriginLoader{profile: validOriginProfile(1)}
+		evidence := &mutableOriginEvidence{evidence: validOriginEvidence(1)}
+		opener := &fakeOriginOpener{evidence: evidence}
+		// Two refused connections (an earlier peer outage) ratchet the
+		// backoff from RetryMin to RetryMax before the session opens.
+		opener.failNext.Store(2)
+		watch := &failFirstOriginWatch{started: make(chan int, 2), listsBeforeFailing: listed}
+		invalidator := &recordingOriginInvalidator{}
+		supervisor := &OriginPeerSupervisor{
+			Logger: slog.New(slog.NewTextHandler(logs, nil)), Loader: loader, Opener: opener, Watch: watch, Invalidator: invalidator,
+			PollEvery: 5 * time.Millisecond, RetryMin: time.Millisecond, RetryMax: 4 * time.Millisecond, StopGrace: 20 * time.Millisecond,
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		run := make(chan error, 1)
+		go func() { run <- supervisor.Run(ctx, "cluster-beta", 17) }()
+		receiveWatchStart(t, watch.started, 1)
+		receiveWatchStart(t, watch.started, 2)
+		cancel()
+		if err := receiveRunResult(t, run); err != nil {
+			t.Fatalf("normal cancellation returned an error: %v", err)
+		}
+		for _, line := range strings.Split(logs.String(), "\n") {
+			if strings.Contains(line, "stage=restart-origin-watch") {
+				fields := strings.Fields(line)
+				for _, field := range fields {
+					if delay, ok := strings.CutPrefix(field, "retryDelay="); ok {
+						return delay
+					}
+				}
+			}
+		}
+		t.Fatalf("no restart-origin-watch log line with a retry delay:\n%s", logs.String())
+		return ""
+	}
+	if got := restartDelay(t, false); got != "4ms" {
+		t.Fatalf("a session that never listed restarted after %s, want the ratcheted 4ms", got)
+	}
+	if got := restartDelay(t, true); got != "1ms" {
+		t.Fatalf("a session that listed and served restarted after %s, want RetryMin 1ms", got)
 	}
 }
 

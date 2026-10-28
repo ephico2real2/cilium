@@ -25,6 +25,13 @@ func newPeerTLSFixture(t *testing.T, notAfter time.Time) (tls.Certificate, *x509
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	require.NoError(t, err)
+	return newPeerTLSFixtureWithKey(t, key, notAfter)
+}
+
+// newPeerTLSFixtureWithKey issues a self-signed server leaf for an existing
+// key: the renewal case, where the SPKI (and so the pin) does not change.
+func newPeerTLSFixtureWithKey(t *testing.T, key *ecdsa.PrivateKey, notAfter time.Time) (tls.Certificate, *x509.CertPool, string) {
+	t.Helper()
 	template := &x509.Certificate{
 		SerialNumber:          big.NewInt(42),
 		NotBefore:             time.Now().Add(-time.Minute),
@@ -210,4 +217,125 @@ func TestRemotePeerAdvertisedClusterIDMustMatchPinnedIdentity(t *testing.T) {
 	require.NoError(t, validateRemotePeerBinding(binding, "cluster-beta", 17))
 	require.ErrorContains(t, validateRemotePeerBinding(binding, "cluster-beta", 18), "does not match pinned ID")
 	require.ErrorContains(t, validateRemotePeerBinding(binding, "other", 17), "does not match configured name")
+}
+
+func TestRemotePeerTLSBindingKeepsEpochAcrossSameKeyRenewal(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	certA, rootsA, pin := newPeerTLSFixtureWithKey(t, key, time.Now().Add(time.Hour))
+	certB, rootsB, pinB := newPeerTLSFixtureWithKey(t, key, time.Now().Add(2*time.Hour))
+	require.Equal(t, pin, pinB, "a renewed leaf for the same key keeps its SPKI pin")
+	binding, err := newRemotePeerTLSBinding("cluster-beta", &RemotePeerIdentityConfig{ClusterID: 17, SPKISHA256: []string{pin}})
+	require.NoError(t, err)
+
+	oldConn, oldServer, err := openPinnedTLSConn(t, binding, certA, rootsA, "etcd.remote.test")
+	require.NoError(t, err)
+	first, err := binding.evidence(time.Now())
+	require.NoError(t, err)
+
+	// The renewed leaf on a second transport is the same identity. While both
+	// transports are active the lease is the earlier NotAfter: the new
+	// transport does not extend the old one.
+	newConn, newServer, err := openPinnedTLSConn(t, binding, certB, rootsB, "etcd.remote.test")
+	require.NoError(t, err)
+	both, err := binding.evidence(time.Now())
+	require.NoError(t, err)
+	require.Equal(t, first.IdentityEpoch(), both.IdentityEpoch())
+	require.WithinDuration(t, certA.Leaf.NotAfter, both.CertificateNotAfter(), time.Second)
+
+	// Once the old transport closes, the lease is the renewed leaf's, still
+	// in the same epoch: no relist is required for a renewal.
+	require.NoError(t, oldConn.Close())
+	require.NoError(t, oldServer.Close())
+	renewed, err := binding.evidence(time.Now())
+	require.NoError(t, err)
+	require.Equal(t, first.IdentityEpoch(), renewed.IdentityEpoch())
+	require.WithinDuration(t, certB.Leaf.NotAfter, renewed.CertificateNotAfter(), time.Second)
+	_ = newConn.Close()
+	_ = newServer.Close()
+}
+
+func TestRemotePeerTLSBindingRefreshClosesTransportsAndWaitsForTheNextHandshake(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	require.NoError(t, err)
+	certA, rootsA, pin := newPeerTLSFixtureWithKey(t, key, time.Now().Add(time.Hour))
+	certB, rootsB, _ := newPeerTLSFixtureWithKey(t, key, time.Now().Add(2*time.Hour))
+	binding, err := newRemotePeerTLSBinding("cluster-beta", &RemotePeerIdentityConfig{ClusterID: 17, SPKISHA256: []string{pin}})
+	require.NoError(t, err)
+	oldConn, oldServer, err := openPinnedTLSConn(t, binding, certA, rootsA, "etcd.remote.test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = oldConn.Close(); _ = oldServer.Close() })
+	before, err := binding.evidence(time.Now())
+	require.NoError(t, err)
+
+	type result struct {
+		proof remoteTLSProof
+		err   error
+	}
+	done := make(chan result, 1)
+	go func() {
+		proof, err := binding.refreshTransports(context.Background(), 2*time.Second, time.Now)
+		done <- result{proof: proof, err: err}
+	}()
+
+	// The refresh closes the old socket: the server side reads EOF.
+	require.NoError(t, oldServer.SetReadDeadline(time.Now().Add(2*time.Second)))
+	_, readErr := oldServer.Read(make([]byte, 1))
+	require.Error(t, readErr, "the refresh must close the authenticated socket")
+
+	// During the grace the closed transport's proof is still the evidence,
+	// bounded by its own NotAfter; it is not a lost peer.
+	during, err := binding.evidence(time.Now())
+	require.NoError(t, err)
+	require.Equal(t, before.IdentityEpoch(), during.IdentityEpoch())
+	require.WithinDuration(t, certA.Leaf.NotAfter, during.CertificateNotAfter(), time.Second)
+	_, err = binding.evidenceAt(time.Now(), certA.Leaf.NotAfter.Add(time.Second))
+	require.ErrorIs(t, err, errRemotePeerEvidenceUnavailable, "the grace never outlives the closed leaf")
+
+	// gRPC redials: the next handshake ends the refresh with the new proof.
+	newConn, newServer, err := openPinnedTLSConn(t, binding, certB, rootsB, "etcd.remote.test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = newConn.Close(); _ = newServer.Close() })
+	select {
+	case got := <-done:
+		require.NoError(t, got.err)
+		require.Equal(t, before.IdentityEpoch(), got.proof.identityEpoch)
+		require.WithinDuration(t, certB.Leaf.NotAfter, got.proof.notAfter, time.Second)
+	case <-time.After(3 * time.Second):
+		t.Fatal("refresh did not return after the new handshake")
+	}
+	after, err := binding.evidence(time.Now())
+	require.NoError(t, err)
+	require.WithinDuration(t, certB.Leaf.NotAfter, after.CertificateNotAfter(), time.Second)
+}
+
+func TestRemotePeerTLSBindingRefreshWithoutHandshakeFailsClosed(t *testing.T) {
+	cert, roots, pin := newPeerTLSFixture(t, time.Now().Add(time.Hour))
+	binding, err := newRemotePeerTLSBinding("cluster-beta", &RemotePeerIdentityConfig{ClusterID: 17, SPKISHA256: []string{pin}})
+	require.NoError(t, err)
+	conn, server, err := openPinnedTLSConn(t, binding, cert, roots, "etcd.remote.test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close(); _ = server.Close() })
+
+	_, err = binding.refreshTransports(context.Background(), 50*time.Millisecond, time.Now)
+	require.ErrorIs(t, err, errRemotePeerRefreshTimedOut)
+	_, err = binding.evidence(time.Now())
+	require.ErrorIs(t, err, errRemotePeerEvidenceUnavailable, "after a refresh without a handshake the peer is unproven")
+
+	// A canceled refresh ends the grace the same way.
+	again, againServer, err := openPinnedTLSConn(t, binding, cert, roots, "etcd.remote.test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = again.Close(); _ = againServer.Close() })
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = binding.refreshTransports(ctx, time.Second, time.Now)
+	require.ErrorIs(t, err, context.Canceled)
+	_, err = binding.evidence(time.Now())
+	require.ErrorIs(t, err, errRemotePeerEvidenceUnavailable)
+
+	// Nothing to refresh: no transport was ever proven.
+	empty, err := newRemotePeerTLSBinding("cluster-beta", &RemotePeerIdentityConfig{ClusterID: 17, SPKISHA256: []string{pin}})
+	require.NoError(t, err)
+	_, err = empty.refreshTransports(context.Background(), time.Second, time.Now)
+	require.ErrorContains(t, err, "cannot refresh an unverified remote peer transport")
 }

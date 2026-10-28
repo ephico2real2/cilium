@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"google.golang.org/grpc"
 	"sigs.k8s.io/yaml"
@@ -45,24 +46,46 @@ const (
 	originRetryMax       = 10 * time.Second
 	originConnectTimeout = 30 * time.Second
 	originStopGrace      = 2 * time.Second
-	logOriginStage       = "stage"
+	// originRefreshLead is how long before the session lease ends the
+	// supervisor re-handshakes the transport. cert-manager must renew the
+	// client certificate earlier than this (the chart's renewBefore is 1 h).
+	originRefreshLead = 10 * time.Minute
+	// originRefreshGrace bounds a transport refresh: the time the previous
+	// transport's evidence stays usable while gRPC redials, and the time a
+	// refresh may take before the session is withdrawn.
+	originRefreshGrace = 5 * time.Second
+	// originRefreshRetry is the least time between two refreshes of one
+	// session, so that a lease that a refresh could not extend (the renewed
+	// credential is not on disk yet) does not redial on every poll.
+	originRefreshRetry = time.Minute
+	logOriginStage     = "stage"
+	logOriginLeaseEnd  = "leaseEnd"
 )
 
 var errOriginConfigChanged = errors.New("origin configuration changed")
+var errOriginLeaseExpired = errors.New("origin session lease expired without a fresh TLS handshake")
 var errOriginWatchDidNotStop = errors.New("direct-origin watch did not stop after backend close")
 var errOriginFactoryDidNotStop = errors.New("direct-origin client factory did not stop after cancellation")
 
 // OriginPeerConfig is an immutable, secret-safe view of one direct-origin
 // ClusterMesh client profile. It intentionally omits all key and certificate
-// bytes. Fingerprint covers the config and all referenced TLS files.
+// bytes. Fingerprint covers the trust of the session: the peer name and
+// ClusterID, the config file (endpoints, pin, host aliases, file names) and
+// the trusted CA bundle; a change restarts the session with a withdrawal.
+// CredentialFingerprint covers the client certificate and key only: a change
+// is a renewal, which the session takes up with a transport refresh, not a
+// restart (the etcd client reloads these files at every TLS handshake).
+// ClientCertificateEnd is the end of the shortest verified chain of the
+// credential on disk now.
 type OriginPeerConfig struct {
-	Name                 string
-	ExpectedClusterID    uint32
-	Path                 string
-	Fingerprint          [sha256.Size]byte
-	ClientCertificateEnd time.Time
-	RemotePeer           *kvstore.RemotePeerIdentityConfig
-	HostAliases          []common.HostAlias
+	Name                  string
+	ExpectedClusterID     uint32
+	Path                  string
+	Fingerprint           [sha256.Size]byte
+	CredentialFingerprint [sha256.Size]byte
+	ClientCertificateEnd  time.Time
+	RemotePeer            *kvstore.RemotePeerIdentityConfig
+	HostAliases           []common.HostAlias
 }
 
 // OriginPeerConfigLoader loads a direct-origin file from a separate, read-only
@@ -159,6 +182,7 @@ func (l FilesystemOriginPeerConfigLoader) Load(name string, expectedClusterID ui
 	writeOriginHashPart(hash, []byte(name))
 	writeOriginHashPart(hash, []byte(strconv.FormatUint(uint64(expectedClusterID), 10)))
 	writeOriginHashPart(hash, configBytes)
+	credentialHash := sha256.New()
 	tlsContents := make(map[string][]byte, 3)
 	for _, filePath := range []string{etcdConfig.TrustedCAFile, etcdConfig.CertFile, etcdConfig.KeyFile} {
 		if !filepath.IsAbs(filePath) {
@@ -176,12 +200,14 @@ func (l FilesystemOriginPeerConfigLoader) Load(name string, expectedClusterID ui
 			return OriginPeerConfig{}, fmt.Errorf("origin TLS files must not be group- or world-readable")
 		}
 		writeOriginHashPart(hash, []byte(filepath.Base(filePath)))
-		writeOriginHashPart(hash, contents)
 		tlsContents[filePath] = contents
 		if filePath == etcdConfig.TrustedCAFile {
+			writeOriginHashPart(hash, contents)
 			if !trustedRoots.AppendCertsFromPEM(contents) {
 				return OriginPeerConfig{}, fmt.Errorf("origin trusted CA file contains no valid PEM certificates")
 			}
+		} else {
+			writeOriginHashPart(credentialHash, contents)
 		}
 	}
 	pair, err := tls.X509KeyPair(tlsContents[etcdConfig.CertFile], tlsContents[etcdConfig.KeyFile])
@@ -241,13 +267,14 @@ func (l FilesystemOriginPeerConfigLoader) Load(name string, expectedClusterID ui
 	}
 
 	return OriginPeerConfig{
-		Name:                 name,
-		ExpectedClusterID:    expectedClusterID,
-		Path:                 resolvedPath,
-		Fingerprint:          hashOriginDigest(hash.Sum(nil)),
-		ClientCertificateEnd: clientCertificateEnd,
-		RemotePeer:           etcdConfig.CiliumRemotePeer,
-		HostAliases:          etcdConfig.CiliumHostAliases,
+		Name:                  name,
+		ExpectedClusterID:     expectedClusterID,
+		Path:                  resolvedPath,
+		Fingerprint:           hashOriginDigest(hash.Sum(nil)),
+		CredentialFingerprint: hashOriginDigest(credentialHash.Sum(nil)),
+		ClientCertificateEnd:  clientCertificateEnd,
+		RemotePeer:            etcdConfig.CiliumRemotePeer,
+		HostAliases:           etcdConfig.CiliumHostAliases,
 	}, nil
 }
 
@@ -551,8 +578,11 @@ func waitRemoteClientReady(ctx context.Context, ready <-chan error) error {
 // OriginPeerWatchSession is one exact-prefix source watch. It must return only
 // when ctx is canceled or the underlying session has failed. Implementations
 // must withdraw the full previous snapshot on every invalid/end transition.
+// Listed reports whether the most recent Run delivered a complete initial
+// list; the supervisor restarts its retry backoff after such a session.
 type OriginPeerWatchSession interface {
 	Run(ctx context.Context, profile OriginPeerConfig, connection *OriginPeerConnection) error
+	Listed() bool
 }
 
 // IPIdentityOriginWatchSession reuses Inventory and WatchStore for one source
@@ -567,12 +597,20 @@ type IPIdentityOriginWatchSession struct {
 	mu          lock.Mutex
 	clusterName string
 	clusterID   uint32
+	listed      atomic.Bool
+}
+
+// Listed reports whether the most recent Run delivered a complete initial
+// list of the peer's IP identities.
+func (s *IPIdentityOriginWatchSession) Listed() bool {
+	return s != nil && s.listed.Load()
 }
 
 func (s *IPIdentityOriginWatchSession) Run(ctx context.Context, profile OriginPeerConfig, connection *OriginPeerConnection) error {
 	if s == nil || s.Factory == nil || s.Logger == nil || s.Joiner == nil || connection == nil || connection.Backend == nil || connection.Evidence == nil {
 		return fmt.Errorf("direct-origin watch session dependencies are incomplete")
 	}
+	s.listed.Store(false)
 	s.mu.Lock()
 	if s.clusterName == "" {
 		s.clusterName = profile.Name
@@ -588,6 +626,7 @@ func (s *IPIdentityOriginWatchSession) Run(ctx context.Context, profile OriginPe
 	if err != nil {
 		return err
 	}
+	inventory.SetOnListDone(func() { s.listed.Store(true) })
 	watch := s.Factory.NewWatchStore(
 		profile.Name,
 		func() store.Key { return &identity.IPIdentityPair{} },
@@ -625,6 +664,14 @@ type OriginPeerInvalidator interface {
 // OriginPeerSupervisor gives one peer's direct security watch its own backend,
 // config fingerprint, TLS evidence monitor, cancellation and bounded retry.
 // It does not own or change the KVStoreMesh route backend.
+//
+// A session's lease ends at the earlier of the client credential's chain end
+// and the peer's server leaf NotAfter, both as presented at the session's
+// last TLS handshake. Before the lease ends (RefreshLead), and when the client
+// credential files change, the supervisor refreshes the session's transport in
+// place through kvstore.RemotePeerTransportRefresher: no withdrawal, no new
+// list. A lease that ends without a fresh handshake, or a refresh that is not
+// followed by one within RefreshGrace, withdraws the peer.
 type OriginPeerSupervisor struct {
 	Logger         *slog.Logger
 	Loader         OriginPeerConfigLoader
@@ -636,7 +683,32 @@ type OriginPeerSupervisor struct {
 	RetryMax       time.Duration
 	StopGrace      time.Duration
 	ConnectTimeout time.Duration
+	RefreshLead    time.Duration
+	RefreshGrace   time.Duration
+	RefreshRetry   time.Duration
 	Now            func() time.Time
+}
+
+// originSessionLease is what the current TLS handshake of a session proves,
+// and when the supervisor last refreshed it.
+type originSessionLease struct {
+	// credentialEnd is the chain end of the client credential on disk when
+	// the session's transport last handshook. The presented certificate is
+	// the one the etcd client read from disk at that handshake, so the
+	// profile loaded at the same poll bounds it from below.
+	credentialEnd         time.Time
+	credentialFingerprint [sha256.Size]byte
+	refreshedAt           time.Time
+}
+
+// end is the lease end: the earlier of the client credential's chain end and
+// the peer's server leaf NotAfter as seen on the active transport.
+func (l originSessionLease) end(evidence kvstore.RemotePeerEvidence) time.Time {
+	end := l.credentialEnd
+	if evidence != nil && !evidence.CertificateNotAfter().IsZero() && evidence.CertificateNotAfter().Before(end) {
+		end = evidence.CertificateNotAfter()
+	}
+	return end
 }
 
 func (s *OriginPeerSupervisor) Run(ctx context.Context, peer string, expectedClusterID uint32) error {
@@ -666,6 +738,16 @@ func (s *OriginPeerSupervisor) Run(ctx context.Context, peer string, expectedClu
 	if connectTimeout <= 0 {
 		connectTimeout = originConnectTimeout
 	}
+	refresh := originRefreshPolicy{lead: s.RefreshLead, grace: s.RefreshGrace, retry: s.RefreshRetry}
+	if refresh.lead <= 0 {
+		refresh.lead = originRefreshLead
+	}
+	if refresh.grace <= 0 {
+		refresh.grace = originRefreshGrace
+	}
+	if refresh.retry <= 0 {
+		refresh.retry = originRefreshRetry
+	}
 	now := s.Now
 	if now == nil {
 		now = time.Now
@@ -692,7 +774,7 @@ func (s *OriginPeerSupervisor) Run(ctx context.Context, peer string, expectedClu
 		// Withdraw any previously served state before opening a new source
 		// epoch. The opener may close a failed backend before returning.
 		s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, "direct-origin connection attempt started")
-		connection, cancelSession, err := s.openOriginSession(ctx, peer, expectedClusterID, profile, poll, connectTimeout, now)
+		connection, opened, cancelSession, err := s.openOriginSession(ctx, peer, expectedClusterID, profile, poll, connectTimeout, now)
 		if err != nil {
 			s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, "origin connection rejected: "+err.Error())
 			s.logRetry("connect-origin", peer, attempt, started, backoff, connectTimeout, err)
@@ -730,10 +812,16 @@ func (s *OriginPeerSupervisor) Run(ctx context.Context, peer string, expectedClu
 			continue
 		}
 
+		// The credential files may have changed while the connection opened;
+		// the handshake used one of the two, so the earlier end bounds it.
+		lease := originSessionLease{credentialEnd: profile.ClientCertificateEnd, credentialFingerprint: opened.CredentialFingerprint, refreshedAt: now()}
+		if opened.ClientCertificateEnd.Before(lease.credentialEnd) {
+			lease.credentialEnd = opened.ClientCertificateEnd
+		}
 		watchCtx, cancel := context.WithCancel(ctx)
 		watchDone := make(chan error, 1)
 		go func() { watchDone <- s.Watch.Run(watchCtx, profile, connection) }()
-		watchErr, watchReturned := s.monitorSession(ctx, cancel, peer, expectedClusterID, profile, connection, watchDone, poll, now)
+		watchErr, watchReturned := s.monitorSession(ctx, cancel, peer, expectedClusterID, profile, lease, refresh, connection, watchDone, poll, now)
 		// Withdraw before cancellation or backend cleanup: stopSession may wait
 		// through both grace periods and Backend.Close can block on active I/O.
 		s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, "direct-origin watch invalidated: "+watchErr.Error())
@@ -748,6 +836,11 @@ func (s *OriginPeerSupervisor) Run(ctx context.Context, peer string, expectedClu
 		}
 		if ctx.Err() != nil {
 			break
+		}
+		if s.Watch.Listed() {
+			// The session listed and served: the peer was reachable. An earlier
+			// outage must not make this restart wait its ratcheted delay.
+			backoff = retryMin
 		}
 		s.logRetry("restart-origin-watch", peer, attempt, started, backoff, connectTimeout, err)
 		if !waitForRemoteWatchRetry(ctx, backoff) {
@@ -769,7 +862,9 @@ type originOpenResult struct {
 
 // openOriginSession bounds both initial connection and config validation while
 // checking projected config rotation during the open. sessionCtx is retained
-// on success and is canceled only when this watch epoch is withdrawn.
+// on success and is canceled only when this watch epoch is withdrawn. On
+// success it also returns the profile as loaded after the connection opened,
+// so that the session lease can be bounded by the credential on disk then.
 func (s *OriginPeerSupervisor) openOriginSession(
 	ctx context.Context,
 	peer string,
@@ -778,7 +873,7 @@ func (s *OriginPeerSupervisor) openOriginSession(
 	poll time.Duration,
 	timeout time.Duration,
 	now func() time.Time,
-) (*OriginPeerConnection, context.CancelFunc, error) {
+) (*OriginPeerConnection, OriginPeerConfig, context.CancelFunc, error) {
 	sessionCtx, cancelSession := context.WithCancel(ctx)
 	opened := make(chan originOpenResult)
 	go func() {
@@ -801,20 +896,20 @@ func (s *OriginPeerSupervisor) openOriginSession(
 		case result := <-opened:
 			if result.err != nil {
 				cancelSession()
-				return nil, nil, result.err
+				return nil, OriginPeerConfig{}, nil, result.err
 			}
 			if err := attemptCtx.Err(); err != nil {
 				cancelSession()
 				if result.connection != nil {
 					result.connection.Close()
 				}
-				return nil, nil, err
+				return nil, OriginPeerConfig{}, nil, err
 			}
 			current, err := s.Loader.Load(peer, expectedClusterID)
 			if err == nil {
 				err = validateOriginPeerProfile(current, peer, expectedClusterID, now())
 			}
-			if err != nil || current.Fingerprint != initial.Fingerprint || current.ClientCertificateEnd != initial.ClientCertificateEnd {
+			if err != nil || current.Fingerprint != initial.Fingerprint {
 				if err == nil {
 					err = errOriginConfigChanged
 				}
@@ -823,40 +918,54 @@ func (s *OriginPeerSupervisor) openOriginSession(
 				if result.connection != nil {
 					result.connection.Close()
 				}
-				return nil, nil, fmt.Errorf("origin config changed during connection: %w", err)
+				return nil, OriginPeerConfig{}, nil, fmt.Errorf("origin config changed during connection: %w", err)
 			}
-			return result.connection, cancelSession, nil
+			return result.connection, current, cancelSession, nil
 		case <-ticker.C:
 			current, err := s.Loader.Load(peer, expectedClusterID)
 			if err == nil {
 				err = validateOriginPeerProfile(current, peer, expectedClusterID, now())
 			}
-			if err != nil || current.Fingerprint != initial.Fingerprint || current.ClientCertificateEnd != initial.ClientCertificateEnd {
+			if err != nil || current.Fingerprint != initial.Fingerprint {
 				if err == nil {
 					err = errOriginConfigChanged
 				}
 				s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, "origin config changed during connection: "+err.Error())
 				cancelSession()
-				return nil, nil, fmt.Errorf("origin config changed during connection: %w", err)
+				return nil, OriginPeerConfig{}, nil, fmt.Errorf("origin config changed during connection: %w", err)
 			}
 		case <-attemptCtx.Done():
 			s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, "direct-origin connection attempt deadline exceeded")
 			cancelSession()
-			return nil, nil, fmt.Errorf("direct-origin connection attempt exceeded its deadline: %w", attemptCtx.Err())
+			return nil, OriginPeerConfig{}, nil, fmt.Errorf("direct-origin connection attempt exceeded its deadline: %w", attemptCtx.Err())
 		case <-ctx.Done():
 			s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, "direct-origin connection attempt canceled")
 			cancelSession()
-			return nil, nil, ctx.Err()
+			return nil, OriginPeerConfig{}, nil, ctx.Err()
 		}
 	}
 }
 
+// originRefreshPolicy is when and how a session's transport is refreshed.
+type originRefreshPolicy struct {
+	lead  time.Duration
+	grace time.Duration
+	retry time.Duration
+}
+
+// monitorSession polls the on-disk profile and the live TLS evidence of one
+// session until the watch ends or the session must be withdrawn. A trust
+// change (Fingerprint), an invalid profile, a changed TLS identity, expired
+// evidence and an expired lease end the session. A credential-only change and
+// an approaching lease end refresh the transport in place.
 func (s *OriginPeerSupervisor) monitorSession(
 	ctx context.Context,
 	cancel context.CancelFunc,
 	peer string,
 	expectedClusterID uint32,
 	initial OriginPeerConfig,
+	lease originSessionLease,
+	refresh originRefreshPolicy,
 	connection *OriginPeerConnection,
 	watchDone <-chan error,
 	poll time.Duration,
@@ -864,6 +973,11 @@ func (s *OriginPeerSupervisor) monitorSession(
 ) (error, bool) {
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+	withdraw := func(reason string, err error) (error, bool) {
+		s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, reason+": "+err.Error())
+		cancel()
+		return fmt.Errorf("%s: %w", reason, err), false
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -879,35 +993,103 @@ func (s *OriginPeerSupervisor) monitorSession(
 				err = validateOriginPeerProfile(currentProfile, peer, expectedClusterID, now())
 			}
 			if err != nil {
-				s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, "origin config became invalid: "+err.Error())
-				cancel()
-				return fmt.Errorf("origin config became invalid: %w", err), false
+				return withdraw("origin config became invalid", err)
 			}
-			if currentProfile.Fingerprint != initial.Fingerprint || currentProfile.ClientCertificateEnd != initial.ClientCertificateEnd {
+			if currentProfile.Fingerprint != initial.Fingerprint {
 				s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, errOriginConfigChanged.Error())
 				cancel()
 				return errOriginConfigChanged, false
 			}
-			evidence, err := connection.Evidence.CurrentRemotePeerEvidence()
-			if err == nil && evidence == nil {
-				err = fmt.Errorf("remote peer evidence provider returned no evidence")
+			evidence, err := s.currentSessionEvidence(peer, expectedClusterID, initial, connection, now())
+			if err != nil {
+				return withdraw("direct-origin peer evidence expired or changed", err)
 			}
-			if err == nil && (evidence.ClusterName() != peer || evidence.ClusterID() != expectedClusterID || evidence.ProfileID() != connection.ProfileID || !originProfileAllowsSPKI(initial, evidence.SPKIHash())) {
-				err = fmt.Errorf("direct-origin TLS identity no longer matches pinned cluster profile")
+			at := now()
+			leaseEnd := lease.end(evidence)
+			if !at.Before(leaseEnd) {
+				return withdraw("direct-origin session lease expired", fmt.Errorf("%w: lease ended %s", errOriginLeaseExpired, leaseEnd.UTC().Format(time.RFC3339)))
 			}
-			if err == nil && evidence.IdentityEpoch() != connection.IdentityEpoch {
-				err = fmt.Errorf("direct-origin TLS identity epoch changed; a new full list is required")
+			credentialChanged := currentProfile.CredentialFingerprint != lease.credentialFingerprint
+			leaseEnding := !at.Before(leaseEnd.Add(-refresh.lead))
+			if !credentialChanged && !leaseEnding {
+				continue
 			}
+			if at.Sub(lease.refreshedAt) < refresh.retry {
+				continue
+			}
+			refresher, ok := connection.Backend.(kvstore.RemotePeerTransportRefresher)
+			if !ok {
+				// The backend cannot re-handshake in place; the lease end above
+				// withdraws the session and the restart presents the new files.
+				s.Logger.Warn("Direct-origin backend cannot refresh its TLS transport; the session ends at its lease end",
+					logfields.LogSubsys, "ztunnel-remote-workload-origin",
+					logOriginStage, "refresh-origin-transport",
+					logfields.ClusterName, peer,
+					logOriginLeaseEnd, leaseEnd,
+				)
+				lease.refreshedAt = at
+				continue
+			}
+			started := at
+			refreshed, err := refresher.RefreshRemotePeerTransport(ctx, refresh.grace)
 			if err == nil {
-				err = evidence.Validate(now())
+				// The new transport must prove the same pinned identity; a
+				// changed epoch (a new server key) is caught on the next poll
+				// and relisted as before.
+				_, err = s.currentSessionEvidence(peer, expectedClusterID, initial, connection, now())
 			}
 			if err != nil {
-				s.Invalidator.InvalidateOriginPeer(peer, expectedClusterID, "direct-origin peer evidence expired or changed: "+err.Error())
-				cancel()
-				return fmt.Errorf("direct-origin peer evidence expired or changed: %w", err), false
+				// The previous transport is closed and no new handshake proved
+				// the peer: fail closed now rather than serve past the lease.
+				return withdraw("direct-origin transport refresh failed", err)
 			}
+			lease.credentialEnd = currentProfile.ClientCertificateEnd
+			lease.credentialFingerprint = currentProfile.CredentialFingerprint
+			lease.refreshedAt = now()
+			s.Logger.Info("Direct-origin transport refreshed in place; the session and its snapshot continue",
+				logfields.LogSubsys, "ztunnel-remote-workload-origin",
+				logOriginStage, "refresh-origin-transport",
+				logfields.ClusterName, peer,
+				logfields.Reason, originRefreshReason(credentialChanged, leaseEnding),
+				logfields.ElapsedDuration, time.Since(started),
+				logOriginLeaseEnd, lease.end(refreshed),
+				logfields.Expiration, refreshed.CertificateNotAfter(),
+			)
 		}
 	}
+}
+
+func originRefreshReason(credentialChanged, leaseEnding bool) string {
+	switch {
+	case credentialChanged && leaseEnding:
+		return "client credential renewed and lease ending"
+	case credentialChanged:
+		return "client credential renewed"
+	default:
+		return "lease ending"
+	}
+}
+
+// currentSessionEvidence is the live TLS evidence of the session's transport,
+// checked against the pinned profile and the identity the session opened with.
+func (s *OriginPeerSupervisor) currentSessionEvidence(peer string, expectedClusterID uint32, initial OriginPeerConfig, connection *OriginPeerConnection, now time.Time) (kvstore.RemotePeerEvidence, error) {
+	evidence, err := connection.Evidence.CurrentRemotePeerEvidence()
+	if err != nil {
+		return nil, err
+	}
+	if evidence == nil {
+		return nil, fmt.Errorf("remote peer evidence provider returned no evidence")
+	}
+	if evidence.ClusterName() != peer || evidence.ClusterID() != expectedClusterID || evidence.ProfileID() != connection.ProfileID || !originProfileAllowsSPKI(initial, evidence.SPKIHash()) {
+		return nil, fmt.Errorf("direct-origin TLS identity no longer matches pinned cluster profile")
+	}
+	if evidence.IdentityEpoch() != connection.IdentityEpoch {
+		return nil, fmt.Errorf("direct-origin TLS identity epoch changed; a new full list is required")
+	}
+	if err := evidence.Validate(now); err != nil {
+		return nil, err
+	}
+	return evidence, nil
 }
 
 func validateOriginPeerProfile(profile OriginPeerConfig, expectedName string, expectedID uint32, now time.Time) error {

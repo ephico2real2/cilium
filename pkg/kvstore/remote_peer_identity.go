@@ -70,18 +70,46 @@ type remotePeerTLSBinding struct {
 	nextConnID  uint64
 	lastProof   remoteTLSProof
 	hasProof    bool
-	connections map[uint64]remoteTLSProof
+	connections map[uint64]remotePeerActiveConn
+	// refreshing is set only by refreshTransports, between closing this
+	// client's sockets and the next recorded handshake. Until its deadline the
+	// evidence of the closed transport stays usable, so that a refresh the
+	// client started itself is not reported as a lost peer.
+	refreshing *remotePeerRefresh
+	// handshakes is closed and replaced by connectionOpened; refreshTransports
+	// waits on it for the handshake that follows a refresh.
+	handshakes chan struct{}
 }
 
 // remoteTLSProof is immutable evidence for one successful gRPC TLS connection.
-// Evidence is usable only while every active connection on this direct etcd
-// client has the same pinned leaf certificate. This conservative lease keeps
-// a newly opened connection from extending an older connection's lifetime.
+// The identity epoch changes only when the pinned leaf's public key (its SPKI)
+// changes; a leaf renewed for the same key is the same identity with a later
+// NotAfter. Evidence is usable only while every active connection on this
+// direct etcd client has the same identity, and its NotAfter is the earliest
+// one among them. This conservative lease keeps a newly opened connection from
+// extending an older connection's lifetime.
 type remoteTLSProof struct {
 	identityEpoch uint64
 	notAfter      time.Time
 	spki          [sha256.Size]byte
 }
+
+// remotePeerActiveConn is one authenticated transport: its proof and the
+// socket, so that refreshTransports can close it.
+type remotePeerActiveConn struct {
+	proof remoteTLSProof
+	conn  net.Conn
+}
+
+// remotePeerRefresh is the bounded grace between a refresh and its handshake.
+type remotePeerRefresh struct {
+	proof remoteTLSProof
+	until time.Time
+}
+
+// errRemotePeerRefreshTimedOut reports a transport refresh that was not
+// followed by a new TLS handshake before its deadline.
+var errRemotePeerRefreshTimedOut = errors.New("remote peer transport refresh was not followed by a new TLS handshake")
 
 // RemotePeerEvidence is a read-only view over one immutable local pin profile,
 // one verified leaf-certificate identity epoch that agrees across every active
@@ -139,6 +167,20 @@ type RemotePeerEvidenceProvider interface {
 	CurrentRemotePeerEvidence() (RemotePeerEvidence, error)
 }
 
+// RemotePeerTransportRefresher is implemented by the direct etcd backend with
+// a pinned peer profile. RefreshRemotePeerTransport closes every authenticated
+// transport of the client, so that the next RPC performs a new TLS handshake
+// with the credential files as they are on disk now, and returns once that
+// handshake has been recorded, with the evidence of the new transport. The
+// client, its watches and its leases stay open: the etcd watch client resumes
+// each watch at its last revision on the new transport. The evidence of the
+// closed transport stays usable until the new handshake or until grace ends,
+// whichever comes first; after a refresh without a handshake the evidence is
+// unavailable and the caller must fail closed.
+type RemotePeerTransportRefresher interface {
+	RefreshRemotePeerTransport(ctx context.Context, grace time.Duration) (RemotePeerEvidence, error)
+}
+
 // RemotePeerBindingInfo exposes the immutable admin-owned peer identity only
 // on a backend returned by RemotePeerBackendBinder. It is used to verify the
 // advertised Cilium ClusterID before watcher registration; it does not assert
@@ -178,6 +220,14 @@ func (b *authenticatedRemotePeerBackend) CurrentRemotePeerEvidence() (RemotePeer
 		return nil, err
 	}
 	return evidence, nil
+}
+
+func (b *authenticatedRemotePeerBackend) RefreshRemotePeerTransport(ctx context.Context, grace time.Duration) (RemotePeerEvidence, error) {
+	refresher, ok := b.BackendOperations.(RemotePeerTransportRefresher)
+	if !ok {
+		return nil, fmt.Errorf("remote etcd backend cannot refresh its TLS transport")
+	}
+	return refresher.RefreshRemotePeerTransport(ctx, grace)
 }
 
 func newRemotePeerTLSBinding(clusterName string, cfg *RemotePeerIdentityConfig) (*remotePeerTLSBinding, error) {
@@ -242,25 +292,31 @@ func (b *remotePeerTLSBinding) VerifyConnection(state tls.ConnectionState) error
 	return err
 }
 
-func (b *remotePeerTLSBinding) connectionOpened(state tls.ConnectionState) (uint64, error) {
+func (b *remotePeerTLSBinding) connectionOpened(state tls.ConnectionState, conn net.Conn) (uint64, error) {
 	proof, err := b.verifyState(state)
 	if err != nil {
 		return 0, err
 	}
 	b.proofMu.Lock()
 	defer b.proofMu.Unlock()
-	if !b.hasProof || b.lastProof.spki != proof.spki || !b.lastProof.notAfter.Equal(proof.notAfter) {
+	if !b.hasProof || b.lastProof.spki != proof.spki {
 		b.proofID++
-		b.lastProof = proof
-		b.lastProof.identityEpoch = b.proofID
 		b.hasProof = true
 	}
-	proof.identityEpoch = b.lastProof.identityEpoch
+	b.lastProof = proof
+	b.lastProof.identityEpoch = b.proofID
+	proof.identityEpoch = b.proofID
 	b.nextConnID++
 	if b.connections == nil {
-		b.connections = make(map[uint64]remoteTLSProof)
+		b.connections = make(map[uint64]remotePeerActiveConn)
 	}
-	b.connections[b.nextConnID] = proof
+	b.connections[b.nextConnID] = remotePeerActiveConn{proof: proof, conn: conn}
+	// A recorded handshake ends any refresh grace and wakes its waiter.
+	b.refreshing = nil
+	if b.handshakes != nil {
+		close(b.handshakes)
+		b.handshakes = nil
+	}
 	return b.nextConnID, nil
 }
 
@@ -272,8 +328,98 @@ func (b *remotePeerTLSBinding) connectionClosed(id uint64) {
 
 func (b *remotePeerTLSBinding) clearConnections() {
 	b.proofMu.Lock()
-	b.connections = make(map[uint64]remoteTLSProof)
+	b.connections = make(map[uint64]remotePeerActiveConn)
+	b.refreshing = nil
 	b.proofMu.Unlock()
+}
+
+// refreshTransports closes every active authenticated socket and waits, at
+// most grace, for the handshake of the transport that replaces it. While it
+// waits, evidenceAt reports the closed transport's proof so that a refresh the
+// client started is not seen as a lost peer. It returns the proof of the new
+// transport, or an error once grace or ctx ends without a handshake; the
+// grace is cleared on that error, so the evidence is then unavailable.
+func (b *remotePeerTLSBinding) refreshTransports(ctx context.Context, grace time.Duration, now func() time.Time) (remoteTLSProof, error) {
+	if b == nil {
+		return remoteTLSProof{}, errRemotePeerEvidenceUnavailable
+	}
+	b.proofMu.Lock()
+	proof, err := b.currentProofLocked(now())
+	if err != nil {
+		b.proofMu.Unlock()
+		return remoteTLSProof{}, fmt.Errorf("cannot refresh an unverified remote peer transport: %w", err)
+	}
+	sockets := make([]net.Conn, 0, len(b.connections))
+	for _, active := range b.connections {
+		sockets = append(sockets, active.conn)
+	}
+	b.connections = make(map[uint64]remotePeerActiveConn)
+	b.refreshing = &remotePeerRefresh{proof: proof, until: now().Add(grace)}
+	if b.handshakes == nil {
+		b.handshakes = make(chan struct{})
+	}
+	handshake := b.handshakes
+	b.proofMu.Unlock()
+
+	// Close outside the lock: the tracked wrapper's Close takes it again when
+	// gRPC notices the dead transport.
+	for _, socket := range sockets {
+		if socket != nil {
+			_ = socket.Close()
+		}
+	}
+
+	timer := time.NewTimer(grace)
+	defer timer.Stop()
+	select {
+	case <-handshake:
+	case <-timer.C:
+		b.endRefresh()
+		return remoteTLSProof{}, errRemotePeerRefreshTimedOut
+	case <-ctx.Done():
+		b.endRefresh()
+		return remoteTLSProof{}, ctx.Err()
+	}
+	b.proofMu.Lock()
+	defer b.proofMu.Unlock()
+	return b.currentProofLocked(now())
+}
+
+func (b *remotePeerTLSBinding) endRefresh() {
+	b.proofMu.Lock()
+	b.refreshing = nil
+	b.proofMu.Unlock()
+}
+
+// currentProofLocked is the lease over every active transport: one identity,
+// the earliest NotAfter. During a refresh grace with no active transport it is
+// the proof of the transport the refresh closed.
+func (b *remotePeerTLSBinding) currentProofLocked(now time.Time) (remoteTLSProof, error) {
+	if len(b.connections) == 0 {
+		if b.refreshing != nil && now.Before(b.refreshing.until) && now.Before(b.refreshing.proof.notAfter) {
+			return b.refreshing.proof, nil
+		}
+		return remoteTLSProof{}, errRemotePeerEvidenceUnavailable
+	}
+	var proof remoteTLSProof
+	first := true
+	for _, active := range b.connections {
+		if !now.Before(active.proof.notAfter) {
+			return remoteTLSProof{}, fmt.Errorf("pinned remote peer certificate expired at %s", active.proof.notAfter.UTC().Format(time.RFC3339))
+		}
+		if first {
+			proof = active.proof
+			first = false
+			continue
+		}
+		if active.proof.spki != proof.spki || active.proof.identityEpoch != proof.identityEpoch {
+			return remoteTLSProof{}, fmt.Errorf("multiple pinned TLS identities are active; remote peer lease is withdrawn until the old transport closes")
+		}
+		if active.proof.notAfter.Before(proof.notAfter) {
+			proof.notAfter = active.proof.notAfter
+		}
+	}
+	return proof, nil
 }
 
 func (b *remotePeerTLSBinding) evidence(lastHeartbeat time.Time) (RemotePeerEvidence, error) {
@@ -285,28 +431,11 @@ func (b *remotePeerTLSBinding) evidenceAt(lastHeartbeat, now time.Time) (RemoteP
 		return nil, errRemotePeerEvidenceUnavailable
 	}
 	b.proofMu.Lock()
-	if len(b.connections) == 0 {
-		b.proofMu.Unlock()
-		return nil, errRemotePeerEvidenceUnavailable
-	}
-	var proof remoteTLSProof
-	first := true
-	for _, active := range b.connections {
-		if !now.Before(active.notAfter) {
-			b.proofMu.Unlock()
-			return nil, fmt.Errorf("pinned remote peer certificate expired at %s", active.notAfter.UTC().Format(time.RFC3339))
-		}
-		if first {
-			proof = active
-			first = false
-			continue
-		}
-		if active.spki != proof.spki || !active.notAfter.Equal(proof.notAfter) || active.identityEpoch != proof.identityEpoch {
-			b.proofMu.Unlock()
-			return nil, fmt.Errorf("multiple pinned TLS identities are active; remote peer lease is withdrawn until the old transport closes")
-		}
-	}
+	proof, err := b.currentProofLocked(now)
 	b.proofMu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	e := remotePeerEvidence{
 		name: b.clusterName, id: b.clusterID,
 		identityEpoch: proof.identityEpoch, notAfter: proof.notAfter,
@@ -337,7 +466,7 @@ func (c *remotePeerTransportCredentials) ClientHandshake(ctx context.Context, au
 		_ = conn.Close()
 		return nil, nil, fmt.Errorf("remote etcd transport did not return TLS connection state")
 	}
-	id, err := c.binding.connectionOpened(tlsInfo.State)
+	id, err := c.binding.connectionOpened(tlsInfo.State, conn)
 	if err != nil {
 		_ = conn.Close()
 		return nil, nil, err
@@ -418,6 +547,27 @@ func (e *etcdClient) CurrentRemotePeerEvidence() (RemotePeerEvidence, error) {
 	return e.remotePeerTLS.evidence(lastHeartbeat)
 }
 
+// RefreshRemotePeerTransport re-handshakes this client's pinned transports in
+// place: the sockets are closed, gRPC redials at once and presents the client
+// certificate that the per-handshake reloader reads from disk now, and the
+// etcd watch client resumes each watch at its last revision. The evidence of
+// the new transport is returned; its NotAfter is the renewed server leaf's.
+func (e *etcdClient) RefreshRemotePeerTransport(ctx context.Context, grace time.Duration) (RemotePeerEvidence, error) {
+	if e.remotePeerTLS == nil {
+		return nil, errRemotePeerEvidenceUnavailable
+	}
+	if err := e.client.Ctx().Err(); err != nil {
+		return nil, fmt.Errorf("remote etcd client is closed: %w", err)
+	}
+	if grace <= 0 {
+		return nil, fmt.Errorf("remote peer transport refresh requires a positive grace")
+	}
+	if _, err := e.remotePeerTLS.refreshTransports(ctx, grace, time.Now); err != nil {
+		return nil, err
+	}
+	return e.CurrentRemotePeerEvidence()
+}
+
 func (e *etcdClient) BindRemotePeer(expectedName string, advertisedClusterID uint32) (BackendOperations, error) {
 	if e.remotePeerTLS == nil {
 		return nil, fmt.Errorf("remote etcd client has no administrator-pinned peer profile")
@@ -454,3 +604,5 @@ func validateRemotePeerBinding(binding *remotePeerTLSBinding, expectedName strin
 
 var _ RemotePeerBackendBinder = (*etcdClient)(nil)
 var _ RemotePeerEvidenceProvider = (*etcdClient)(nil)
+var _ RemotePeerTransportRefresher = (*etcdClient)(nil)
+var _ RemotePeerTransportRefresher = (*authenticatedRemotePeerBackend)(nil)
