@@ -68,6 +68,8 @@ type Server struct {
 	remotePeers               *remote.PeerSnapshotStore
 	remoteTrust               *remoteTrustAuthority
 	policyOwner               *effectivePolicyOwner
+	// stopServerTLS stops the watch of the server certificate and key files.
+	stopServerTLS func()
 	v3.UnimplementedAggregatedDiscoveryServiceServer
 }
 
@@ -100,11 +102,17 @@ func newServer(
 // go routine.
 //
 // Server.GracefulStop() can be used to kill the running gRPC server.
-func (x *Server) Serve() error {
-	creds, err := ca.LoadServerTLSCredentials()
+func (x *Server) Serve() (err error) {
+	creds, stopServerTLS, err := ca.LoadServerTLSCredentials(x.log.With(logfields.Config, "ztunnel-xds-server-tls"))
 	if err != nil {
 		return fmt.Errorf("failed to create gRPC TLS credentials: %w", err)
 	}
+	x.stopServerTLS = stopServerTLS
+	defer func() {
+		if err != nil {
+			x.stopServerTLS()
+		}
+	}()
 
 	x.g, err = x.newGRPCServer(creds, func() (pb.IstioCertificateServiceServer, error) {
 		return ca.NewServer(x.log, x.epManager)
@@ -179,6 +187,9 @@ func (x *Server) newGRPCServer(creds credentials.TransportCredentials, newCA fun
 func (x *Server) GracefulStop() {
 	if x.g != nil {
 		x.g.GracefulStop()
+	}
+	if x.stopServerTLS != nil {
+		x.stopServerTLS()
 	}
 }
 

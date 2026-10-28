@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 
 	"google.golang.org/grpc/credentials"
 
+	"github.com/cilium/cilium/pkg/crypto/certloader"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/safeio"
@@ -72,10 +74,28 @@ func NewServer(log *slog.Logger, epManager endpointmanager.EndpointManager) (*Se
 	return s, nil
 }
 
-// LoadServerTLSCredentials loads the bootstrap TLS credentials used by the
-// gRPC server that hosts the certificate signing service.
-func LoadServerTLSCredentials() (credentials.TransportCredentials, error) {
-	return credentials.NewServerTLSFromFile(bootstrapCertPath, bootstrapKeyPath)
+// LoadServerTLSCredentials returns the TLS credentials of the gRPC server that
+// hosts ADS and, for the internal backend, the certificate signing service.
+//
+// The certificate and key are watched on disk, and every new TLS handshake
+// presents the pair loaded last. A renewal written into the mounted Secret thus
+// reaches each connection made after it, without an agent restart, and the
+// established ztunnel streams keep their connection. A pair that does not load
+// is logged and the last good pair stays in service. The returned function
+// stops the watch.
+func LoadServerTLSCredentials(log *slog.Logger) (credentials.TransportCredentials, func(), error) {
+	return newServerTLSCredentials(log, bootstrapCertPath, bootstrapKeyPath)
+}
+
+func newServerTLSCredentials(log *slog.Logger, certPath, keyPath string) (credentials.TransportCredentials, func(), error) {
+	// No client CA files: the server asks for no client certificate, as with
+	// credentials.NewServerTLSFromFile before.
+	watched, err := certloader.NewWatchedServerConfig(log, nil, certPath, keyPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	// TLS 1.2 is also the minimum that gRPC sets on a config that has none.
+	return credentials.NewTLS(watched.ServerConfig(&tls.Config{MinVersion: tls.VersionTLS12})), watched.Stop, nil
 }
 
 // init loads the CA certificate and private key from disk.
