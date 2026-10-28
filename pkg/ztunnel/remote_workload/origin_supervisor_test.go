@@ -1518,6 +1518,86 @@ func TestOriginSupervisorRestartsBackoffAfterAListedSession(t *testing.T) {
 	}
 }
 
+func waitForReason(t *testing.T, invalidator *recordingOriginInvalidator, needle string) {
+	t.Helper()
+	deadline := time.After(2 * time.Second)
+	for !invalidator.contains(needle) {
+		select {
+		case <-deadline:
+			t.Fatalf("no withdrawal containing %q: %v", needle, invalidator.reasons)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
+// The poll loads the profile before the refresh; if the files
+// change again between that Load and the handshake (here: to a credential
+// ending at start+2h30m instead of the start+4h the poll saw), the lease's
+// credentialEnd stays at 4h — but the next poll's validateOriginPeerProfile
+// withdraws the session at the on-disk credential's end regardless, with no
+// second refresh. (Measured on ce5c3ec031: the withdrawal reason is "origin
+// config became invalid"; a "lease expired" reason would need a fix that
+// bounds credentialEnd by a re-Load after the refresh.)
+func TestOriginSupervisorLeaseAfterRefreshIsBoundedByTheCredentialOnDisk(t *testing.T) {
+	start := time.Now()
+	var clock atomic.Pointer[time.Time]
+	clock.Store(&start)
+	now := func() time.Time { return *clock.Load() }
+
+	loader := &mutableOriginLoader{profile: renewedOriginProfile(1, 1, start.Add(5*time.Hour))}
+	peer := validOriginEvidence(1)
+	peer.notAfter = start.Add(6 * time.Hour)
+	peer.heartbeat = start
+	evidence := &mutableOriginEvidence{evidence: peer}
+	backend := &testOriginBackend{}
+	backend.refresh = func(context.Context, time.Duration) (kvstore.RemotePeerEvidence, error) {
+		// The files changed between this poll's Load and the handshake.
+		loader.set(renewedOriginProfile(1, 3, start.Add(150*time.Minute)), nil)
+		fresh := peer
+		fresh.heartbeat = now()
+		evidence.set(fresh)
+		return fresh, nil
+	}
+	opener := &fakeOriginOpener{evidence: evidence, newBackend: func() *testOriginBackend { return backend }}
+	watch := &blockingOriginWatch{started: make(chan int, 4)}
+	invalidator := &recordingOriginInvalidator{}
+	supervisor := newOriginSupervisor(loader, opener, watch, invalidator)
+	supervisor.Now = now
+	ctx, cancel := context.WithCancel(context.Background())
+	run := make(chan error, 1)
+	go func() { run <- supervisor.Run(ctx, "cluster-beta", 17) }()
+	receiveWatchStart(t, watch.started, 1)
+
+	// Two minutes in, the credential on disk is renewed (ends start+4h): one
+	// refresh. During that refresh the files change again (see above).
+	t1 := start.Add(2 * time.Minute)
+	fresh := peer
+	fresh.heartbeat = t1
+	evidence.set(fresh)
+	clock.Store(&t1)
+	loader.set(renewedOriginProfile(1, 2, start.Add(4*time.Hour)), nil)
+	waitForCount(t, "transport refreshes after the renewal", &backend.refreshCalls, 1)
+	time.Sleep(10 * supervisor.PollEvery)
+	if got := backend.refreshCalls.Load(); got != 1 {
+		t.Fatalf("refreshed %d times while the clock stood still, want 1", got)
+	}
+
+	// At start+2h45m the on-disk credential has ended: the session must be
+	// withdrawn by the per-poll profile validation, without another refresh.
+	t2 := start.Add(165 * time.Minute)
+	fresh.heartbeat = t2
+	evidence.set(fresh)
+	clock.Store(&t2)
+	waitForReason(t, invalidator, "origin config became invalid")
+	cancel()
+	if err := receiveRunResult(t, run); err != nil {
+		t.Fatalf("normal cancellation returned an error: %v", err)
+	}
+	if got := backend.refreshCalls.Load(); got != 1 {
+		t.Fatalf("the session needed %d refreshes before it ended; want 1", got)
+	}
+}
+
 var _ OriginPeerConfigLoader = FilesystemOriginPeerConfigLoader{}
 var _ OriginPeerConnectionOpener = PinnedEtcdOriginPeerOpener{}
 var _ OriginPeerWatchSession = (*IPIdentityOriginWatchSession)(nil)

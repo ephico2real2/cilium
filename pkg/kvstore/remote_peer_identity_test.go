@@ -339,3 +339,54 @@ func TestRemotePeerTLSBindingRefreshWithoutHandshakeFailsClosed(t *testing.T) {
 	_, err = empty.refreshTransports(context.Background(), time.Second, time.Now)
 	require.ErrorContains(t, err, "cannot refresh an unverified remote peer transport")
 }
+
+// The refresh grace cannot be re-armed without a handshake.
+// An overlapping second refresh does not keep the closed transport's
+// evidence past the first refresh's deadline, and once a grace has ended
+// without a handshake a further refresh is refused outright.
+func TestRemotePeerTLSBindingRefreshGraceCannotBeRearmedWithoutAHandshake(t *testing.T) {
+	cert, roots, pin := newPeerTLSFixture(t, time.Now().Add(time.Hour))
+	binding, err := newRemotePeerTLSBinding("cluster-beta", &RemotePeerIdentityConfig{ClusterID: 17, SPKISHA256: []string{pin}})
+	require.NoError(t, err)
+	conn, server, err := openPinnedTLSConn(t, binding, cert, roots, "etcd.remote.test")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = conn.Close(); _ = server.Close() })
+
+	first := make(chan error, 1)
+	go func() {
+		_, err := binding.refreshTransports(context.Background(), 300*time.Millisecond, time.Now)
+		first <- err
+	}()
+	time.Sleep(100 * time.Millisecond)
+	_, err = binding.evidence(time.Now())
+	require.NoError(t, err, "inside the first grace the closed transport's proof is the evidence")
+
+	// A second, overlapping refresh with a longer grace while no transport is
+	// active: it must not extend the evidence past the first deadline.
+	second := make(chan error, 1)
+	go func() {
+		_, err := binding.refreshTransports(context.Background(), 2*time.Second, time.Now)
+		second <- err
+	}()
+	select {
+	case err := <-first:
+		require.ErrorIs(t, err, errRemotePeerRefreshTimedOut)
+	case <-time.After(time.Second):
+		t.Fatal("first refresh did not time out")
+	}
+	_, err = binding.evidence(time.Now())
+	require.ErrorIs(t, err, errRemotePeerEvidenceUnavailable, "the first deadline ends the grace although a second refresh still waits")
+	select {
+	case err := <-second:
+		require.ErrorIs(t, err, errRemotePeerRefreshTimedOut)
+	case <-time.After(3 * time.Second):
+		t.Fatal("second refresh did not time out")
+	}
+
+	// Sequential: after a grace ended without a handshake there is nothing
+	// to refresh, so the grace cannot be re-armed.
+	_, err = binding.refreshTransports(context.Background(), time.Second, time.Now)
+	require.ErrorContains(t, err, "cannot refresh an unverified remote peer transport")
+	_, err = binding.evidence(time.Now())
+	require.ErrorIs(t, err, errRemotePeerEvidenceUnavailable)
+}
